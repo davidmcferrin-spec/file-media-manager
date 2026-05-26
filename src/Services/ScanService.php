@@ -11,12 +11,14 @@ use RuntimeException;
 
 final class ScanService
 {
+    /** @param ?\Closure(string, array<string, mixed>): void $onProgress */
     public function __construct(
         private readonly ScanJobRepository $scanJobs = new ScanJobRepository(),
         private readonly FileRepository $files = new FileRepository(),
         private readonly Classifier $classifier = new Classifier(),
         private readonly FFprobeService $ffprobe = new FFprobeService(),
         private readonly AuditRepository $audit = new AuditRepository(),
+        private readonly ?\Closure $onProgress = null,
     ) {
     }
 
@@ -83,6 +85,7 @@ final class ScanService
 
         if ($extract && !$this->ffprobe->isAvailable()) {
             error_log('[scan] Job ' . $jobId . ': FFprobe unavailable; skipping metadata extraction.');
+            $this->progress('warning', ['message' => 'FFprobe unavailable; skipping metadata extraction.']);
             $extract = false;
         }
 
@@ -91,13 +94,25 @@ final class ScanService
         $skipped = 0;
         $queued  = 0;
 
+        $this->progress('start', [
+            'job_id'      => $jobId,
+            'source_name' => (string) ($job['source_name'] ?? ''),
+            'scan_root'   => $scanRoot,
+            'extract'     => $extract,
+        ]);
+
         try {
+            $this->progress('collecting', ['scan_root' => $scanRoot]);
+
             $mediaFiles = $devList !== null && $devList !== ''
                 ? $this->collectFromDevList((string) $devList, $mountPath, $subpath, $ignore)
                 : $this->collectFromFilesystem($scanRoot, $mountPath, $ignore);
 
-            $this->scanJobs->setTotalFiles($jobId, count($mediaFiles));
+            $totalFiles = count($mediaFiles);
+            $this->scanJobs->setTotalFiles($jobId, $totalFiles);
+            $this->progress('discovered', ['total' => $totalFiles]);
 
+            $processed = 0;
             foreach ($mediaFiles as $entry) {
                 $outcome = $this->processFile($job, $entry, $extract);
                 if ($outcome === 'queued') {
@@ -105,7 +120,14 @@ final class ScanService
                 } elseif ($outcome === 'skipped') {
                     $skipped++;
                 }
+                $processed++;
                 $this->scanJobs->incrementProcessed($jobId);
+                $this->progress('file', [
+                    'processed' => $processed,
+                    'total'     => $totalFiles,
+                    'path'      => $entry['path'],
+                    'outcome'   => $outcome,
+                ]);
             }
 
             $this->scanJobs->markCompleted($jobId);
@@ -127,18 +149,36 @@ final class ScanService
                 ]
             );
 
+            $this->progress('complete', [
+                'job_id'  => $jobId,
+                'total'   => $totalFiles,
+                'queued'  => $queued,
+                'skipped' => $skipped,
+            ]);
+
             error_log(sprintf(
                 '[scan] Job %d completed: %d discovered, %d queued, %d skipped.',
                 $jobId,
-                count($mediaFiles),
+                $totalFiles,
                 $queued,
                 $skipped
             ));
         } catch (\Throwable $e) {
             $this->scanJobs->markFailed($jobId, $e->getMessage());
+            $this->progress('failed', ['job_id' => $jobId, 'message' => $e->getMessage()]);
             error_log('[scan] Job ' . $jobId . ' failed: ' . $e->getMessage());
             throw $e;
         }
+    }
+
+    /** @param array<string, mixed> $data */
+    private function progress(string $event, array $data = []): void
+    {
+        if ($this->onProgress === null) {
+            return;
+        }
+
+        ($this->onProgress)($event, $data);
     }
 
     /**
