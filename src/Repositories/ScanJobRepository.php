@@ -17,7 +17,7 @@ final class ScanJobRepository extends BaseRepository
             $sourceId,
             $createdBy,
             trim($subpath, '/'),
-            $extractMetadata,
+            $this->pgBool($extractMetadata),
             $devFileList,
         ]);
 
@@ -58,13 +58,68 @@ final class ScanJobRepository extends BaseRepository
         return is_array($rows) ? $rows : [];
     }
 
-    public function markRunning(int $id, int $totalFiles): void
+    /**
+     * Atomically claim the oldest pending/failed job for a worker without a specific ID.
+     */
+    public function claimNextPending(): ?int
+    {
+        $stmt = $this->db()->query(
+            'WITH next AS (
+                SELECT id FROM scan_jobs
+                WHERE status IN (\'PENDING\', \'FAILED\')
+                ORDER BY created_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+             )
+             UPDATE scan_jobs sj
+             SET status = \'RUNNING\',
+                 started_at = now(),
+                 processed_files = 0,
+                 total_files = 0,
+                 error_message = NULL
+             FROM next
+             WHERE sj.id = next.id
+             RETURNING sj.id'
+        );
+        $id = $stmt->fetchColumn();
+
+        return $id !== false ? (int) $id : null;
+    }
+
+    /**
+     * Claim a specific job started from the web UI or CLI --job-id flag.
+     */
+    public function tryClaim(int $id): bool
     {
         $stmt = $this->db()->prepare(
-            'UPDATE scan_jobs SET status = \'RUNNING\', total_files = ?, processed_files = 0,
-             started_at = now(), error_message = NULL WHERE id = ?'
+            'UPDATE scan_jobs
+             SET status = \'RUNNING\',
+                 started_at = now(),
+                 processed_files = 0,
+                 total_files = 0,
+                 error_message = NULL
+             WHERE id = ?
+               AND status IN (\'PENDING\', \'FAILED\')
+             RETURNING id'
+        );
+        $stmt->execute([$id]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function setTotalFiles(int $id, int $totalFiles): void
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE scan_jobs SET total_files = ? WHERE id = ?'
         );
         $stmt->execute([$totalFiles, $id]);
+    }
+
+    public function resetProgress(int $id): void
+    {
+        $this->db()->prepare(
+            'UPDATE scan_jobs SET processed_files = 0, total_files = 0, error_message = NULL WHERE id = ?'
+        )->execute([$id]);
     }
 
     public function incrementProcessed(int $id): void

@@ -13,4 +13,10 @@ abstract class BaseRepository
     {
         return Database::connection();
     }
+
+    /** PDO+pgsql binds PHP false as '' which PostgreSQL rejects for BOOLEAN columns. */
+    protected function pgBool(bool $value): string
+    {
+        return $value ? 'true' : 'false';
+    }
 }

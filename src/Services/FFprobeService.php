@@ -31,7 +31,7 @@ final class FFprobeService
      */
     public function probe(string $filePath): ?array
     {
-        if (!is_readable($filePath)) {
+        if (!$this->isAvailable() || !is_readable($filePath)) {
             return null;
         }
 

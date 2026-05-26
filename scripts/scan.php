@@ -15,15 +15,25 @@ foreach ($argv as $arg) {
     }
 }
 
-if ($jobId === null || $jobId <= 0) {
-    fwrite(STDERR, "Usage: php scripts/scan.php --job-id=ID\n");
-    exit(1);
-}
+$service = new ScanService();
 
 try {
-    (new ScanService())->runJob($jobId);
-    echo "Scan job {$jobId} completed.\n";
+    if ($jobId !== null && $jobId > 0) {
+        $service->runJob($jobId);
+        echo "Scan job {$jobId} completed.\n";
+        exit(0);
+    }
+
+    $ranJobId = $service->runNextPending();
+    if ($ranJobId === null) {
+        echo "No pending scan jobs.\n";
+        exit(0);
+    }
+
+    echo "Scan job {$ranJobId} completed.\n";
+    exit(0);
 } catch (\Throwable $e) {
-    fwrite(STDERR, "Scan job {$jobId} failed: " . $e->getMessage() . "\n");
+    $label = $jobId !== null && $jobId > 0 ? (string) $jobId : 'pending';
+    fwrite(STDERR, "Scan job {$label} failed: " . $e->getMessage() . "\n");
     exit(1);
 }

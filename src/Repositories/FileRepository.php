@@ -56,8 +56,8 @@ final class FileRepository extends BaseRepository
             $data['codec_audio'],
             $data['resolution'],
             $data['framerate'],
-            $data['metadata_extracted'] ?? false,
-            $data['needs_split'] ?? false,
+            $this->pgBool((bool) ($data['metadata_extracted'] ?? false)),
+            $this->pgBool((bool) ($data['needs_split'] ?? false)),
             $data['split_notes'] ?? '',
         ]);
 
