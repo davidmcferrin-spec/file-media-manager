@@ -230,7 +230,7 @@ ADMIN_EMAIL=$(grep '^SEED_ADMIN_EMAIL=' "${ENV_FILE}" | cut -d'=' -f2 | tr -d '"
 ADMIN_PASS=$(grep '^SEED_ADMIN_PASSWORD=' "${ENV_FILE}" | cut -d'=' -f2 | tr -d '"' || echo "")
 
 if [[ -z "${ADMIN_PASS}" ]]; then
-    ADMIN_PASS=$(tr -dc 'A-Za-z0-9!@#$%' < /dev/urandom | head -c 18)
+    ADMIN_PASS=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9!@#$%' | cut -c1-18)
     GENERATED_PASS=true
 else
     GENERATED_PASS=false
