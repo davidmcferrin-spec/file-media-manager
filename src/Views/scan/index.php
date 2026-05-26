@@ -47,7 +47,7 @@ use MediaManager\Support\View;
 
           <div class="mb-3">
             <label class="form-label">Subpath (optional)</label>
-            <input type="text" name="subpath" class="form-control" value="cuomo"
+            <input type="text" name="subpath" class="form-control" value=""
                    placeholder="cuomo">
             <div class="form-text" style="color:var(--text-soft)">
               Limit scan to a folder under the mount, e.g. <code>cuomo</code> for the Cuomo pilot.
