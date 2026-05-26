@@ -45,13 +45,13 @@ apt-get update -qq
 info "Installing PHP 8.2, Apache, FFmpeg, PostgreSQL, and utilities..."
 apt-get install -y -qq \
     apache2 \
-    php8.2 \
-    php8.2-cli \
-    php8.2-pgsql \
-    php8.2-mbstring \
-    php8.2-json \
-    php8.2-fileinfo \
-    php8.2-curl \
+    php8.4 \
+    php8.4-cli \
+    php8.4-pgsql \
+    php8.4-mbstring \
+    php8.4-json \
+    php8.4-fileinfo \
+    php8.4-curl \
     postgresql \
     postgresql-client \
     ffmpeg \
