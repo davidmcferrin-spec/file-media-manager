@@ -107,8 +107,8 @@ final class ScanService
             $this->abortIfCancelled($jobId);
 
             $mediaFiles = $devList !== null && $devList !== ''
-                ? $this->collectFromDevList((string) $devList, $mountPath, $subpath, $ignore)
-                : $this->collectFromFilesystem($scanRoot, $mountPath, $ignore);
+                ? $this->collectFromDevList((string) $devList, $mountPath, $subpath, $ignore, $jobId)
+                : $this->collectFromFilesystem($scanRoot, $mountPath, $ignore, $jobId);
 
             $this->abortIfCancelled($jobId);
 
@@ -224,60 +224,118 @@ final class ScanService
     /**
      * @return list<array{path: string, sidecars: list<string>}>
      */
-    private function collectFromFilesystem(string $scanRoot, string $sourceMount, ScanIgnore $ignore): array
-    {
-        if (!is_dir($scanRoot)) {
+    private function collectFromFilesystem(
+        string $scanRoot,
+        string $sourceMount,
+        ScanIgnore $ignore,
+        int $jobId,
+    ): array {
+        $scanRoot = str_replace('\\', '/', rtrim($scanRoot, '/'));
+        error_log('[scan] Job ' . $jobId . ': opening scan root ' . $scanRoot);
+
+        $rootHandle = @opendir($scanRoot);
+        if ($rootHandle === false) {
             throw new RuntimeException("Scan root not found or not mounted: {$scanRoot}");
         }
+        closedir($rootHandle);
+
+        error_log('[scan] Job ' . $jobId . ': walking directory tree');
 
         /** @var array<string, list<string>> $dirSidecars */
         $dirSidecars = [];
         /** @var list<string> $mediaPaths */
         $mediaPaths = [];
 
-        $directory = new \RecursiveDirectoryIterator($scanRoot, \FilesystemIterator::SKIP_DOTS);
-        $filtered  = new \RecursiveCallbackFilterIterator(
-            $directory,
-            function (\SplFileInfo $current) use ($ignore, $sourceMount): bool {
-                $path = str_replace('\\', '/', $current->getPathname());
-                if ($current->isDir() && $ignore->shouldIgnoreDirectory($path, $sourceMount)) {
-                    return false;
+        /** @var list<string> $stack */
+        $stack = [$scanRoot];
+        $dirsScanned = 0;
+        $entriesSeen = 0;
+        $lastProgress = microtime(true);
+
+        while ($stack !== []) {
+            $this->abortIfCancelled($jobId);
+
+            $dir = array_pop($stack);
+            if ($ignore->shouldIgnoreDirectory($dir, $sourceMount)) {
+                continue;
+            }
+
+            $handle = @opendir($dir);
+            if ($handle === false) {
+                error_log('[scan] Cannot read directory: ' . $dir);
+                continue;
+            }
+
+            $dirsScanned++;
+
+            while (($entry = readdir($handle)) !== false) {
+                if ($entry === '.' || $entry === '..') {
+                    continue;
                 }
 
-                return true;
-            }
-        );
-        $iterator = new \RecursiveIteratorIterator($filtered);
+                $path = str_replace('\\', '/', $dir . '/' . $entry);
+                $entriesSeen++;
 
-        foreach ($iterator as $fileInfo) {
-            if (!$fileInfo instanceof \SplFileInfo || !$fileInfo->isFile()) {
-                continue;
+                $now = microtime(true);
+                if ($entriesSeen % 250 === 0 || ($now - $lastProgress) >= 1.0) {
+                    $this->progress('collecting_progress', [
+                        'dirs'        => $dirsScanned,
+                        'entries'     => $entriesSeen,
+                        'media'       => count($mediaPaths),
+                        'current_dir' => $dir,
+                    ]);
+                    $lastProgress = $now;
+
+                    if ($entriesSeen % 1000 === 0) {
+                        $this->abortIfCancelled($jobId);
+                    }
+                }
+
+                $type = @filetype($path);
+                if ($type === 'dir') {
+                    if (!$ignore->shouldIgnoreDirectory($path, $sourceMount)) {
+                        $stack[] = $path;
+                    }
+                    continue;
+                }
+
+                if ($type !== 'file') {
+                    continue;
+                }
+
+                if ($ignore->shouldIgnore($path, $sourceMount)) {
+                    continue;
+                }
+
+                if (MediaExtensions::isSidecar($path)) {
+                    $stem = pathinfo($path, PATHINFO_FILENAME);
+                    $dirSidecars[$dir . '|' . strtolower($stem)][] = $path;
+                    continue;
+                }
+
+                if (MediaExtensions::isMedia($path)) {
+                    $mediaPaths[] = $path;
+                }
             }
 
-            $path = str_replace('\\', '/', $fileInfo->getPathname());
-            if ($ignore->shouldIgnore($path, $sourceMount)) {
-                continue;
-            }
-
-            if (MediaExtensions::isSidecar($path)) {
-                $dir = str_replace('\\', '/', $fileInfo->getPath());
-                $stem = pathinfo($path, PATHINFO_FILENAME);
-                $dirSidecars[$dir . '|' . strtolower($stem)][] = $path;
-                continue;
-            }
-
-            if (MediaExtensions::isMedia($path)) {
-                $mediaPaths[] = $path;
-            }
+            closedir($handle);
         }
+
+        error_log(sprintf(
+            '[scan] Job %d: discovery complete — %d dirs, %d entries, %d media files.',
+            $jobId,
+            $dirsScanned,
+            $entriesSeen,
+            count($mediaPaths)
+        ));
 
         sort($mediaPaths);
 
         $entries = [];
         foreach ($mediaPaths as $path) {
-            $dir  = dirname($path);
-            $stem = pathinfo($path, PATHINFO_FILENAME);
-            $key  = $dir . '|' . strtolower($stem);
+            $fileDir = dirname($path);
+            $stem    = pathinfo($path, PATHINFO_FILENAME);
+            $key     = $fileDir . '|' . strtolower($stem);
             $entries[] = [
                 'path'     => $path,
                 'sidecars' => $dirSidecars[$key] ?? [],
@@ -292,8 +350,13 @@ final class ScanService
      *
      * @return list<array{path: string, sidecars: list<string>}>
      */
-    private function collectFromDevList(string $listPath, string $mountPath, string $subpath, ScanIgnore $ignore): array
-    {
+    private function collectFromDevList(
+        string $listPath,
+        string $mountPath,
+        string $subpath,
+        ScanIgnore $ignore,
+        int $jobId,
+    ): array {
         if (!is_readable($listPath)) {
             throw new RuntimeException("Dev file list not readable: {$listPath}");
         }
@@ -313,7 +376,17 @@ final class ScanService
             $prefix .= '/' . trim($subpath, '/');
         }
 
-        foreach ($lines as $line) {
+        foreach ($lines as $lineNum => $line) {
+            if ($lineNum > 0 && $lineNum % 5000 === 0) {
+                $this->abortIfCancelled($jobId);
+                $this->progress('collecting_progress', [
+                    'dirs'        => 0,
+                    'entries'     => $lineNum,
+                    'media'       => count($mediaPaths),
+                    'current_dir' => 'dev file list',
+                ]);
+            }
+
             $path = trim($line);
             if ($path === '' || !str_starts_with($path, $prefix)) {
                 continue;

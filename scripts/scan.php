@@ -27,7 +27,15 @@ if ($verbose === null) {
 }
 
 /** @param array<string, mixed> $data */
-$progress = static function (string $event, array $data) use ($verbose): void {
+$flushOutput = static function (): void {
+    if (function_exists('ob_get_level') && ob_get_level() > 0) {
+        ob_flush();
+    }
+    flush();
+};
+
+/** @param array<string, mixed> $data */
+$progress = static function (string $event, array $data) use ($verbose, $flushOutput): void {
     if (!$verbose) {
         return;
     }
@@ -48,11 +56,26 @@ $progress = static function (string $event, array $data) use ($verbose): void {
             break;
 
         case 'collecting':
-            echo 'Discovering media files...' . "\n";
+            echo 'Discovering media files (opening scan root)...' . "\n";
+            break;
+
+        case 'collecting_progress':
+            $dir = basename((string) $data['current_dir']);
+            if (strlen($dir) > 36) {
+                $dir = substr($dir, 0, 33) . '...';
+            }
+            $line = sprintf(
+                '  Scanning... %s dirs, %s entries, %s media — %s',
+                number_format((int) $data['dirs']),
+                number_format((int) $data['entries']),
+                number_format((int) $data['media']),
+                $dir
+            );
+            echo str_pad($line, 100) . "\r";
             break;
 
         case 'discovered':
-            echo sprintf("Found %d media file(s). Processing...\n", (int) $data['total']);
+            echo sprintf("\nFound %d media file(s). Processing...\n", (int) $data['total']);
             break;
 
         case 'file':
@@ -93,6 +116,8 @@ $progress = static function (string $event, array $data) use ($verbose): void {
             echo "\nScan cancelled.\n";
             break;
     }
+
+    $flushOutput();
 };
 
 $service = new ScanService(onProgress: $verbose ? $progress : null);
