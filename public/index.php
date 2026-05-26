@@ -57,9 +57,12 @@ match (true) {
     $uri === '/queue'
         => require dirname(__DIR__) . '/src/Controllers/QueueController.php',
 
-    // Thumbnail (AJAX)
+    // Thumbnail / preview (AJAX)
     str_starts_with($uri, '/queue/thumbnail')
         => require dirname(__DIR__) . '/src/Controllers/ThumbnailController.php',
+
+    str_starts_with($uri, '/queue/preview')
+        => require dirname(__DIR__) . '/src/Controllers/PreviewController.php',
 
     // Queue actions (POST)
     $uri === '/queue/approve'
@@ -76,6 +79,10 @@ match (true) {
     // Dictionary (admin only)
     $uri === '/dictionary' || str_starts_with($uri, '/dictionary/')
         => require dirname(__DIR__) . '/src/Controllers/DictionaryController.php',
+
+    // Program schedule (admin only)
+    $uri === '/schedule' || str_starts_with($uri, '/schedule/')
+        => require dirname(__DIR__) . '/src/Controllers/ProgramScheduleController.php',
 
     // Execute / Rollback (admin only)
     $uri === '/execute' || $uri === '/rollback'

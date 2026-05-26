@@ -253,6 +253,41 @@ final class FileRepository extends BaseRepository
         $stmt->execute([$thumbnailPath, $id]);
     }
 
+    public function clearThumbnailPath(int $id): void
+    {
+        $this->db()->prepare(
+            'UPDATE files SET thumbnail_path = NULL, thumbnail_at = NULL WHERE id = ?'
+        )->execute([$id]);
+    }
+
+    /**
+     * Best path for reading media from disk (post-execute uses executed_path).
+     *
+     * @param array<string, mixed> $file
+     */
+    public static function mediaSourcePath(array $file): string
+    {
+        $executed = (string) ($file['executed_path'] ?? '');
+        if ($executed !== '' && is_readable($executed)) {
+            return $executed;
+        }
+
+        return (string) ($file['original_path'];
+    }
+
+    /**
+     * @param array<string, mixed> $file
+     */
+    public static function displayPath(array $file): string
+    {
+        $executed = (string) ($file['executed_path'] ?? '');
+        if ($executed !== '') {
+            return $executed;
+        }
+
+        return (string) ($file['original_path'];
+    }
+
     /** @param list<int> $ids */
     public function findApprovedByIds(array $ids): array
     {

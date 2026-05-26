@@ -6,6 +6,7 @@ namespace MediaManager\Services;
 
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
+use MediaManager\Services\MediaCacheService;
 use RuntimeException;
 
 final class ExecutorService
@@ -13,6 +14,7 @@ final class ExecutorService
     public function __construct(
         private readonly FileRepository $files = new FileRepository(),
         private readonly AuditRepository $audit = new AuditRepository(),
+        private readonly MediaCacheService $cache = new MediaCacheService(),
     ) {
     }
 
@@ -94,6 +96,7 @@ final class ExecutorService
         $sidecarErrors = $this->moveSidecars($file, $targetDir, $userId, $userEmail, $ip);
 
         $this->files->markExecuted($id, $targetPath, $userId);
+        $this->cache->invalidate($id);
 
         $this->audit->record(
             $userId,

@@ -132,14 +132,14 @@ final class ScanJobRepository extends BaseRepository
     public function markCompleted(int $id): void
     {
         $this->db()->prepare(
-            'UPDATE scan_jobs SET status = \'COMPLETED\', completed_at = now() WHERE id = ?'
+            'UPDATE scan_jobs SET status = \'COMPLETED\', completed_at = now(), worker_pid = NULL WHERE id = ?'
         )->execute([$id]);
     }
 
     public function markFailed(int $id, string $message): void
     {
         $stmt = $this->db()->prepare(
-            'UPDATE scan_jobs SET status = \'FAILED\', error_message = ?, completed_at = now() WHERE id = ?'
+            'UPDATE scan_jobs SET status = \'FAILED\', error_message = ?, completed_at = now(), worker_pid = NULL WHERE id = ?'
         );
         $stmt->execute([$message, $id]);
     }
@@ -191,9 +191,32 @@ final class ScanJobRepository extends BaseRepository
              SET status = \'CANCELLED\',
                  cancel_requested = true,
                  completed_at = now(),
-                 error_message = NULL
+                 error_message = NULL,
+                 worker_pid = NULL
              WHERE id = ?'
         )->execute([$id]);
+    }
+
+    public function setWorkerPid(int $id, int $pid): void
+    {
+        $this->db()->prepare('UPDATE scan_jobs SET worker_pid = ? WHERE id = ?')->execute([$pid, $id]);
+    }
+
+    public function clearWorkerPid(int $id): void
+    {
+        $this->db()->prepare('UPDATE scan_jobs SET worker_pid = NULL WHERE id = ?')->execute([$id]);
+    }
+
+    public function getWorkerPid(int $id): ?int
+    {
+        $stmt = $this->db()->prepare('SELECT worker_pid FROM scan_jobs WHERE id = ? LIMIT 1');
+        $stmt->execute([$id]);
+        $value = $stmt->fetchColumn();
+        if ($value === false || $value === null) {
+            return null;
+        }
+
+        return (int) $value;
     }
 
     public function delete(int $id): bool

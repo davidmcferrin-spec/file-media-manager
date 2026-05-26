@@ -112,13 +112,45 @@ if ($method === 'POST' && $uri === '/scan/start') {
 
 function delete_scan_thumbnails(array $fileIds, string $projectRoot): void
 {
-    $dir = rtrim($projectRoot . '/' . trim((string) env('STORAGE_THUMBNAILS', 'storage/thumbnails'), '/'), '/');
+    $cache = new \MediaManager\Services\MediaCacheService(projectRoot: $projectRoot);
     foreach ($fileIds as $fileId) {
-        $path = $dir . '/' . $fileId . '.jpg';
-        if (is_file($path)) {
-            @unlink($path);
-        }
+        $cache->invalidate((int) $fileId);
     }
+}
+
+function kill_scan_worker(int $pid): bool
+{
+    if ($pid <= 0) {
+        return false;
+    }
+
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        exec('taskkill /PID ' . $pid . ' /F 2>NUL', $output, $code);
+
+        return $code === 0;
+    }
+
+    if (function_exists('posix_kill')) {
+        if (!@posix_kill($pid, 0)) {
+            return false;
+        }
+        @posix_kill($pid, SIGTERM);
+        usleep(300000);
+        if (@posix_kill($pid, 0)) {
+            @posix_kill($pid, SIGKILL);
+        }
+
+        return true;
+    }
+
+    exec('kill -TERM ' . $pid . ' 2>/dev/null');
+    usleep(300000);
+    exec('kill -0 ' . $pid . ' 2>/dev/null', $out, $alive);
+    if ($alive === 0) {
+        exec('kill -KILL ' . $pid . ' 2>/dev/null');
+    }
+
+    return true;
 }
 
 // ── POST: cancel scan ───────────────────────────────────────────
@@ -151,6 +183,18 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
         exit;
     }
 
+    $killed = false;
+    $pid    = null;
+    if ($status === 'RUNNING') {
+        $pid = $scanJobs->getWorkerPid($jobId);
+        if ($pid !== null && $pid > 0) {
+            $killed = kill_scan_worker($pid);
+            if ($killed) {
+                $scanJobs->markCancelled($jobId);
+            }
+        }
+    }
+
     $user = Auth::user();
     $audit->record(
         Auth::id(),
@@ -161,12 +205,14 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
         $jobId,
         null,
         null,
-        ['previous_status' => $status]
+        ['previous_status' => $status, 'worker_pid' => $pid ?? null, 'killed' => $killed]
     );
 
     $message = $status === 'PENDING'
         ? 'Scan job #' . $jobId . ' cancelled.'
-        : 'Stop requested for scan job #' . $jobId . '. It will halt after the current file.';
+        : ($killed
+            ? 'Scan job #' . $jobId . ' stopped.'
+            : 'Stop requested for scan job #' . $jobId . '. It will halt after the current file.');
     Session::flash('success', $message);
     header('Location: /scan/' . $jobId);
     exit;

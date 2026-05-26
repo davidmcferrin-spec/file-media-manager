@@ -9,6 +9,7 @@ use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\MediaTypeRepository;
 use MediaManager\Repositories\ScanJobRepository;
 use MediaManager\Repositories\ShowRepository;
+use MediaManager\Services\FileEditSuggester;
 
 Auth::requireLogin();
 
@@ -16,6 +17,7 @@ $files       = new FileRepository();
 $shows       = new ShowRepository();
 $scanJobs    = new ScanJobRepository();
 $mediaTypes  = new MediaTypeRepository();
+$suggester   = new FileEditSuggester();
 
 $filters = [
     'status'      => $_GET['status'] ?? 'PENDING',
@@ -45,6 +47,9 @@ $offset  = ($page - 1) * $perPage;
 
 $total      = $files->countQueue($filters);
 $queueItems = $files->listQueue($filters, $perPage, $offset);
+foreach ($queueItems as $i => $item) {
+    $queueItems[$i]['edit_suggest'] = $suggester->suggest($item);
+}
 $statusCounts = $files->statusCounts();
 $showList    = $shows->all(true);
 $mediaTypeList = $mediaTypes->all(true);

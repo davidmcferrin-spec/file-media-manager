@@ -11,46 +11,48 @@ use RuntimeException;
 final class ThumbnailService
 {
     private string $ffmpegBin;
-    private string $storageDir;
     private int $offsetSeconds;
-    private int $width;
+    private int $defaultWidth;
     private int $quality;
 
     public function __construct(
         private readonly FileRepository $files = new FileRepository(),
+        private readonly MediaCacheService $cache = new MediaCacheService(),
         private readonly SystemRepository $settings = new SystemRepository(),
     ) {
         $this->ffmpegBin     = (string) env('FFMPEG_BIN', '/usr/bin/ffmpeg');
-        $projectRoot         = dirname(__DIR__, 2);
-        $this->storageDir    = $projectRoot . '/' . trim((string) env('STORAGE_THUMBNAILS', 'storage/thumbnails'), '/');
         $this->offsetSeconds = (int) ($settings->get('thumbnail_offset_seconds') ?? env('THUMBNAIL_OFFSET_SECONDS', 50));
-        $this->width         = (int) env('THUMBNAIL_WIDTH', 320);
+        $this->defaultWidth  = (int) env('THUMBNAIL_WIDTH', 320);
         $this->quality       = (int) env('THUMBNAIL_QUALITY', 5);
     }
 
     public function pathForFileId(int $fileId): string
     {
-        return $this->storageDir . '/' . $fileId . '.jpg';
+        return $this->cache->thumbnailPath($fileId);
     }
 
-    public function ensureThumbnail(int $fileId): string
+    public function ensureThumbnail(int $fileId, ?int $width = null): string
     {
+        $width ??= $this->defaultWidth;
+        $dest  = $width > $this->defaultWidth
+            ? $this->cache->thumbnailPath($fileId) . '.large.jpg'
+            : $this->cache->thumbnailPath($fileId);
+
+        if (is_readable($dest)) {
+            return $dest;
+        }
+
         $file = $this->files->findById($fileId);
         if ($file === null) {
             throw new RuntimeException('File not found.');
         }
 
-        $dest = $this->pathForFileId($fileId);
-        if (is_readable($dest)) {
-            return $dest;
-        }
-
-        $source = (string) $file['original_path'];
+        $source = FileRepository::mediaSourcePath($file);
         if (!is_readable($source)) {
             throw new RuntimeException('Source file not readable for thumbnail.');
         }
 
-        if (!is_dir($this->storageDir) && !mkdir($this->storageDir, 0775, true)) {
+        if (!is_dir(dirname($dest)) && !mkdir(dirname($dest), 0775, true)) {
             throw new RuntimeException('Cannot create thumbnail directory.');
         }
 
@@ -64,7 +66,7 @@ final class ThumbnailService
             escapeshellcmd($this->ffmpegBin),
             $offset,
             escapeshellarg($source),
-            $this->width,
+            $width,
             $this->quality,
             escapeshellarg($dest)
         );
@@ -74,8 +76,9 @@ final class ThumbnailService
             throw new RuntimeException('Thumbnail generation failed: ' . trim((string) $output));
         }
 
-        $relative = 'storage/thumbnails/' . $fileId . '.jpg';
-        $this->files->updateThumbnail($fileId, $relative);
+        if ($width === $this->defaultWidth) {
+            $this->files->updateThumbnail($fileId, 'storage/thumbnails/' . $fileId . '.jpg');
+        }
 
         return $dest;
     }

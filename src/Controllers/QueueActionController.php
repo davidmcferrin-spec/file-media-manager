@@ -163,6 +163,29 @@ if ($uri === '/queue/edit') {
     $fileTime         = trim($_POST['file_time'] ?? '') ?: null;
 
     if ($proposedDir === '' || $proposedFilename === '') {
+        $suggester = new \MediaManager\Services\FileEditSuggester();
+        $suggest   = $suggester->suggest($file);
+        if ($proposedDir === '') {
+            $proposedDir = trim((string) ($suggest['proposed_dir'] ?? ''));
+        }
+        if ($proposedFilename === '') {
+            $proposedFilename = trim((string) ($suggest['proposed_filename'] ?? ''));
+        }
+        if ($showId === null && !empty($suggest['show_id'])) {
+            $showId = (int) $suggest['show_id'];
+        }
+        if ($mediaTypeId === null && !empty($suggest['media_type_id'])) {
+            $mediaTypeId = (int) $suggest['media_type_id'];
+        }
+        if ($fileDate === null && !empty($suggest['file_date'])) {
+            $fileDate = (string) $suggest['file_date'];
+        }
+        if ($fileTime === null && !empty($suggest['file_time'])) {
+            $fileTime = (string) $suggest['file_time'];
+        }
+    }
+
+    if ($proposedDir === '' || $proposedFilename === '') {
         Session::flash('error', 'Proposed directory and filename are required.');
         redirect_queue();
     }

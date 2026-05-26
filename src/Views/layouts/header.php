@@ -321,6 +321,11 @@ body {
           </a>
         </li>
         <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/schedule', $currentPath); ?>" href="/schedule">
+            Schedule
+          </a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link<?php echo navActive('/execute', $currentPath); ?>" href="/execute">
             Execute
           </a>

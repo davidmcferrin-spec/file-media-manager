@@ -94,6 +94,8 @@ final class ScanService
         $skipped = 0;
         $queued  = 0;
 
+        $this->scanJobs->setWorkerPid($jobId, getmypid());
+
         $this->progress('start', [
             'job_id'      => $jobId,
             'source_name' => (string) ($job['source_name'] ?? ''),
@@ -176,6 +178,8 @@ final class ScanService
             $this->progress('failed', ['job_id' => $jobId, 'message' => $e->getMessage()]);
             error_log('[scan] Job ' . $jobId . ' failed: ' . $e->getMessage());
             throw $e;
+        } finally {
+            $this->scanJobs->clearWorkerPid($jobId);
         }
     }
 
@@ -429,6 +433,8 @@ final class ScanService
      */
     private function processFile(array $job, array $entry, bool $extractMetadata): string
     {
+        $this->abortIfCancelled((int) $job['id']);
+
         $path = $entry['path'];
 
         if (!is_file($path) || !is_readable($path)) {

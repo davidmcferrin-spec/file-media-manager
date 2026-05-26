@@ -6,6 +6,7 @@ namespace MediaManager\Services;
 
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
+use MediaManager\Services\MediaCacheService;
 use RuntimeException;
 
 final class RollbackService
@@ -13,6 +14,7 @@ final class RollbackService
     public function __construct(
         private readonly FileRepository $files = new FileRepository(),
         private readonly AuditRepository $audit = new AuditRepository(),
+        private readonly MediaCacheService $cache = new MediaCacheService(),
     ) {
     }
 
@@ -81,6 +83,7 @@ final class RollbackService
         $this->rollbackSidecars($file, $userId, $userEmail, $ip);
 
         $this->files->markRolledBack($fileId);
+        $this->cache->invalidate($fileId);
 
         $this->audit->record(
             $userId,

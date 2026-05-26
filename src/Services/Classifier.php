@@ -28,6 +28,8 @@ final class Classifier
         private readonly MediaTypeRepository $mediaTypeRepo = new MediaTypeRepository(),
         private readonly ConversionRuleRepository $conversionRepo = new ConversionRuleRepository(),
         private readonly SystemRepository $systemRepo = new SystemRepository(),
+        private readonly ScheduleLookupService $scheduleLookup = new ScheduleLookupService(),
+        private readonly ScheduleSplitSuggester $scheduleSplit = new ScheduleSplitSuggester(),
     ) {
         $this->shows           = $showRepo->all(true);
         $this->mediaTypes      = $mediaTypeRepo->all(true);
@@ -61,12 +63,12 @@ final class Classifier
         // ── Media type ───────────────────────────────────────
         $typeMatch = $this->matchMediaType($segments, $filename, $signals);
 
-        // ── Date / time ──────────────────────────────────────
-        $fromFile = DateNormalizer::fromFilename($filename);
-        $date     = $fromFile['date'];
-        $time     = $fromFile['time'];
-        if ($fromFile['signal'] !== null) {
-            $signals[] = $fromFile['signal'];
+        // ── Date / time (FFprobe-preferred, LOW default trust) ─
+        $datetime = FileDateTimeResolver::resolve($filename, $ffprobe);
+        $date     = $datetime['date'];
+        $time     = $datetime['time'];
+        foreach ($datetime['signals'] as $dtSignal) {
+            $signals[] = $dtSignal;
         }
 
         if ($date === null) {
@@ -76,17 +78,15 @@ final class Classifier
             }
         }
 
-        if ($time === null && $ffprobe !== null) {
-            $fromProbe = DateNormalizer::fromFfprobe($ffprobe['creation_time'] ?? null);
-            if ($fromProbe['time'] !== null) {
-                $time = $fromProbe['time'];
-                $signals[] = $fromProbe['signal'] ?? 'ffprobe:creation_time';
-            }
-            if ($date === null && $fromProbe['date'] !== null) {
-                $date = $fromProbe['date'];
-                if (!in_array('ffprobe:creation_time', $signals, true)) {
-                    $signals[] = 'ffprobe:creation_time';
-                }
+        // ── Schedule show lookup when path/filename did not match ─
+        if (($showMatch['id'] ?? null) === null && $date !== null && $time !== null) {
+            $scheduleMatch = $this->scheduleLookup->match($date, $time);
+            if ($scheduleMatch !== null) {
+                $showMatch = [
+                    'id'           => $scheduleMatch['show_id'],
+                    'abbreviation' => $scheduleMatch['show_abbr'],
+                ];
+                $signals[] = $scheduleMatch['signal'] . ' (' . $scheduleMatch['confidence'] . ')';
             }
         }
 
@@ -168,6 +168,17 @@ final class Classifier
                 ? 'Duration ≥ 3h — strong split candidate'
                 : 'Duration > 1h 11m — review for split';
             $signals[] = 'split:duration threshold';
+        }
+
+        $scheduleSplit = $this->scheduleSplit->suggest($date, $time, $duration);
+        if ($scheduleSplit['needs_split']) {
+            $needsSplit = true;
+            $splitNotes = $scheduleSplit['notes'] !== ''
+                ? ($splitNotes !== '' ? $splitNotes . "\n\n" : '') . $scheduleSplit['notes']
+                : $splitNotes;
+            foreach ($scheduleSplit['signals'] as $splitSignal) {
+                $signals[] = $splitSignal;
+            }
         }
 
         return new ClassifierResult(
@@ -392,6 +403,12 @@ final class Classifier
         }
         if ($score >= 4) {
             return 'MEDIUM';
+        }
+
+        foreach ($signals as $signal) {
+            if (str_starts_with($signal, 'schedule:')) {
+                return 'MEDIUM';
+            }
         }
 
         return 'LOW';
