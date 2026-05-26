@@ -1,0 +1,36 @@
+# Environment
+.env
+
+# SQLite database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Storage (generated files)
+storage/thumbnails/*
+storage/logs/*
+storage/backups/*
+!storage/thumbnails/.gitkeep
+!storage/logs/.gitkeep
+!storage/backups/.gitkeep
+
+# Uploads (temp)
+uploads/*
+!uploads/.gitkeep
+
+# Vendor (Bootstrap fetched by setup.sh)
+public/vendor/bootstrap/
+public/vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# PHP
+*.log
