@@ -30,6 +30,12 @@ class AuthController
             exit;
         }
 
+        if (Auth::isRateLimited($ip)) {
+            Session::flash('login_rate_limited', true);
+            header('Location: /login');
+            exit;
+        }
+
         $user = Auth::attempt($email, $password, $ip);
 
         if ($user === null) {

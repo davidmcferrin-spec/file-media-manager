@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace MediaManager\Auth;
 
 use MediaManager\Database;
+use MediaManager\Auth\LdapService;
+use MediaManager\Repositories\LdapRepository;
+use MediaManager\Repositories\UserRepository;
 use PDO;
 
 class Auth
 {
     /**
      * Attempt login. Returns user array on success, null on failure.
+     * Tries LDAP first when enabled, then local password auth.
      */
     public static function attempt(string $email, string $password, string $ip): ?array
     {
@@ -18,29 +22,54 @@ class Auth
             return null;
         }
 
+        $ldapRepo = new LdapRepository();
+        if ($ldapRepo->isEnabled()) {
+            $ldapUser = (new LdapService())->authenticate($email, $password);
+            if ($ldapUser !== null) {
+                $user = (new UserRepository())->upsertLdapUser(
+                    $ldapUser['email'],
+                    $ldapUser['name'],
+                    $ldapUser['role']
+                );
+                self::loginSession($user);
+                return $user;
+            }
+        }
+
         $pdo  = Database::connection();
-        $stmt = $pdo->prepare('SELECT * FROM users WHERE email = ? AND active = 1 LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT * FROM users WHERE lower(email) = lower(?) AND active IS TRUE LIMIT 1'
+        );
         $stmt->execute([trim($email)]);
         $user = $stmt->fetch();
 
-        if (!$user || !password_verify($password, $user['password_hash'])) {
+        if (!$user || ($user['auth_source'] ?? 'local') === 'ldap') {
             self::recordAttempt($ip);
             return null;
         }
 
-        // Update last login
-        $pdo->prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
-            ->execute([gmdate('Y-m-d\TH:i:s\Z'), $user['id']]);
+        if (!password_verify($password, $user['password_hash'])) {
+            self::recordAttempt($ip);
+            return null;
+        }
 
-        // Store in session
+        $pdo->prepare('UPDATE users SET last_login_at = now() WHERE id = ?')
+            ->execute([$user['id']]);
+
+        self::loginSession($user);
+
+        return $user;
+    }
+
+    /** @param array<string, mixed> $user */
+    private static function loginSession(array $user): void
+    {
         Session::set('user_id',    $user['id']);
         Session::set('user_email', $user['email']);
         Session::set('user_name',  $user['display_name']);
         Session::set('user_role',  $user['role']);
 
         session_regenerate_id(true);
-
-        return $user;
     }
 
     public static function logout(): void
@@ -113,7 +142,7 @@ class Auth
 
     // ── Rate limiting ────────────────────────────────────────
 
-    private static function isRateLimited(string $ip): bool
+    public static function isRateLimited(string $ip): bool
     {
         $window   = (int) env('AUTH_RATE_LIMIT_WINDOW_SECONDS', 300);
         $maxTries = (int) env('AUTH_RATE_LIMIT_MAX_ATTEMPTS', 5);
@@ -147,12 +176,13 @@ class Auth
         $pdo  = Database::connection();
 
         $stmt = $pdo->prepare(
-            'INSERT INTO users (email, password_hash, display_name, role)
-             VALUES (?, ?, ?, ?)'
+            'INSERT INTO users (email, password_hash, display_name, role, auth_source)
+             VALUES (?, ?, ?, ?, \'local\')
+             RETURNING id'
         );
         $stmt->execute([$email, $hash, $displayName, $role]);
 
-        return (int) $pdo->lastInsertId();
+        return (int) $stmt->fetchColumn();
     }
 
     public static function updatePassword(int $userId, string $newPassword): void

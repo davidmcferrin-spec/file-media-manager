@@ -7,13 +7,9 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 
 use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
-use MediaManager\Database;
 
 // ── Start session ────────────────────────────────────────────
 Session::start();
-
-// ── Run migrations on every boot (fast no-op if up to date) ──
-Database::migrate();
 
 // ── Router ───────────────────────────────────────────────────
 $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
@@ -34,7 +30,8 @@ if ($uri === '/login') {
             header('Location: /dashboard');
             exit;
         }
-        $error = Session::getFlash('login_error');
+        $error       = Session::getFlash('login_error');
+        $rateLimited = Session::getFlash('login_rate_limited');
         require dirname(__DIR__) . '/src/Views/auth/login.php';
     }
     exit;
@@ -69,6 +66,7 @@ match (true) {
     || $uri === '/queue/reject'
     || $uri === '/queue/edit'
     || $uri === '/queue/batch'
+    || $uri === '/queue/add-split'
         => require dirname(__DIR__) . '/src/Controllers/QueueActionController.php',
 
     // Scanner (admin only)

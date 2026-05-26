@@ -28,7 +28,7 @@ function navActive(string $prefix, string $current): string {
 (function () {
     var saved = localStorage.getItem('mm-theme');
     var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    var theme = saved === 'light' ? 'light' : (saved === 'dark' ? 'dark' : (prefersDark ? 'dark' : 'dark'));
+    var theme = saved === 'light' ? 'light' : (saved === 'dark' ? 'dark' : (prefersDark ? 'dark' : 'light'));
     document.documentElement.setAttribute('data-bs-theme', theme);
 })();
 </script>
@@ -318,6 +318,11 @@ body {
         <li class="nav-item">
           <a class="nav-link<?php echo navActive('/dictionary', $currentPath); ?>" href="/dictionary">
             Dictionary
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/execute', $currentPath); ?>" href="/execute">
+            Execute
           </a>
         </li>
         <li class="nav-item">

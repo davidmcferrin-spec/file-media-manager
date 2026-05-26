@@ -20,7 +20,7 @@ $queueStats = $pdo->query("
         SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) AS rejected,
         SUM(CASE WHEN status = 'FLAGGED'  THEN 1 ELSE 0 END) AS flagged,
         SUM(CASE WHEN status = 'EXECUTED' THEN 1 ELSE 0 END) AS executed,
-        SUM(CASE WHEN needs_split = 1     THEN 1 ELSE 0 END) AS needs_split
+        SUM(CASE WHEN needs_split IS TRUE THEN 1 ELSE 0 END) AS needs_split
     FROM files
 ")->fetch();
 

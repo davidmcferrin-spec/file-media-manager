@@ -78,6 +78,9 @@ class View
             'FLAGGED'     => ['warning',   'Flagged'],
             'EXECUTED'    => ['success',   'Executed'],
             'ROLLED_BACK' => ['info',      'Rolled Back'],
+            'IN_PROGRESS' => ['info',      'In Progress'],
+            'DONE'        => ['success',   'Done'],
+            'FAILED'      => ['danger',    'Failed'],
         ];
         [$cls, $label] = $map[$status] ?? ['secondary', $status];
         return '<span class="badge bg-' . $cls . '">' . self::e($label) . '</span>';

@@ -1,11 +1,6 @@
 # Environment
 .env
 
-# SQLite database
-data/*.db
-data/*.db-shm
-data/*.db-wal
-
 # Storage (generated files)
 storage/thumbnails/*
 storage/logs/*

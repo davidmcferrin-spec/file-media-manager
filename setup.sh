@@ -42,20 +42,21 @@ read -rp "Install Media Manager to ${WEB_ROOT}? [y/N] " CONFIRM
 info "Updating package lists..."
 apt-get update -qq
 
-info "Installing PHP 8.2, Apache, FFmpeg, SQLite, and utilities..."
+info "Installing PHP 8.2, Apache, FFmpeg, PostgreSQL, and utilities..."
 apt-get install -y -qq \
     apache2 \
     php8.2 \
     php8.2-cli \
-    php8.2-sqlite3 \
+    php8.2-pgsql \
     php8.2-mbstring \
     php8.2-json \
     php8.2-fileinfo \
     php8.2-curl \
+    postgresql \
+    postgresql-client \
     ffmpeg \
     unzip \
-    curl \
-    sqlite3
+    curl
 
 success "System packages installed."
 
@@ -71,7 +72,6 @@ if [[ "$APP_DIR" != "$WEB_ROOT" ]]; then
     mkdir -p "$WEB_ROOT"
     rsync -a --exclude='.git' --exclude='storage/thumbnails/*' \
           --exclude='storage/logs/*' --exclude='storage/backups/*' \
-          --exclude='data/*.db' \
           "${APP_DIR}/" "${WEB_ROOT}/"
 else
     info "Already in web root, skipping rsync."
@@ -84,10 +84,10 @@ if [[ ! -f "${VENDOR_DIR}/css/bootstrap.min.css" ]]; then
     info "Downloading Bootstrap ${BOOTSTRAP_VERSION}..."
     TMP_ZIP=$(mktemp /tmp/bootstrap-XXXXXX.zip)
     curl -sL "${BOOTSTRAP_URL}" -o "${TMP_ZIP}"
-    mkdir -p "${VENDOR_DIR}"
-    unzip -q "${TMP_ZIP}" "bootstrap-${BOOTSTRAP_VERSION}-dist/css/bootstrap.min.css" \
-                          "bootstrap-${BOOTSTRAP_VERSION}-dist/js/bootstrap.bundle.min.js" \
-          -d /tmp/bs-extract/
+    mkdir -p "${VENDOR_DIR}" /tmp/bs-extract/
+    unzip -q -d /tmp/bs-extract/ "${TMP_ZIP}" \
+        "bootstrap-${BOOTSTRAP_VERSION}-dist/css/bootstrap.min.css" \
+        "bootstrap-${BOOTSTRAP_VERSION}-dist/js/bootstrap.bundle.min.js"
     cp "/tmp/bs-extract/bootstrap-${BOOTSTRAP_VERSION}-dist/css/bootstrap.min.css" \
        "${VENDOR_DIR}/css/bootstrap.min.css"
     mkdir -p "${VENDOR_DIR}/js"
@@ -104,7 +104,6 @@ info "Creating storage directories..."
 mkdir -p "${WEB_ROOT}/storage/thumbnails"
 mkdir -p "${WEB_ROOT}/storage/logs"
 mkdir -p "${WEB_ROOT}/storage/backups"
-mkdir -p "${WEB_ROOT}/data"
 mkdir -p "${WEB_ROOT}/uploads"
 
 # .gitkeep placeholders
@@ -120,7 +119,6 @@ info "Setting permissions..."
 chown -R www-data:www-data "${WEB_ROOT}"
 chmod -R 755 "${WEB_ROOT}"
 chmod -R 775 "${WEB_ROOT}/storage" \
-             "${WEB_ROOT}/data" \
              "${WEB_ROOT}/uploads"
 success "Permissions set."
 
@@ -138,20 +136,92 @@ fi
 
 # ── 8. Apache site config ─────────────────────────────────────
 info "Installing Apache site config..."
+cp "${WEB_ROOT}/apache/media-manager-port.conf" /etc/apache2/conf-available/media-manager-port.conf
+a2enconf media-manager-port
 cp "${WEB_ROOT}/apache/media-manager.conf" "${APACHE_CONF}"
 a2ensite media-manager.conf
-success "Apache site enabled."
+success "Apache site enabled on port 81."
 
-# ── 9. Run database migrations ────────────────────────────────
+# ── 9. PostgreSQL provisioning ────────────────────────────────
+info "Configuring PostgreSQL..."
+
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +a
+
+db_host="${DB_HOST:-127.0.0.1}"
+db_name="${DB_NAME:-media_manager}"
+db_user="${DB_USER:-media_manager}"
+db_password="${DB_PASSWORD:-}"
+
+if [[ -z "${db_name}" || -z "${db_user}" || -z "${db_password}" ]]; then
+    error "DB_NAME, DB_USER, and DB_PASSWORD must be set in ${ENV_FILE}"
+fi
+
+if [[ "$db_host" == "127.0.0.1" || "$db_host" == "localhost" || "$db_host" == "::1" ]]; then
+    db_name_b64="$(printf '%s' "$db_name" | base64 | tr -d '\n')"
+    db_user_b64="$(printf '%s' "$db_user" | base64 | tr -d '\n')"
+    db_password_b64="$(printf '%s' "$db_password" | base64 | tr -d '\n')"
+
+    if ! sudo -u postgres psql -d postgres -v ON_ERROR_STOP=1 <<SQL
+\\set db_user_b64 '${db_user_b64}'
+\\set db_password_b64 '${db_password_b64}'
+WITH vars AS (
+  SELECT
+    convert_from(decode(:'db_user_b64', 'base64'), 'UTF8') AS db_user,
+    convert_from(decode(:'db_password_b64', 'base64'), 'UTF8') AS db_password
+)
+SELECT format(
+  CASE
+    WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = vars.db_user)
+      THEN 'ALTER ROLE %I WITH LOGIN PASSWORD %L'
+    ELSE 'CREATE ROLE %I LOGIN PASSWORD %L'
+  END,
+  vars.db_user,
+  vars.db_password
+)
+FROM vars \\gexec
+SQL
+    then
+        error "Failed to create or update PostgreSQL role \"${db_user}\"."
+    fi
+
+    if ! sudo -u postgres psql -d postgres -v ON_ERROR_STOP=1 <<SQL
+\\set db_name_b64 '${db_name_b64}'
+\\set db_user_b64 '${db_user_b64}'
+WITH vars AS (
+  SELECT
+    convert_from(decode(:'db_name_b64', 'base64'), 'UTF8') AS db_name,
+    convert_from(decode(:'db_user_b64', 'base64'), 'UTF8') AS db_user
+)
+SELECT format('CREATE DATABASE %I OWNER %I', vars.db_name, vars.db_user)
+FROM vars
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = vars.db_name) \\gexec
+
+WITH vars AS (
+  SELECT
+    convert_from(decode(:'db_name_b64', 'base64'), 'UTF8') AS db_name,
+    convert_from(decode(:'db_user_b64', 'base64'), 'UTF8') AS db_user
+)
+SELECT format('ALTER DATABASE %I OWNER TO %I', vars.db_name, vars.db_user)
+FROM vars
+WHERE EXISTS (SELECT 1 FROM pg_database WHERE datname = vars.db_name)
+  AND (SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = vars.db_name) <> vars.db_user \\gexec
+SQL
+    then
+        error "Failed to create or update PostgreSQL database \"${db_name}\"."
+    fi
+fi
+
+success "PostgreSQL role and database ready."
+
+# ── 10. Run database migrations ───────────────────────────────
 info "Running database migrations..."
-sudo -u www-data php8.2 -r "
-    require '${WEB_ROOT}/src/bootstrap.php';
-    MediaManager\Database::migrate();
-    echo 'Migrations complete.' . PHP_EOL;
-"
+sudo -u www-data php8.2 "${WEB_ROOT}/scripts/migrate.php"
 success "Database migrations applied."
 
-# ── 10. Create admin user ─────────────────────────────────────
+# ── 11. Create admin user ─────────────────────────────────────
 info "Creating admin user..."
 
 # Load env values for admin seed
@@ -180,7 +250,7 @@ sudo -u www-data php8.2 -r "
     }
 "
 
-# ── 11. Restart Apache ────────────────────────────────────────
+# ── 12. Restart Apache ────────────────────────────────────────
 info "Restarting Apache..."
 systemctl reload apache2
 success "Apache reloaded."
@@ -191,7 +261,7 @@ echo -e "${BOLD}${GREEN}========================================${NC}"
 echo -e "${BOLD}${GREEN}  Setup complete!${NC}"
 echo -e "${BOLD}${GREEN}========================================${NC}"
 echo ""
-echo -e "  URL:      ${CYAN}http://$(hostname -I | awk '{print $1}')/dashboard${NC}"
+echo -e "  URL:      ${CYAN}http://$(hostname -I | awk '{print $1}'):81/dashboard${NC}"
 echo -e "  Email:    ${CYAN}${ADMIN_EMAIL}${NC}"
 if [[ "${GENERATED_PASS}" == "true" ]]; then
 echo -e "  Password: ${YELLOW}${ADMIN_PASS}${NC}  ← save this now!"

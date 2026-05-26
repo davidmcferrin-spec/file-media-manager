@@ -9,7 +9,7 @@ only after human approval via a web-based review queue.
 ## Stack
 - PHP 8.2+ (strict_types=1 everywhere)
 - Bootstrap 5 vendored (no CDN — must work on isolated broadcast network)
-- SQLite (data/media-manager.db)
+- PostgreSQL 14+
 - FFmpeg + FFprobe (metadata extraction, thumbnail generation)
 - Apache 2.4 on Debian 13
 - Session-based auth (bcrypt passwords)
@@ -24,25 +24,25 @@ src/Controllers/        One controller per module
 src/Repositories/       All DB access — no inline SQL in controllers/views
 src/Services/           Classifier, Executor, Rollback, FFprobe, Thumbnail
 src/Views/              PHP templates only — no logic beyond display
-sql/migrations/         Versioned SQLite migrations (001_, 002_, etc.)
+scripts/migrate.php     Versioned PostgreSQL migration runner
+sql/migrations/         Versioned PostgreSQL migrations (001_, 002_, etc.)
 storage/thumbnails/     FFmpeg-generated JPGs cached by file_id
 storage/logs/           Application logs
-data/                   SQLite DB lives here
 ```
 
 ## NAS Mount Points
-- NY Linear:      /mnt-smb/SNSEVO-NYL
+- NY Linear: /mnt-smb/SNSEVO-NYL
 - Chicago Linear: /mnt-smb/SNSEVO-CHL
 
 ## Naming Policy (target state)
 - Folder: /SHOW_ABBR/YYYY/MM/MediaType/
-- File:   SHOW_ABBR_YYYYMMDD_HHMM_MEDIATYPE.ext
-- GISO:   SHOW_ABBR_YYYYMMDD_HHMM_GISO_Guest_Name.ext
+- File: SHOW_ABBR_YYYYMMDD_HHMM_MEDIATYPE.ext
+- GISO: SHOW_ABBR_YYYYMMDD_HHMM_GISO_Guest_Name.ext
 - No spaces — underscores only
 - Date: YYYYMMDD, Time: HHMM 24hr Eastern
 
 ## Roles
-- admin  — full access: scan, execute, rollback, audit, user mgmt, dictionary
+- admin — full access: scan, execute, rollback, audit, user mgmt, dictionary
 - editor — queue review only: approve, reject, edit proposed name/path, flag
 
 ## Key Rules
@@ -66,4 +66,6 @@ data/                   SQLite DB lives here
 ## Testing
 - Run php -l on all files before committing
 - Key classifier logic covered by unit tests in tests/
-```
+
+## Related Project
+Architecture and PostgreSQL patterns follow `studio-calendar` (davidmcferrin-spec/studio-calendar).
