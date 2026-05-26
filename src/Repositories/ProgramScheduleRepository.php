@@ -51,16 +51,27 @@ final class ProgramScheduleRepository extends BaseRepository
     }
 
     /** @return list<array<string, mixed>> */
-    public function list(int $limit = 200, int $offset = 0, ?string $search = null): array
+    public function list(int $limit = 200, int $offset = 0, ?string $search = null, ?int $showId = null): array
     {
         $sql = 'SELECT pse.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name
                 FROM program_schedule_entries pse
                 JOIN shows sh ON sh.id = pse.show_id';
         $params = [];
+        $where = [];
+
+        if ($showId !== null && $showId > 0) {
+            $where[] = 'pse.show_id = ?';
+            $params[] = $showId;
+        }
         if ($search !== null && $search !== '') {
-            $sql .= ' WHERE pse.title ILIKE ? OR sh.abbreviation ILIKE ? OR sh.canonical_name ILIKE ?';
+            $where[] = '(pse.title ILIKE ? OR sh.abbreviation ILIKE ? OR sh.canonical_name ILIKE ?)';
             $term = '%' . $search . '%';
-            $params = [$term, $term, $term];
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+        }
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
         }
         $sql .= ' ORDER BY pse.effective_from DESC, pse.hour_start_et ASC, pse.title ASC LIMIT ? OFFSET ?';
         $params[] = $limit;
@@ -74,6 +85,116 @@ final class ProgramScheduleRepository extends BaseRepository
         $rows = $stmt->fetchAll();
 
         return is_array($rows) ? $rows : [];
+    }
+
+    public function countFiltered(?string $search = null, ?int $showId = null): int
+    {
+        $sql = 'SELECT COUNT(*)
+                FROM program_schedule_entries pse
+                JOIN shows sh ON sh.id = pse.show_id';
+        $params = [];
+        $where = [];
+
+        if ($showId !== null && $showId > 0) {
+            $where[] = 'pse.show_id = ?';
+            $params[] = $showId;
+        }
+        if ($search !== null && $search !== '') {
+            $where[] = '(pse.title ILIKE ? OR sh.abbreviation ILIKE ? OR sh.canonical_name ILIKE ?)';
+            $term = '%' . $search . '%';
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+        }
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+
+        $stmt = $this->db()->prepare($sql);
+        foreach ($params as $i => $value) {
+            $stmt->bindValue($i + 1, $value, is_int($value) ? \PDO::PARAM_INT : \PDO::PARAM_STR);
+        }
+        $stmt->execute();
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function findById(int $id): ?array
+    {
+        $stmt = $this->db()->prepare(
+            'SELECT pse.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name
+             FROM program_schedule_entries pse
+             JOIN shows sh ON sh.id = pse.show_id
+             WHERE pse.id = ?
+             LIMIT 1'
+        );
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
+    /** @param array<string, mixed> $data */
+    public function update(int $id, array $data): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE program_schedule_entries SET
+                show_id = ?,
+                title = ?,
+                hour_start_et = ?,
+                hour_end_et = ?,
+                days_of_week = ?,
+                effective_from = ?,
+                effective_to = ?,
+                era_name = ?,
+                anchor_names = ?,
+                show_type = ?,
+                network_brand = ?,
+                notes = ?,
+                active = ?
+             WHERE id = ?'
+        );
+
+        return $stmt->execute([
+            $data['show_id'],
+            $data['title'],
+            $data['hour_start_et'],
+            $data['hour_end_et'],
+            $data['days_of_week'],
+            $data['effective_from'],
+            $data['effective_to'] ?? null,
+            $data['era_name'] ?? '',
+            $data['anchor_names'] ?? '',
+            $data['show_type'] ?? '',
+            $data['network_brand'] ?? '',
+            $data['notes'] ?? '',
+            $this->pgBool((bool) ($data['active'] ?? true)),
+            $id,
+        ]);
+    }
+
+    public function delete(int $id): bool
+    {
+        $stmt = $this->db()->prepare('DELETE FROM program_schedule_entries WHERE id = ?');
+
+        return $stmt->execute([$id]);
+    }
+
+    /** @return array<int, int> show_id => entry count */
+    public function countByShow(): array
+    {
+        $rows = $this->db()->query(
+            'SELECT show_id, COUNT(*) AS cnt FROM program_schedule_entries GROUP BY show_id'
+        )->fetchAll();
+
+        $counts = [];
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                $counts[(int) $row['show_id']] = (int) $row['cnt'];
+            }
+        }
+
+        return $counts;
     }
 
     /** @return list<array<string, mixed>> */

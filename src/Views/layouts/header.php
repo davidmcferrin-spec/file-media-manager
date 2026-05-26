@@ -316,13 +316,8 @@ body {
           </a>
         </li>
         <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/dictionary', $currentPath); ?>" href="/dictionary">
-            Dictionary
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/schedule', $currentPath); ?>" href="/schedule">
-            Schedule
+          <a class="nav-link<?php echo navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath); ?>" href="/dictionary">
+            Shows
           </a>
         </li>
         <li class="nav-item">

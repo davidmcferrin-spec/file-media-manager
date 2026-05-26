@@ -6,8 +6,11 @@ use MediaManager\Auth\Session;
 use MediaManager\Support\View;
 
 /** @var list<array<string, mixed>> $shows */
+/** @var array<int, int> $scheduleCounts */
 /** @var array<string, mixed>|null $editShow */
 ?>
+
+<?php require dirname(__DIR__) . '/shows/_nav.php'; ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
@@ -71,6 +74,16 @@ use MediaManager\Support\View;
                    <?php echo !empty($editShow['active']) ? 'checked' : ''; ?>>
             <label class="form-check-label" for="show-active">Active</label>
           </div>
+          <?php
+          $editScheduleCount = $scheduleCounts[(int) $editShow['id']] ?? 0;
+          ?>
+          <div class="mb-3 p-2 rounded" style="background:var(--hover-bg);font-size:0.78rem">
+            Program schedule:
+            <a href="/schedule?show_id=<?php echo (int) $editShow['id']; ?>">
+              <?php echo $editScheduleCount; ?> hourly block<?php echo $editScheduleCount === 1 ? '' : 's'; ?>
+            </a>
+            · <a href="/schedule?show_id=<?php echo (int) $editShow['id']; ?>&amp;add=1">Add block</a>
+          </div>
           <?php endif; ?>
 
           <div class="d-flex gap-2">
@@ -95,6 +108,7 @@ use MediaManager\Support\View;
             <tr>
               <th>Name</th>
               <th>Abbr</th>
+              <th>Schedule</th>
               <th>Aliases</th>
               <th>Status</th>
               <th></th>
@@ -103,7 +117,7 @@ use MediaManager\Support\View;
           <tbody>
             <?php if ($shows === []): ?>
             <tr>
-              <td colspan="5" class="text-center py-4" style="color:var(--text-soft)">
+              <td colspan="6" class="text-center py-4" style="color:var(--text-soft)">
                 No shows in dictionary yet.
               </td>
             </tr>
@@ -112,15 +126,29 @@ use MediaManager\Support\View;
             <?php
             $aliases = json_decode((string) ($show['aliases'] ?? '[]'), true);
             $aliasDisplay = is_array($aliases) ? implode(', ', $aliases) : '';
+            $schedCount = $scheduleCounts[(int) $show['id']] ?? 0;
             ?>
             <tr>
               <td>
-                <strong><?php echo View::e($show['canonical_name']); ?></strong>
+                <strong>
+                  <a href="/schedule?show_id=<?php echo (int) $show['id']; ?>">
+                    <?php echo View::e($show['canonical_name']); ?>
+                  </a>
+                </strong>
                 <?php if (!empty($show['notes'])): ?>
                 <div class="path-text"><?php echo View::e($show['notes']); ?></div>
                 <?php endif; ?>
               </td>
               <td><code><?php echo View::e($show['abbreviation']); ?></code></td>
+              <td class="text-nowrap">
+                <?php if ($schedCount > 0): ?>
+                <a href="/schedule?show_id=<?php echo (int) $show['id']; ?>" class="badge bg-info text-decoration-none">
+                  <?php echo $schedCount; ?> block<?php echo $schedCount === 1 ? '' : 's'; ?>
+                </a>
+                <?php else: ?>
+                <a href="/schedule?show_id=<?php echo (int) $show['id']; ?>&amp;add=1" class="path-text">Add schedule</a>
+                <?php endif; ?>
+              </td>
               <td class="path-text"><?php echo View::e($aliasDisplay ?: '—'); ?></td>
               <td>
                 <?php if (!empty($show['active'])): ?>

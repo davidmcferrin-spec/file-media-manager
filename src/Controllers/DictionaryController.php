@@ -7,6 +7,7 @@ namespace MediaManager\Controllers;
 use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
 use MediaManager\Repositories\AuditRepository;
+use MediaManager\Repositories\ProgramScheduleRepository;
 use MediaManager\Repositories\ShowRepository;
 use PDOException;
 
@@ -16,6 +17,7 @@ $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
 $showRepo = new ShowRepository();
+$scheduleRepo = new ProgramScheduleRepository();
 $audit    = new AuditRepository();
 
 /** @param list<string> $aliases */
@@ -130,8 +132,10 @@ if ($method === 'POST') {
 }
 
 $shows = $showRepo->all();
+$scheduleCounts = $scheduleRepo->countByShow();
 $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
 $editShow = $editId > 0 ? $showRepo->findById($editId) : null;
+$showsTab = 'dictionary';
 
 $title = 'Dictionary — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';

@@ -272,7 +272,7 @@ final class FileRepository extends BaseRepository
             return $executed;
         }
 
-        return (string) ($file['original_path'];
+        return (string) ($file['original_path'] ?? '');
     }
 
     /**
@@ -285,7 +285,7 @@ final class FileRepository extends BaseRepository
             return $executed;
         }
 
-        return (string) ($file['original_path'];
+        return (string) ($file['original_path'] ?? '');
     }
 
     /** @param list<int> $ids */
