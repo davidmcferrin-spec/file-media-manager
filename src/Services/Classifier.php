@@ -279,7 +279,7 @@ final class Classifier
         $tokens = ['GISO', 'ISO', 'CLEAN', 'PROGRAM', 'PGM', 'PRETAPE', 'PRE-TAPE', 'RAW', 'LIVE CLEAN'];
         foreach ($tokens as $token) {
             if (stripos($filename, $token) !== false) {
-                $normalized = match (strtoupper(str_replace('-', ' ', $token)) {
+                $normalized = match (strtoupper(str_replace('-', ' ', $token))) {
                     'PGM'         => 'PROGRAM',
                     'PRETAPE', 'PRE TAPE' => 'CLEAN',
                     'LIVE CLEAN'  => 'CLEAN',
