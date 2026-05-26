@@ -2,7 +2,7 @@
 # =============================================================
 # setup.sh — Media Manager
 # NewsNation Broadcast Archive System
-# Target: Debian 13 (Trixie) / Apache 2.4 / PHP 8.2+
+# Target: Debian 13 (Trixie) / Apache 2.4 / PHP 8.4+
 # =============================================================
 set -euo pipefail
 
@@ -42,14 +42,14 @@ read -rp "Install Media Manager to ${WEB_ROOT}? [y/N] " CONFIRM
 info "Updating package lists..."
 apt-get update -qq
 
-info "Installing PHP 8.2, Apache, FFmpeg, PostgreSQL, and utilities..."
+info "Installing PHP 8.4, Apache, FFmpeg, PostgreSQL, and utilities..."
 apt-get install -y -qq \
     apache2 \
     php8.4 \
     php8.4-cli \
     php8.4-pgsql \
     php8.4-mbstring \
-    php8.4-json \
+    php-json \
     php8.4-fileinfo \
     php8.4-curl \
     postgresql \
@@ -218,7 +218,7 @@ success "PostgreSQL role and database ready."
 
 # ── 10. Run database migrations ───────────────────────────────
 info "Running database migrations..."
-sudo -u www-data php8.2 "${WEB_ROOT}/scripts/migrate.php"
+sudo -u www-data php8.4 "${WEB_ROOT}/scripts/migrate.php"
 success "Database migrations applied."
 
 # ── 11. Create admin user ─────────────────────────────────────
@@ -235,7 +235,7 @@ else
     GENERATED_PASS=false
 fi
 
-sudo -u www-data php8.2 -r "
+sudo -u www-data php8.4 -r "
     require '${WEB_ROOT}/src/bootstrap.php';
     use MediaManager\Auth\Auth;
     use MediaManager\Database;
