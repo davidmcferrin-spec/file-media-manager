@@ -40,7 +40,7 @@ final class ExecutorService
                     (string) $file['original_filename'],
                     $e->getMessage()
                 );
-                error_log('[execute] ' . $result['errors[array_key_last($result['errors'])]']);
+                error_log('[execute] ' . $result['errors'][array_key_last($result['errors'])]);
             }
         }
 
