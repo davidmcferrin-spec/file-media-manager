@@ -152,4 +152,54 @@ final class ScanJobRepository extends BaseRepository
 
         return is_array($row) ? $row : null;
     }
+
+    /**
+     * Request stop for a pending or running job. Pending jobs are cancelled immediately.
+     */
+    public function requestCancel(int $id): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE scan_jobs
+             SET cancel_requested = true,
+                 status = CASE WHEN status = \'PENDING\' THEN \'CANCELLED\' ELSE status END,
+                 completed_at = CASE WHEN status = \'PENDING\' THEN now() ELSE completed_at END,
+                 error_message = CASE WHEN status = \'PENDING\' THEN NULL ELSE error_message END
+             WHERE id = ?
+               AND status IN (\'PENDING\', \'RUNNING\')
+             RETURNING id'
+        );
+        $stmt->execute([$id]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function isCancelRequested(int $id): bool
+    {
+        $stmt = $this->db()->prepare(
+            'SELECT cancel_requested FROM scan_jobs WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute([$id]);
+        $value = $stmt->fetchColumn();
+
+        return in_array($value, [true, 't', 'true', '1', 1], true);
+    }
+
+    public function markCancelled(int $id): void
+    {
+        $this->db()->prepare(
+            'UPDATE scan_jobs
+             SET status = \'CANCELLED\',
+                 cancel_requested = true,
+                 completed_at = now(),
+                 error_message = NULL
+             WHERE id = ?'
+        )->execute([$id]);
+    }
+
+    public function delete(int $id): bool
+    {
+        $stmt = $this->db()->prepare('DELETE FROM scan_jobs WHERE id = ?');
+
+        return $stmt->execute([$id]);
+    }
 }

@@ -110,6 +110,135 @@ if ($method === 'POST' && $uri === '/scan/start') {
     exit;
 }
 
+function delete_scan_thumbnails(array $fileIds, string $projectRoot): void
+{
+    $dir = rtrim($projectRoot . '/' . trim((string) env('STORAGE_THUMBNAILS', 'storage/thumbnails'), '/'), '/');
+    foreach ($fileIds as $fileId) {
+        $path = $dir . '/' . $fileId . '.jpg';
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+}
+
+// ── POST: cancel scan ───────────────────────────────────────────
+if ($method === 'POST' && $uri === '/scan/cancel') {
+    $csrf = $_POST['_csrf'] ?? '';
+    if (!Session::validateCsrf($csrf)) {
+        Session::flash('error', 'Invalid request.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $jobId = (int) ($_POST['id'] ?? 0);
+    $job   = $jobId > 0 ? $scanJobs->findById($jobId) : null;
+    if ($job === null) {
+        Session::flash('error', 'Scan job not found.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $status = (string) ($job['status'] ?? '');
+    if (!in_array($status, ['PENDING', 'RUNNING'], true)) {
+        Session::flash('error', 'Only pending or running scans can be stopped.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    if (!$scanJobs->requestCancel($jobId)) {
+        Session::flash('error', 'Could not stop scan job.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    $user = Auth::user();
+    $audit->record(
+        Auth::id(),
+        $user['email'] ?? '',
+        $_SERVER['REMOTE_ADDR'] ?? '',
+        'SCAN_CANCEL_REQUESTED',
+        'scan_job',
+        $jobId,
+        null,
+        null,
+        ['previous_status' => $status]
+    );
+
+    $message = $status === 'PENDING'
+        ? 'Scan job #' . $jobId . ' cancelled.'
+        : 'Stop requested for scan job #' . $jobId . '. It will halt after the current file.';
+    Session::flash('success', $message);
+    header('Location: /scan/' . $jobId);
+    exit;
+}
+
+// ── POST: delete scan ───────────────────────────────────────────
+if ($method === 'POST' && $uri === '/scan/delete') {
+    $csrf = $_POST['_csrf'] ?? '';
+    if (!Session::validateCsrf($csrf)) {
+        Session::flash('error', 'Invalid request.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $jobId = (int) ($_POST['id'] ?? 0);
+    $job   = $jobId > 0 ? $scanJobs->findById($jobId) : null;
+    if ($job === null) {
+        Session::flash('error', 'Scan job not found.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $status = (string) ($job['status'] ?? '');
+    if ($status === 'RUNNING') {
+        Session::flash('error', 'Stop the scan and wait for it to finish before deleting.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    $protected = $files->countProtectedByScanJob($jobId);
+    if ($protected > 0) {
+        Session::flash(
+            'error',
+            'Cannot delete scan job #' . $jobId . ': '
+            . $protected . ' file(s) are approved, executed, or rolled back.'
+        );
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    $fileIds      = $files->idsByScanJob($jobId);
+    $deletedFiles = $files->deleteByScanJob($jobId);
+    delete_scan_thumbnails($fileIds, $projectRoot);
+
+    if (!$scanJobs->delete($jobId)) {
+        Session::flash('error', 'Could not delete scan job.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    $user = Auth::user();
+    $audit->record(
+        Auth::id(),
+        $user['email'] ?? '',
+        $_SERVER['REMOTE_ADDR'] ?? '',
+        'SCAN_DELETED',
+        'scan_job',
+        $jobId,
+        null,
+        null,
+        [
+            'files_removed' => $deletedFiles,
+            'previous_status' => $status,
+            'source_id' => (int) ($job['source_id'] ?? 0),
+        ]
+    );
+
+    Session::flash('success', 'Scan job #' . $jobId . ' deleted (' . $deletedFiles . ' queued file(s) removed).');
+    header('Location: /scan');
+    exit;
+}
+
 // ── GET: job detail ───────────────────────────────────────────
 if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $jobId = (int) $m[1];
@@ -121,9 +250,12 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
         exit;
     }
 
-    $jobFiles    = $files->byScanJob($jobId, 50);
-    $totalQueued = $files->countByScanJob($jobId);
-    $confidence  = $files->confidenceSummary($jobId);
+    $jobFiles      = $files->byScanJob($jobId, 50);
+    $totalQueued   = $files->countByScanJob($jobId);
+    $confidence    = $files->confidenceSummary($jobId);
+    $protectedCount = $files->countProtectedByScanJob($jobId);
+    $canStop       = in_array((string) $job['status'], ['PENDING', 'RUNNING'], true);
+    $canDelete     = (string) $job['status'] !== 'RUNNING' && $protectedCount === 0;
 
     $title = 'Scan Job #' . $jobId . ' — Media Manager';
     require dirname(__DIR__) . '/Views/layouts/header.php';

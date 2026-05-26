@@ -45,7 +45,7 @@ final class ScanService
         }
 
         $status = (string) ($job['status'] ?? '');
-        if ($status === 'COMPLETED') {
+        if ($status === 'COMPLETED' || $status === 'CANCELLED') {
             return;
         }
 
@@ -104,9 +104,13 @@ final class ScanService
         try {
             $this->progress('collecting', ['scan_root' => $scanRoot]);
 
+            $this->abortIfCancelled($jobId);
+
             $mediaFiles = $devList !== null && $devList !== ''
                 ? $this->collectFromDevList((string) $devList, $mountPath, $subpath, $ignore)
                 : $this->collectFromFilesystem($scanRoot, $mountPath, $ignore);
+
+            $this->abortIfCancelled($jobId);
 
             $totalFiles = count($mediaFiles);
             $this->scanJobs->setTotalFiles($jobId, $totalFiles);
@@ -114,6 +118,8 @@ final class ScanService
 
             $processed = 0;
             foreach ($mediaFiles as $entry) {
+                $this->abortIfCancelled($jobId);
+
                 $outcome = $this->processFile($job, $entry, $extract);
                 if ($outcome === 'queued') {
                     $queued++;
@@ -163,6 +169,8 @@ final class ScanService
                 $queued,
                 $skipped
             ));
+        } catch (ScanCancelledException $e) {
+            throw $e;
         } catch (\Throwable $e) {
             $this->scanJobs->markFailed($jobId, $e->getMessage());
             $this->progress('failed', ['job_id' => $jobId, 'message' => $e->getMessage()]);
@@ -179,6 +187,38 @@ final class ScanService
         }
 
         ($this->onProgress)($event, $data);
+    }
+
+    private function abortIfCancelled(int $jobId): void
+    {
+        if (!$this->scanJobs->isCancelRequested($jobId)) {
+            return;
+        }
+
+        $this->scanJobs->markCancelled($jobId);
+
+        $job = $this->scanJobs->findById($jobId);
+        if ($job !== null) {
+            $this->audit->record(
+                (int) $job['created_by'],
+                (string) ($job['created_by_email'] ?? ''),
+                '127.0.0.1',
+                'SCAN_CANCELLED',
+                'scan_job',
+                $jobId,
+                null,
+                null,
+                [
+                    'processed_files' => (int) ($job['processed_files'] ?? 0),
+                    'total_files'     => (int) ($job['total_files'] ?? 0),
+                ]
+            );
+        }
+
+        $this->progress('cancelled', ['job_id' => $jobId]);
+        error_log('[scan] Job ' . $jobId . ' cancelled.');
+
+        throw new ScanCancelledException("Scan job {$jobId} was cancelled.");
     }
 
     /**

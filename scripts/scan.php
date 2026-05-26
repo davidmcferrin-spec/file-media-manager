@@ -7,6 +7,7 @@ chdir(__DIR__ . '/..');
 require_once __DIR__ . '/../src/bootstrap.php';
 
 use MediaManager\Services\ScanService;
+use MediaManager\Services\ScanCancelledException;
 
 $jobId = null;
 $verbose = null;
@@ -87,6 +88,10 @@ $progress = static function (string $event, array $data) use ($verbose): void {
         case 'failed':
             echo "\nScan failed: " . (string) $data['message'] . "\n";
             break;
+
+        case 'cancelled':
+            echo "\nScan cancelled.\n";
+            break;
     }
 };
 
@@ -110,6 +115,8 @@ try {
     if (!$verbose) {
         echo "Scan job {$ranJobId} completed.\n";
     }
+    exit(0);
+} catch (ScanCancelledException) {
     exit(0);
 } catch (\Throwable $e) {
     $label = $jobId !== null && $jobId > 0 ? (string) $jobId : 'pending';

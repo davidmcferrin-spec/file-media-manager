@@ -89,12 +89,13 @@ use MediaManager\Support\View;
               <th>Status</th>
               <th>Progress</th>
               <th>Started</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             <?php if ($recentJobs === []): ?>
             <tr>
-              <td colspan="6" class="text-center py-4" style="color:var(--text-soft)">No scans yet.</td>
+              <td colspan="7" class="text-center py-4" style="color:var(--text-soft)">No scans yet.</td>
             </tr>
             <?php else: ?>
             <?php foreach ($recentJobs as $job): ?>
@@ -102,6 +103,9 @@ use MediaManager\Support\View;
             $total = (int) ($job['total_files'] ?? 0);
             $done  = (int) ($job['processed_files'] ?? 0);
             $pct   = $total > 0 ? round(($done / $total) * 100) : 0;
+            $status = (string) $job['status'];
+            $canStopRow = in_array($status, ['PENDING', 'RUNNING'], true);
+            $canDeleteRow = $status !== 'RUNNING';
             ?>
             <tr>
               <td><a href="/scan/<?php echo (int) $job['id']; ?>">#<?php echo (int) $job['id']; ?></a></td>
@@ -109,11 +113,11 @@ use MediaManager\Support\View;
               <td class="path-text"><?php echo View::e($job['subpath'] ?: '—'); ?></td>
               <td>
                 <?php
-                $status = (string) $job['status'];
                 $badge  = match ($status) {
                     'COMPLETED' => 'success',
                     'RUNNING'   => 'primary',
                     'FAILED'    => 'danger',
+                    'CANCELLED' => 'warning',
                     default     => 'secondary',
                 };
                 ?>
@@ -130,6 +134,24 @@ use MediaManager\Support\View;
                 <?php endif; ?>
               </td>
               <td class="path-text"><?php echo View::e(substr((string) ($job['started_at'] ?? $job['created_at']), 0, 16)); ?></td>
+              <td class="text-end text-nowrap">
+                <?php if ($canStopRow): ?>
+                <form method="post" action="/scan/cancel" class="d-inline"
+                      onsubmit="return confirm('Stop scan #<?php echo (int) $job['id']; ?>?');">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+                  <button type="submit" class="btn btn-outline-danger btn-xs">Stop</button>
+                </form>
+                <?php endif; ?>
+                <?php if ($canDeleteRow): ?>
+                <form method="post" action="/scan/delete" class="d-inline"
+                      onsubmit="return confirm('Delete scan #<?php echo (int) $job['id']; ?> and its queued files?');">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+                  <button type="submit" class="btn btn-outline-secondary btn-xs">Delete</button>
+                </form>
+                <?php endif; ?>
+              </td>
             </tr>
             <?php endforeach; ?>
             <?php endif; ?>

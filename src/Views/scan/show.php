@@ -2,12 +2,16 @@
 
 declare(strict_types=1);
 
+use MediaManager\Auth\Session;
 use MediaManager\Support\View;
 
 /** @var array<string, mixed> $job */
 /** @var list<array<string, mixed>> $jobFiles */
 /** @var int $totalQueued */
 /** @var array<string, int> $confidence */
+/** @var int $protectedCount */
+/** @var bool $canStop */
+/** @var bool $canDelete */
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
@@ -21,7 +25,27 @@ use MediaManager\Support\View;
       — <?php echo View::e($job['created_by_email']); ?>
     </p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
+    <?php if ($canStop): ?>
+    <form method="post" action="/scan/cancel" class="d-inline"
+          onsubmit="return confirm('Stop this scan? Files already queued will remain in the review queue.');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <button type="submit" class="btn btn-outline-danger btn-sm">Stop Scan</button>
+    </form>
+    <?php endif; ?>
+    <?php if ($canDelete): ?>
+    <form method="post" action="/scan/delete" class="d-inline"
+          onsubmit="return confirm('Delete scan job #<?php echo (int) $job['id']; ?> and remove <?php echo number_format($totalQueued); ?> queued file(s) from the review queue?');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <button type="submit" class="btn btn-outline-danger btn-sm">Delete Scan</button>
+    </form>
+    <?php elseif ($protectedCount > 0): ?>
+    <span class="align-self-center" style="font-size:0.78rem;color:var(--text-soft)">
+      Cannot delete — <?php echo number_format($protectedCount); ?> protected file(s)
+    </span>
+    <?php endif; ?>
     <a href="/scan" class="btn btn-outline-secondary btn-sm">All Scans</a>
     <a href="/queue" class="btn btn-primary btn-sm">Review Queue</a>
   </div>
@@ -77,20 +101,33 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
   </div>
 </div>
 
-<?php if ($status === 'RUNNING' || $status === 'PENDING'): ?>
+<?php if ($status === 'RUNNING' || ($status === 'PENDING' && empty($job['cancel_requested']))): ?>
 <div class="card mb-4">
   <div class="card-body py-3">
     <div class="d-flex justify-content-between mb-1">
-      <span style="font-size:0.82rem;color:var(--text-soft)">Processing…</span>
+      <span style="font-size:0.82rem;color:var(--text-soft)">
+        <?php echo $status === 'PENDING' ? 'Waiting to start…' : 'Processing…'; ?>
+      </span>
       <span style="font-size:0.82rem"><?php echo $done; ?> / <?php echo $total; ?> (<?php echo $pct; ?>%)</span>
     </div>
     <div class="progress" style="height:8px">
       <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:<?php echo $pct; ?>%"></div>
     </div>
-    <p class="mb-0 mt-2" style="font-size:0.78rem;color:var(--text-soft)">Refresh this page to update progress.</p>
+    <p class="mb-0 mt-2" style="font-size:0.78rem;color:var(--text-soft)">
+      <?php if (!empty($job['cancel_requested'])): ?>
+      Stop requested — scan will halt shortly.
+      <?php else: ?>
+      Refresh this page to update progress.
+      <?php endif; ?>
+    </p>
   </div>
 </div>
 <meta http-equiv="refresh" content="5">
+<?php elseif ($status === 'CANCELLED'): ?>
+<div class="alert alert-warning mb-4" style="font-size:0.84rem;">
+  Scan was stopped<?php echo $done > 0 ? ' after processing ' . number_format($done) . ' file(s)' : ''; ?>.
+  Queued results remain in the review queue until you delete this scan job.
+</div>
 <?php endif; ?>
 
 <?php if ($status === 'FAILED' && !empty($job['error_message'])): ?>

@@ -354,6 +354,44 @@ final class FileRepository extends BaseRepository
         return $summary;
     }
 
+    public function countProtectedByScanJob(int $scanJobId): int
+    {
+        $stmt = $this->db()->prepare(
+            "SELECT COUNT(*) FROM files
+             WHERE scan_job_id = ?
+               AND status IN ('APPROVED', 'EXECUTED', 'ROLLED_BACK')"
+        );
+        $stmt->execute([$scanJobId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** @return list<int> */
+    public function idsByScanJob(int $scanJobId): array
+    {
+        $stmt = $this->db()->prepare('SELECT id FROM files WHERE scan_job_id = ?');
+        $stmt->execute([$scanJobId]);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        return array_map(static fn (array $row): int => (int) $row['id'], $rows);
+    }
+
+    public function deleteByScanJob(int $scanJobId): int
+    {
+        $this->db()->prepare(
+            'DELETE FROM split_queue
+             WHERE file_id IN (SELECT id FROM files WHERE scan_job_id = ?)'
+        )->execute([$scanJobId]);
+
+        $stmt = $this->db()->prepare('DELETE FROM files WHERE scan_job_id = ?');
+        $stmt->execute([$scanJobId]);
+
+        return $stmt->rowCount();
+    }
+
     /** @return list<array{original_path: string, proposed_filename: string}> */
     public static function parseSidecars(?string $classifierNotes): array
     {
