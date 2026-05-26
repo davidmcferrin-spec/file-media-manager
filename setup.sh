@@ -88,6 +88,7 @@ if [[ ! -f "${VENDOR_DIR}/css/bootstrap.min.css" ]]; then
     unzip -q -d /tmp/bs-extract/ "${TMP_ZIP}" \
         "bootstrap-${BOOTSTRAP_VERSION}-dist/css/bootstrap.min.css" \
         "bootstrap-${BOOTSTRAP_VERSION}-dist/js/bootstrap.bundle.min.js"
+    mkdir -p "${VENDOR_DIR}/css"
     cp "/tmp/bs-extract/bootstrap-${BOOTSTRAP_VERSION}-dist/css/bootstrap.min.css" \
        "${VENDOR_DIR}/css/bootstrap.min.css"
     mkdir -p "${VENDOR_DIR}/js"
