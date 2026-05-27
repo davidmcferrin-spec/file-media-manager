@@ -21,9 +21,15 @@ $fileId = (int) $m[1];
 try {
     $path = (new PreviewService())->ensurePreview($fileId);
 } catch (\Throwable $e) {
+    error_log('[preview] file #' . $fileId . ': ' . $e->getMessage());
     http_response_code(404);
-    header('Content-Type: text/plain');
-    echo 'Preview unavailable';
+    header('Content-Type: text/plain; charset=utf-8');
+    header('X-Preview-Error: ' . substr(preg_replace('/[\r\n]+/', ' ', $e->getMessage()) ?? '', 0, 500));
+    $message = 'Preview unavailable';
+    if (env('APP_DEBUG', false) === true) {
+        $message .= ': ' . $e->getMessage();
+    }
+    echo $message;
     exit;
 }
 

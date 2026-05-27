@@ -31,8 +31,12 @@ final class PreviewService
     public function ensurePreview(int $fileId): string
     {
         $dest = $this->cache->previewPath($fileId);
-        if (is_readable($dest)) {
+        if (is_readable($dest) && filesize($dest) > 0) {
             return $dest;
+        }
+
+        if (is_file($dest)) {
+            @unlink($dest);
         }
 
         $file = $this->files->findById($fileId);
@@ -41,8 +45,14 @@ final class PreviewService
         }
 
         $source = FileRepository::mediaSourcePath($file);
-        if (!is_readable($source)) {
-            throw new RuntimeException('Source file not readable for preview.');
+        if ($source === '' || !is_readable($source)) {
+            $stored = (string) ($file['original_path'] ?? '');
+            $mount  = (string) ($file['source_mount'] ?? '');
+            throw new RuntimeException(
+                'Source file not readable for preview.'
+                . ($stored !== '' ? ' Stored path: ' . $stored : '')
+                . ($mount !== '' ? ' Source mount: ' . $mount : '')
+            );
         }
 
         $this->cache->ensurePreviewDir();
@@ -60,24 +70,60 @@ final class PreviewService
             }
         }
 
-        $cmd = sprintf(
-            '%s -hide_banner -loglevel error -ss %d -i %s -t %d -vf scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2 -c:v libvpx-vp9 -b:v 800k -an -y %s 2>&1',
-            escapeshellcmd($this->ffmpegBin),
-            $offset,
-            escapeshellarg($source),
-            $duration,
-            $this->width,
-            $this->height,
-            $this->width,
-            $this->height,
-            escapeshellarg($dest)
-        );
-
-        $output = shell_exec($cmd);
-        if (!is_readable($dest)) {
-            throw new RuntimeException('Preview generation failed: ' . trim((string) $output));
+        $lastOutput = $this->generatePreview($source, $dest, $offset, $duration);
+        if (!is_readable($dest) || filesize($dest) === 0) {
+            throw new RuntimeException(
+                'Preview generation failed.'
+                . ($lastOutput !== '' ? ' FFmpeg: ' . $lastOutput : ' Check that libvpx is installed.')
+            );
         }
 
         return $dest;
+    }
+
+    private function generatePreview(string $source, string $dest, int $offset, int $duration): string
+    {
+        $scale = sprintf(
+            'scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2',
+            $this->width,
+            $this->height,
+            $this->width,
+            $this->height
+        );
+
+        $codecs = [
+            '-c:v libvpx-vp9 -b:v 800k -deadline realtime -cpu-used 4',
+            '-c:v libvpx -b:v 800k -deadline realtime -cpu-used 4',
+        ];
+
+        $lastOutput = '';
+        foreach ($codecs as $codecArgs) {
+            if (is_file($dest)) {
+                @unlink($dest);
+            }
+
+            $cmd = sprintf(
+                '%s -hide_banner -nostdin -loglevel error -ss %d -i %s -t %d -vf %s %s -an -f webm -y %s 2>&1',
+                escapeshellcmd($this->ffmpegBin),
+                $offset,
+                escapeshellarg($source),
+                $duration,
+                escapeshellarg($scale),
+                $codecArgs,
+                escapeshellarg($dest)
+            );
+
+            $output = trim((string) shell_exec($cmd));
+            if ($output !== '') {
+                $lastOutput = $output;
+                error_log('[preview] ffmpeg: ' . $output);
+            }
+
+            if (is_readable($dest) && filesize($dest) > 0) {
+                return $lastOutput;
+            }
+        }
+
+        return $lastOutput;
     }
 }

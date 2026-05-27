@@ -317,7 +317,77 @@ final class FileRepository extends BaseRepository
             return $executed;
         }
 
-        return (string) ($file['original_path'] ?? '');
+        $original = (string) ($file['original_path'] ?? '');
+        if ($original !== '' && is_readable($original)) {
+            return $original;
+        }
+
+        $mount = rtrim((string) ($file['source_mount'] ?? ''), '/');
+        $filename = (string) ($file['original_filename'] ?? basename($original));
+        $originalDir = (string) ($file['original_dir'] ?? '');
+
+        if ($mount !== '' && $filename !== '') {
+            foreach (self::mediaSourcePathCandidates($mount, $originalDir, $filename) as $candidate) {
+                if (is_readable($candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return $original;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function mediaSourcePathCandidates(
+        string $currentMount,
+        string $originalDir,
+        string $filename
+    ): array {
+        $currentMount = rtrim($currentMount, '/');
+        $candidates   = [];
+
+        if ($originalDir !== '') {
+            $relativeDir = self::relativeDirUnderMount($originalDir, $currentMount);
+            if ($relativeDir !== null) {
+                $candidates[] = $currentMount
+                    . ($relativeDir !== '' ? '/' . $relativeDir : '')
+                    . '/'
+                    . $filename;
+            }
+        }
+
+        return array_values(array_unique($candidates));
+    }
+
+    private static function relativeDirUnderMount(string $originalDir, string $currentMount): ?string
+    {
+        $currentMount = rtrim(str_replace('\\', '/', $currentMount), '/');
+        $originalDir  = rtrim(str_replace('\\', '/', $originalDir), '/');
+
+        if ($originalDir === $currentMount) {
+            return '';
+        }
+
+        if (str_starts_with($originalDir, $currentMount . '/')) {
+            return substr($originalDir, strlen($currentMount) + 1);
+        }
+
+        $mountBase = basename($currentMount);
+        $parts     = explode('/', trim($originalDir, '/'));
+        $idx       = array_search($mountBase, $parts, true);
+        if ($idx !== false) {
+            $tail = array_slice($parts, $idx + 1);
+
+            return implode('/', $tail);
+        }
+
+        if (count($parts) > 3) {
+            return implode('/', array_slice($parts, 3));
+        }
+
+        return null;
     }
 
     /**

@@ -812,6 +812,10 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             videoWrap.classList.add('d-none');
             loading.classList.add('d-none');
             video.pause();
+            if (video.dataset.objectUrl) {
+                URL.revokeObjectURL(video.dataset.objectUrl);
+                delete video.dataset.objectUrl;
+            }
             video.removeAttribute('src');
             video.load();
             if (metaSummary) metaSummary.innerHTML = '';
@@ -885,19 +889,47 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             stage.classList.add('d-none');
             loading.classList.remove('d-none');
             videoWrap.classList.add('d-none');
+            video.pause();
+            video.removeAttribute('src');
+            if (video.dataset.objectUrl) {
+                URL.revokeObjectURL(video.dataset.objectUrl);
+                delete video.dataset.objectUrl;
+            }
 
             var previewUrl = '/queue/preview/' + currentFileId + '?_=' + Date.now();
-            video.onloadeddata = function () {
-                loading.classList.add('d-none');
-                videoWrap.classList.remove('d-none');
-            };
-            video.onerror = function () {
-                loading.classList.add('d-none');
-                stage.classList.remove('d-none');
-                alert('Preview could not be generated. The source file may be unavailable.');
-            };
-            video.src = previewUrl;
-            video.load();
+            fetch(previewUrl)
+                .then(function (response) {
+                    if (!response.ok) {
+                        return response.text().then(function (text) {
+                            var detail = (text || 'Preview unavailable').trim();
+                            throw new Error(detail);
+                        });
+                    }
+                    return response.blob();
+                })
+                .then(function (blob) {
+                    if (!blob || blob.size === 0) {
+                        throw new Error('Preview file was empty.');
+                    }
+                    var objectUrl = URL.createObjectURL(blob);
+                    video.dataset.objectUrl = objectUrl;
+                    video.onloadeddata = function () {
+                        loading.classList.add('d-none');
+                        videoWrap.classList.remove('d-none');
+                    };
+                    video.onerror = function () {
+                        loading.classList.add('d-none');
+                        stage.classList.remove('d-none');
+                        alert('Preview could not be played in this browser.');
+                    };
+                    video.src = objectUrl;
+                    video.load();
+                })
+                .catch(function (err) {
+                    loading.classList.add('d-none');
+                    stage.classList.remove('d-none');
+                    alert(err && err.message ? err.message : 'Preview could not be generated.');
+                });
         });
     }
 
