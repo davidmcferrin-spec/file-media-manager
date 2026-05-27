@@ -554,6 +554,7 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 }
 </style>
 
+<?php ob_start(); ?>
 <script>
 (function () {
     var checkAll = document.getElementById('check-all');
@@ -696,18 +697,21 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 })();
 
 (function () {
-    function initMediaPreview() {
-        if (typeof bootstrap === 'undefined') {
-            console.error('Bootstrap is not loaded — preview modal unavailable.');
-            return;
-        }
+    if (typeof bootstrap === 'undefined') {
+        console.error('Bootstrap is not loaded — preview modal unavailable.');
+        return;
+    }
 
-        var previewModal = document.getElementById('media-preview-modal');
-        if (!previewModal) {
-            return;
-        }
+    var previewModal = document.getElementById('media-preview-modal');
+    if (!previewModal) {
+        return;
+    }
 
-        var modal = bootstrap.Modal.getOrCreateInstance(previewModal);
+    if (previewModal.parentElement !== document.body) {
+        document.body.appendChild(previewModal);
+    }
+
+    var modal = bootstrap.Modal.getOrCreateInstance(previewModal);
         var img = document.getElementById('media-preview-image');
         var stage = document.getElementById('media-preview-stage');
         var videoWrap = document.getElementById('media-preview-video-wrap');
@@ -889,9 +893,6 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             video.src = previewUrl;
             video.load();
         });
-    }
-
-    document.addEventListener('DOMContentLoaded', initMediaPreview);
 })();
 
 function confirmSplitSelected(form) {
@@ -910,3 +911,5 @@ function confirmSplitSelected(form) {
     return confirm('Add ' + ids.length + ' file(s) to split queue?');
 }
 </script>
+<?php
+$extraScripts = ($extraScripts ?? '') . ob_get_clean();

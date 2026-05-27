@@ -34,7 +34,6 @@ function navActive(string $prefix, string $current): string {
 </script>
 
 <link href="/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-<script defer src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 
 <style>
 /* ── Design tokens: dark (default) ─────────────────────────── */
