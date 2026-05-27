@@ -13,8 +13,8 @@ use MediaManager\Support\View;
 /** @var list<array{label: string, total_seconds: float, file_count: int, href: string}> $timelineYears */
 /** @var list<array{label: string, ym: string, total_seconds: float, file_count: int}> $timelineMonths */
 /** @var string|null $timelineFrom */
-/** @var string|null $timelinePrev */
-/** @var string|null $timelineNext */
+/** @var string|null $timelinePrevUrl */
+/** @var string|null $timelineNextUrl */
 /** @var string $timelineTitle */
 
 $extTotal  = array_sum(array_column($extensions, 'count'));
@@ -71,41 +71,6 @@ $codecTotal = array_sum(array_column($codecs, 'count'));
   </div>
 </div>
 
-<div class="card mb-4">
-  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-    <div>
-      <span><?php echo View::e($timelineTitle); ?></span>
-      <?php if ($timelineView === 'month'): ?>
-        <span class="path-text d-block" style="font-size:0.72rem">13-month window — use Prev/Next to slide</span>
-      <?php else: ?>
-        <span class="path-text d-block" style="font-size:0.72rem">Click a year to zoom into monthly detail</span>
-      <?php endif; ?>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-      <?php if ($timelineView === 'month'): ?>
-        <a class="btn btn-sm btn-outline-secondary" href="<?php echo View::e(timelineMonthUrl($timelinePrev)); ?>"
-           title="Shift window back one month">&larr; Prev</a>
-        <a class="btn btn-sm btn-outline-secondary" href="/dashboard/library">All years</a>
-        <a class="btn btn-sm btn-outline-secondary" href="<?php echo View::e(timelineMonthUrl($timelineNext)); ?>"
-           title="Shift window forward one month">Next &rarr;</a>
-      <?php endif; ?>
-    </div>
-  </div>
-  <div class="card-body">
-    <?php
-    $timelineBars = $timelineView === 'year' ? $timelineYears : $timelineMonths;
-    echo View::hoursBarChartHtml($timelineBars);
-    ?>
-    <?php if ($excluded['undated_files'] > 0): ?>
-      <p class="path-text mb-0 mt-2" style="font-size:0.72rem;color:var(--text-soft)">
-        <?php echo number_format($excluded['undated_files']); ?> files
-        (<?php echo View::e(View::formatHours($excluded['undated_seconds'])); ?> hours)
-        excluded — missing or invalid <code>file_date</code>.
-      </p>
-    <?php endif; ?>
-  </div>
-</div>
-
 <div class="row g-3">
   <div class="col-lg-4">
     <div class="card h-100">
@@ -144,7 +109,42 @@ $codecTotal = array_sum(array_column($codecs, 'count'));
   </div>
 </div>
 
-<p class="path-text mt-3 mb-0" style="font-size:0.72rem;color:var(--text-soft)">
+<p class="path-text mt-3 mb-4" style="font-size:0.72rem;color:var(--text-soft)">
   Charts show top categories; remaining values are grouped as “Other”.
   Duration totals require scan-time FFprobe metadata.
 </p>
+
+<div class="card mb-0">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <div>
+      <span><?php echo View::e($timelineTitle); ?></span>
+      <?php if ($timelineView === 'month'): ?>
+        <span class="path-text d-block" style="font-size:0.72rem">13-month window — use Prev/Next to slide</span>
+      <?php else: ?>
+        <span class="path-text d-block" style="font-size:0.72rem">Click a year to zoom into monthly detail</span>
+      <?php endif; ?>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <?php if ($timelineView === 'month' && $timelinePrevUrl !== null && $timelineNextUrl !== null): ?>
+        <a class="btn btn-sm btn-outline-secondary" href="<?php echo View::e($timelinePrevUrl); ?>"
+           title="Shift window back one month">&larr; Prev</a>
+        <a class="btn btn-sm btn-outline-secondary" href="/dashboard/library">All years</a>
+        <a class="btn btn-sm btn-outline-secondary" href="<?php echo View::e($timelineNextUrl); ?>"
+           title="Shift window forward one month">Next &rarr;</a>
+      <?php endif; ?>
+    </div>
+  </div>
+  <div class="card-body py-3">
+    <?php
+    $timelineBars = $timelineView === 'year' ? $timelineYears : $timelineMonths;
+    echo View::hoursBarChartHtml($timelineBars);
+    ?>
+    <?php if ($excluded['undated_files'] > 0): ?>
+      <p class="path-text mb-0 mt-2" style="font-size:0.72rem;color:var(--text-soft)">
+        <?php echo number_format($excluded['undated_files']); ?> files
+        (<?php echo View::e(View::formatHours($excluded['undated_seconds'])); ?> hours)
+        excluded — missing or invalid <code>file_date</code>.
+      </p>
+    <?php endif; ?>
+  </div>
+</div>

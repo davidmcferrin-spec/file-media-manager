@@ -284,14 +284,14 @@ class View
         $maxHours = max($hours) ?: 1.0;
         $count    = count($bars);
 
-        $leftPad    = 52.0;
-        $rightPad   = 16.0;
-        $topPad     = 16.0;
-        $bottomPad  = 44.0;
-        $chartHeight = 220.0;
-        $barGap     = 6.0;
-        $minBarWidth = 14.0;
-        $plotWidth  = max(320.0, ($count * ($minBarWidth + $barGap)) - $barGap);
+        $leftPad     = 44.0;
+        $rightPad    = 12.0;
+        $topPad      = 10.0;
+        $bottomPad   = 36.0;
+        $chartHeight = 140.0;
+        $barGap      = 4.0;
+        $minBarWidth = 10.0;
+        $plotWidth   = min(560.0, max(240.0, ($count * ($minBarWidth + $barGap)) - $barGap));
         $width      = $leftPad + $plotWidth + $rightPad;
         $height     = $topPad + $chartHeight + $bottomPad;
         $barWidth   = ($plotWidth - (($count - 1) * $barGap)) / $count;
@@ -348,9 +348,17 @@ class View
             );
 
             if ($href !== null) {
+                $hitArea = sprintf(
+                    '<rect x="%.2F" y="%.2F" width="%.2F" height="%.2F" fill="transparent" pointer-events="all"/>',
+                    $x,
+                    $topPad,
+                    $barWidth,
+                    $chartHeight
+                );
                 $rect = sprintf(
-                    '<a href="%s" class="hours-bar-link">%s</a>',
+                    '<a href="%s" class="hours-bar-link" pointer-events="bounding-box">%s%s</a>',
                     self::e($href),
+                    $hitArea,
                     $rect
                 );
             }
@@ -379,17 +387,20 @@ class View
         }
 
         $style = '<style>'
-            . '.hours-bar-chart{width:100%;max-width:100%;height:auto;display:block}'
+            . '.hours-bar-chart-wrap{max-width:640px}'
+            . '.hours-bar-chart{width:100%;height:auto;display:block}'
             . '.hours-bar-link{cursor:pointer}'
-            . '.hours-bar-clickable{transition:fill 0.15s ease}'
+            . '.hours-bar-clickable{transition:fill 0.15s ease;pointer-events:none}'
             . '.hours-bar-link:hover .hours-bar-clickable{fill:' . $hoverColor . '}'
             . '</style>';
 
         return $style
+            . '<div class="hours-bar-chart-wrap">'
             . '<svg class="hours-bar-chart" viewBox="0 0 ' . round($width, 1) . ' ' . round($height, 1) . '" '
             . 'role="img" aria-label="Hours of content bar chart">'
             . $svg
-            . '</svg>';
+            . '</svg>'
+            . '</div>';
     }
 
     public static function formatHours(float $seconds): string

@@ -66,12 +66,12 @@ $duration    = $stats->durationSummary();
 $excluded    = $stats->timelineExcludedSummary();
 
 $timelineView = ($_GET['view'] ?? 'year') === 'month' ? 'month' : 'year';
-$timelineYears  = [];
-$timelineMonths = [];
-$timelineFrom   = null;
-$timelinePrev   = null;
-$timelineNext   = null;
-$timelineTitle  = 'Content hours by year';
+$timelineYears     = [];
+$timelineMonths    = [];
+$timelineFrom      = null;
+$timelinePrevUrl   = null;
+$timelineNextUrl   = null;
+$timelineTitle     = 'Content hours by year';
 
 if ($timelineView === 'year') {
     $timelineYears = $stats->hoursByYear();
@@ -86,10 +86,10 @@ if ($timelineView === 'year') {
         }
     }
 
-    $timelineMonths = $stats->hoursByMonthWindow($timelineFrom, 13);
-    $timelineTitle  = formatTimelineWindowTitle($timelineFrom, 13);
-    $timelinePrev   = shiftTimelineFrom($timelineFrom, -1);
-    $timelineNext   = shiftTimelineFrom($timelineFrom, 1);
+    $timelineMonths  = $stats->hoursByMonthWindow($timelineFrom, 13);
+    $timelineTitle   = formatTimelineWindowTitle($timelineFrom, 13);
+    $timelinePrevUrl = timelineMonthUrl(shiftTimelineFrom($timelineFrom, -1));
+    $timelineNextUrl = timelineMonthUrl(shiftTimelineFrom($timelineFrom, 1));
 }
 
 $dashboardTab = 'library';
