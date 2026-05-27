@@ -697,21 +697,27 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 })();
 
 (function () {
-    if (typeof bootstrap === 'undefined') {
-        console.error('Bootstrap is not loaded — preview modal unavailable.');
-        return;
-    }
+    function initPreviewModal(retryCount) {
+        var bs = window.bootstrap;
+        if (!bs) {
+            if (retryCount < 80) {
+                setTimeout(function () { initPreviewModal(retryCount + 1); }, 50);
+                return;
+            }
+            console.error('Bootstrap did not load — preview modal unavailable. Check /vendor/bootstrap/js/bootstrap.bundle.min.js (run ./setup.sh).');
+            return;
+        }
 
-    var previewModal = document.getElementById('media-preview-modal');
-    if (!previewModal) {
-        return;
-    }
+        var previewModal = document.getElementById('media-preview-modal');
+        if (!previewModal) {
+            return;
+        }
 
-    if (previewModal.parentElement !== document.body) {
-        document.body.appendChild(previewModal);
-    }
+        if (previewModal.parentElement !== document.body) {
+            document.body.appendChild(previewModal);
+        }
 
-    var modal = bootstrap.Modal.getOrCreateInstance(previewModal);
+        var modal = bs.Modal.getOrCreateInstance(previewModal);
         var img = document.getElementById('media-preview-image');
         var stage = document.getElementById('media-preview-stage');
         var videoWrap = document.getElementById('media-preview-video-wrap');
@@ -811,7 +817,7 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             if (metaSummary) metaSummary.innerHTML = '';
             if (ffprobeRaw) ffprobeRaw.textContent = '';
             if (ffprobeRawWrap) {
-                var collapse = bootstrap.Collapse.getInstance(ffprobeRawWrap);
+                var collapse = bs.Collapse.getInstance(ffprobeRawWrap);
                 if (collapse) collapse.hide();
             }
         }
@@ -893,6 +899,9 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             video.src = previewUrl;
             video.load();
         });
+    }
+
+    initPreviewModal(0);
 })();
 
 function confirmSplitSelected(form) {
