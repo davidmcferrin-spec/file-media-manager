@@ -136,4 +136,62 @@ class View
         [$cls, $label] = $map[$status] ?? ['secondary', $status];
         return '<span class="badge bg-' . $cls . '">' . self::e($label) . '</span>';
     }
+
+    /**
+     * Page numbers for pagination UI: [1, '…', 4, 5, 6, '…', 100]
+     *
+     * @return list<int|string>
+     */
+    public static function paginationRange(int $page, int $totalPages, int $window = 2): array
+    {
+        if ($totalPages <= 1) {
+            return [1];
+        }
+
+        $page = max(1, min($page, $totalPages));
+        $pages = [1];
+
+        $left  = max(2, $page - $window);
+        $right = min($totalPages - 1, $page + $window);
+
+        if ($left > 2) {
+            $pages[] = '…';
+        }
+
+        for ($p = $left; $p <= $right; $p++) {
+            $pages[] = $p;
+        }
+
+        if ($right < $totalPages - 1) {
+            $pages[] = '…';
+        }
+
+        if ($totalPages > 1) {
+            $pages[] = $totalPages;
+        }
+
+        return $pages;
+    }
+
+    /**
+     * @param array<string, mixed> $query
+     */
+    public static function paginationUrl(string $basePath, array $query, int $page): string
+    {
+        $params = $query;
+        if ($page > 1) {
+            $params['page'] = (string) $page;
+        } else {
+            unset($params['page']);
+        }
+
+        $filtered = array_filter(
+            $params,
+            static fn (mixed $value): bool => $value !== null && $value !== '' && $value !== false
+        );
+
+        $qs = http_build_query($filtered);
+
+        return $basePath . ($qs !== '' ? '?' . $qs : '');
+    }
 }

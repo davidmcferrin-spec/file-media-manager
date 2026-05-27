@@ -15,6 +15,7 @@ use MediaManager\Support\View;
 /** @var int $total */
 /** @var int $page */
 /** @var int $totalPages */
+/** @var int $perPage */
 
 $returnQuery = http_build_query(array_filter([
     'status'      => $filters['status'] ?? '',
@@ -23,9 +24,20 @@ $returnQuery = http_build_query(array_filter([
     'show_id'     => $filters['show_id'] ?? '',
     'needs_split' => !empty($filters['needs_split']) ? '1' : '',
     'q'           => $filters['search'] ?? '',
+    'per_page'    => $perPage !== 50 ? (string) $perPage : '',
     'page'        => $page > 1 ? (string) $page : '',
 ]));
 $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
+$paginationQuery = [
+    'status'      => $filters['status'] ?? '',
+    'confidence'  => $filters['confidence'] ?? '',
+    'scan_job_id' => $filters['scan_job_id'] ?? '',
+    'show_id'     => $filters['show_id'] ?? '',
+    'needs_split' => !empty($filters['needs_split']) ? '1' : '',
+    'q'           => $filters['search'] ?? '',
+    'per_page'    => $perPage !== 50 ? (string) $perPage : '',
+];
+$paginationBasePath = '/queue';
 $previewWidth       = (int) env('PREVIEW_WIDTH', 420);
 $previewHeight      = (int) env('PREVIEW_HEIGHT', 236);
 $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) / 60);
@@ -98,10 +110,20 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
           <?php endforeach; ?>
         </select>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-2">
         <label class="form-label">Search</label>
         <input type="text" name="q" class="form-control form-control-sm"
                value="<?php echo View::e($filters['search'] ?? ''); ?>" placeholder="Filename or path">
+      </div>
+      <div class="col-md-1">
+        <label class="form-label">Per page</label>
+        <select name="per_page" class="form-select form-select-sm">
+          <?php foreach ([50, 100, 200] as $pp): ?>
+          <option value="<?php echo $pp; ?>" <?php echo $perPage === $pp ? 'selected' : ''; ?>>
+            <?php echo $pp; ?>
+          </option>
+          <?php endforeach; ?>
+        </select>
       </div>
       <div class="col-md-1">
         <div class="form-check mb-2">
@@ -325,27 +347,7 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
 <?php endif; ?>
 
 <!-- Pagination -->
-<?php if ($totalPages > 1): ?>
-<nav class="mt-3">
-  <ul class="pagination pagination-sm mb-0">
-    <?php for ($p = 1; $p <= min($totalPages, 20); $p++): ?>
-    <li class="page-item <?php echo $p === $page ? 'active' : ''; ?>">
-      <a class="page-link" href="/queue?<?php echo http_build_query(array_merge(
-          array_filter([
-              'status'      => $filters['status'] ?? '',
-              'confidence'  => $filters['confidence'] ?? '',
-              'scan_job_id' => $filters['scan_job_id'] ?? '',
-              'show_id'     => $filters['show_id'] ?? '',
-              'needs_split' => !empty($filters['needs_split']) ? '1' : '',
-              'q'           => $filters['search'] ?? '',
-          ]),
-          ['page' => $p]
-      )); ?>"><?php echo $p; ?></a>
-    </li>
-    <?php endfor; ?>
-  </ul>
-</nav>
-<?php endif; ?>
+<?php require dirname(__DIR__) . '/partials/pagination.php'; ?>
 
 <!-- Edit modals -->
 <?php foreach ($queueItems as $item): ?>

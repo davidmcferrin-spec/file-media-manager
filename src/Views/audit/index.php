@@ -134,22 +134,13 @@ use MediaManager\Support\View;
   </div>
 </div>
 
-<?php if ($totalPages > 1): ?>
-<nav class="mt-3">
-  <ul class="pagination pagination-sm mb-0">
-    <?php for ($p = 1; $p <= min($totalPages, 20); $p++): ?>
-    <li class="page-item <?php echo $p === $page ? 'active' : ''; ?>">
-      <a class="page-link" href="/audit?<?php echo http_build_query(array_merge(
-          array_filter([
-              'action'      => $filters['action'] ?? '',
-              'entity_type' => $filters['entity_type'] ?? '',
-              'user_email'  => $filters['user_email'] ?? '',
-              'q'           => $filters['search'] ?? '',
-          ]),
-          ['page' => $p]
-      )); ?>"><?php echo $p; ?></a>
-    </li>
-    <?php endfor; ?>
-  </ul>
-</nav>
-<?php endif; ?>
+<?php
+$paginationBasePath = '/audit';
+$paginationQuery = [
+    'action'      => $filters['action'] ?? '',
+    'entity_type' => $filters['entity_type'] ?? '',
+    'user_email'  => $filters['user_email'] ?? '',
+    'q'           => $filters['search'] ?? '',
+];
+require dirname(__DIR__) . '/partials/pagination.php';
+?>

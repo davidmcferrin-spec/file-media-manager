@@ -42,7 +42,10 @@ if ($filters['search'] === '') {
 }
 
 $page    = max(1, (int) ($_GET['page'] ?? 1));
-$perPage = 50;
+$perPage = (int) ($_GET['per_page'] ?? 50);
+if (!in_array($perPage, [50, 100, 200], true)) {
+    $perPage = 50;
+}
 $offset  = ($page - 1) * $perPage;
 
 $total      = $files->countQueue($filters);

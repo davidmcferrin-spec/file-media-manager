@@ -87,20 +87,13 @@ use MediaManager\Support\View;
       </div>
     </div>
 
-    <?php if ($totalPages > 1): ?>
-    <nav class="mt-3">
-      <ul class="pagination pagination-sm mb-0">
-        <?php for ($p = 1; $p <= min($totalPages, 10); $p++): ?>
-        <li class="page-item <?php echo $p === $page ? 'active' : ''; ?>">
-          <a class="page-link" href="/split?<?php echo http_build_query(array_filter([
-              'status' => $statusFilter,
-              'page'   => $p > 1 ? (string) $p : '',
-          ])); ?>"><?php echo $p; ?></a>
-        </li>
-        <?php endfor; ?>
-      </ul>
-    </nav>
-    <?php endif; ?>
+    <?php
+    $paginationBasePath = '/split';
+    $paginationQuery = [
+        'status' => $statusFilter,
+    ];
+    require dirname(__DIR__) . '/partials/pagination.php';
+    ?>
   </div>
 
   <div class="col-lg-4">
