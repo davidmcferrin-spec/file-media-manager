@@ -33,17 +33,22 @@ final class LegacyRenameMapImporter
             throw new \RuntimeException('Spreadsheet is empty.');
         }
 
-        $header = array_shift($rows);
+        $headerLine = 1;
+        $header = $this->findHeaderRow($rows, $headerLine);
         if ($header === null) {
             throw new \RuntimeException('Missing header row.');
         }
 
         $columns = $this->mapColumns($header);
         $required = ['source', 'original path', 'original filename', 'show abbr', 'media type'];
-        foreach ($required as $col) {
-            if (!isset($columns[$col])) {
-                throw new \RuntimeException('Missing column: ' . $col);
-            }
+        $missing = array_values(array_filter($required, static fn (string $col): bool => !isset($columns[$col])));
+        if ($missing !== []) {
+            $found = array_keys($columns);
+            sort($found);
+            throw new \RuntimeException(
+                'Missing column(s): ' . implode(', ', $missing)
+                . '. Found: ' . ($found !== [] ? implode(', ', $found) : '(none)')
+            );
         }
 
         if ($replaceExisting) {
@@ -52,7 +57,7 @@ final class LegacyRenameMapImporter
 
         $imported = 0;
         foreach ($rows as $lineNum => $row) {
-            $line = $lineNum + 2;
+            $line = $headerLine + $lineNum + 1;
             $get = static function (string $key) use ($columns, $row): string {
                 if (!isset($columns[$key])) {
                     return '';
@@ -153,13 +158,19 @@ final class LegacyRenameMapImporter
             return SimpleXlsxReader::readRows($path);
         }
 
+        $raw = file_get_contents($path);
+        if ($raw === false) {
+            throw new \RuntimeException('Cannot open file.');
+        }
+
+        $delimiter = $this->detectCsvDelimiter($raw);
         $handle = fopen($path, 'r');
         if ($handle === false) {
             throw new \RuntimeException('Cannot open file.');
         }
 
         $rows = [];
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
             if ($row === [null]) {
                 continue;
             }
@@ -170,19 +181,110 @@ final class LegacyRenameMapImporter
         return $rows;
     }
 
+    /** @param list<list<string>> $rows @return list<string>|null */
+    private function findHeaderRow(array &$rows, int &$headerLine): ?array
+    {
+        while ($rows !== []) {
+            $candidate = array_shift($rows);
+            if ($candidate === null) {
+                $headerLine++;
+                continue;
+            }
+
+            $columns = $this->mapColumns($candidate);
+            if (isset($columns['source'], $columns['original path'], $columns['original filename'])) {
+                return $candidate;
+            }
+
+            $first = strtolower(trim(str_replace(['–', '—'], '-', (string) ($candidate[0] ?? ''))));
+            if (str_contains($first, 'summary') && !isset($columns['original path'])) {
+                throw new \RuntimeException(
+                    'This looks like the Summary sheet. Import the "Rename Map" sheet (columns: Source, Original Path, Original Filename, …).'
+                );
+            }
+
+            $headerLine++;
+        }
+
+        return null;
+    }
+
+    private function detectCsvDelimiter(string $raw): string
+    {
+        $line = strtok($raw, "\r\n");
+        if ($line === false || $line === '') {
+            return ',';
+        }
+
+        $line = ltrim($line, "\xEF\xBB\xBF");
+        $candidates = [',', ';', "\t"];
+        $best = ',';
+        $bestCount = 0;
+        foreach ($candidates as $delimiter) {
+            $count = substr_count($line, $delimiter);
+            if ($count > $bestCount) {
+                $bestCount = $count;
+                $best = $delimiter;
+            }
+        }
+
+        return $best;
+    }
+
     /** @param list<string> $header @return array<string, int> */
     private function mapColumns(array $header): array
     {
         $columns = [];
         foreach ($header as $i => $label) {
-            $key = strtolower(trim(str_replace(['–', '—'], '-', (string) $label)));
+            $key = $this->normalizeHeaderLabel((string) $label);
+            if ($key === '') {
+                continue;
+            }
             $columns[$key] = $i;
             if (str_starts_with($key, 'confidence')) {
+                $columns['confidence (1-10)'] = $i;
                 $columns['confidence (1–10)'] = $i;
                 $columns['confidence'] = $i;
             }
         }
 
+        $this->applyColumnAliases($columns);
+
         return $columns;
+    }
+
+    private function normalizeHeaderLabel(string $label): string
+    {
+        $label = ltrim($label, "\xEF\xBB\xBF");
+        $label = strtolower(trim(str_replace(['–', '—'], '-', $label)));
+
+        return $label;
+    }
+
+    /** @param array<string, int> $columns */
+    private function applyColumnAliases(array &$columns): void
+    {
+        $aliases = [
+            'source'            => ['src', 'source code', 'source_code', 'nas', 'site', 'origin'],
+            'original path'     => ['original dir', 'original directory', 'legacy path', 'path'],
+            'original filename' => ['original file', 'original name', 'legacy filename', 'filename', 'file name'],
+            'suggested path'    => ['suggested dir', 'target path', 'target dir', 'proposed path'],
+            'suggested filename'=> ['suggested file', 'target filename', 'target file', 'proposed filename'],
+            'show abbr'         => ['show', 'show abbreviation', 'show_abbrev', 'show_abbr'],
+            'media type'        => ['media', 'type', 'media_type'],
+            'notes'             => ['note', 'comment', 'comments'],
+        ];
+
+        foreach ($aliases as $canonical => $names) {
+            if (isset($columns[$canonical])) {
+                continue;
+            }
+            foreach ($names as $alias) {
+                if (isset($columns[$alias])) {
+                    $columns[$canonical] = $columns[$alias];
+                    break;
+                }
+            }
+        }
     }
 }

@@ -57,22 +57,22 @@ final class SimpleXlsxReader
     /** @param list<string> $shared @return list<list<string>> */
     private static function parseSheet(string $xml, array $shared): array
     {
-        $rows = [];
-        if (!preg_match_all('/<row[^>]*>(.*?)<\/row>/s', $xml, $rowMatches)) {
+        if (!preg_match('/<sheetData>(.*)<\/sheetData>/s', $xml, $sheetMatch)) {
             return [];
         }
 
-        foreach ($rowMatches[1] as $rowXml) {
+        $rows = [];
+        $rowChunks = preg_split('/<\/row>/', $sheetMatch[1]) ?: [];
+        foreach ($rowChunks as $chunk) {
+            if (!preg_match('/<row[^>]*>(.*)$/s', $chunk, $rowMatch)) {
+                continue;
+            }
+
             $cells = [];
-            if (preg_match_all('/<c r="([A-Z]+)(\d+)"([^>]*)>(?:<v>(.*?)<\/v>)?(?:<is>.*?<t[^>]*>(.*?)<\/t>.*?<\/is>)?<\/c>/s', $rowXml, $cellMatches, PREG_SET_ORDER)) {
+            if (preg_match_all('/<c r="([A-Z]+)(\d+)"([^>]*)>(.*?)<\/c>/s', $rowMatch[1], $cellMatches, PREG_SET_ORDER)) {
                 foreach ($cellMatches as $cell) {
                     $col = self::columnIndex($cell[1]);
-                    $attrs = $cell[3];
-                    $value = $cell[4] !== '' ? $cell[4] : ($cell[5] ?? '');
-                    if (str_contains($attrs, ' t="s"') && is_numeric($value)) {
-                        $value = $shared[(int) $value] ?? '';
-                    }
-                    $cells[$col] = html_entity_decode((string) $value, ENT_QUOTES | ENT_XML1, 'UTF-8');
+                    $cells[$col] = self::cellValue($cell[3], $cell[4], $shared);
                 }
             }
             if ($cells === []) {
@@ -90,6 +90,25 @@ final class SimpleXlsxReader
         }
 
         return $rows;
+    }
+
+    /** @param list<string> $shared */
+    private static function cellValue(string $attrs, string $body, array $shared): string
+    {
+        if (preg_match('/<v>(.*?)<\/v>/s', $body, $valueMatch)) {
+            $value = $valueMatch[1];
+            if (str_contains($attrs, ' t="s"') && is_numeric($value)) {
+                return $shared[(int) $value] ?? '';
+            }
+
+            return html_entity_decode((string) $value, ENT_QUOTES | ENT_XML1, 'UTF-8');
+        }
+
+        if (preg_match_all('/<t(?:[^>]*)>([^<]*)<\/t>/', $body, $textMatches)) {
+            return html_entity_decode(implode('', $textMatches[1]), ENT_QUOTES | ENT_XML1, 'UTF-8');
+        }
+
+        return '';
     }
 
     private static function columnIndex(string $letters): int
