@@ -13,6 +13,7 @@ use MediaManager\Support\View;
 /** @var int $protectedCount */
 /** @var bool $canStop */
 /** @var bool $canDelete */
+/** @var bool $canResume */
 $status = (string) ($job['status'] ?? '');
 ?>
 
@@ -36,6 +37,13 @@ $status = (string) ($job['status'] ?? '');
       <button type="submit" class="btn btn-outline-danger btn-sm">Stop Scan</button>
     </form>
     <?php endif; ?>
+    <?php if ($canResume): ?>
+    <form method="post" action="/scan/resume" class="d-inline">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <button type="submit" class="btn btn-primary btn-sm">Resume Scan</button>
+    </form>
+    <?php endif; ?>
     <?php if ($canDelete): ?>
     <form method="post" action="/scan/delete" class="d-inline"
           onsubmit="return confirm('Delete scan job #<?php echo (int) $job['id']; ?> and remove <?php echo number_format($totalQueued); ?> queued file(s) from the review queue?');">
@@ -49,7 +57,7 @@ $status = (string) ($job['status'] ?? '');
     </span>
     <?php endif; ?>
     <a href="/scan" class="btn btn-outline-secondary btn-sm">All Scans</a>
-    <?php if (Auth::isAdmin() && in_array($status, ['COMPLETED', 'CANCELLED', 'FAILED'], true) && $totalQueued > 0): ?>
+    <?php if (Auth::isAdmin() && in_array($status, ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true) && $totalQueued > 0): ?>
     <form method="post" action="/scan/apply-map" class="d-inline"
           onsubmit="return confirm('Apply legacy rename map to this scan job? Matches map rows and reconciles confidence.');">
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
@@ -132,6 +140,12 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
   </div>
 </div>
 <meta http-equiv="refresh" content="5">
+<?php elseif ($status === 'PAUSED'): ?>
+<div class="alert alert-info mb-4" style="font-size:0.84rem;">
+  Scan paused<?php echo $done > 0 ? ' after processing ' . number_format($done) . ' of ' . number_format($total) . ' file(s)' : ''; ?>.
+  Run <code>php scripts/scan.php</code> (no flags) or click <strong>Resume Scan</strong> to continue.
+  Already-queued files are kept; duplicates are skipped on resume.
+</div>
 <?php elseif ($status === 'CANCELLED'): ?>
 <div class="alert alert-warning mb-4" style="font-size:0.84rem;">
   Scan was stopped<?php echo $done > 0 ? ' after processing ' . number_format($done) . ' file(s)' : ''; ?>.

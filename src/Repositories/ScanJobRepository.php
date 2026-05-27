@@ -59,15 +59,32 @@ final class ScanJobRepository extends BaseRepository
     }
 
     /**
-     * Atomically claim the oldest pending/failed job for a worker without a specific ID.
+     * Atomically claim the oldest runnable job for a worker without a specific ID.
+     * Includes pending, paused, failed, and orphaned running jobs (dead worker).
      */
     public function claimNextPending(): ?int
+    {
+        $id = $this->claimFreshJob();
+        if ($id !== null) {
+            return $id;
+        }
+
+        return $this->claimOrphanedRunning();
+    }
+
+    private function claimFreshJob(): ?int
     {
         $stmt = $this->db()->query(
             'WITH next AS (
                 SELECT id FROM scan_jobs
-                WHERE status IN (\'PENDING\', \'FAILED\')
-                ORDER BY created_at ASC
+                WHERE status IN (\'PENDING\', \'PAUSED\', \'FAILED\')
+                ORDER BY
+                    CASE status
+                        WHEN \'PENDING\' THEN 0
+                        WHEN \'PAUSED\' THEN 1
+                        ELSE 2
+                    END,
+                    created_at ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
              )
@@ -76,7 +93,8 @@ final class ScanJobRepository extends BaseRepository
                  started_at = now(),
                  processed_files = 0,
                  total_files = 0,
-                 error_message = NULL
+                 error_message = NULL,
+                 cancel_requested = false
              FROM next
              WHERE sj.id = next.id
              RETURNING sj.id'
@@ -84,6 +102,67 @@ final class ScanJobRepository extends BaseRepository
         $id = $stmt->fetchColumn();
 
         return $id !== false ? (int) $id : null;
+    }
+
+    private function claimOrphanedRunning(): ?int
+    {
+        $stmt = $this->db()->query(
+            'SELECT id, worker_pid FROM scan_jobs
+             WHERE status = \'RUNNING\'
+             ORDER BY created_at ASC
+             LIMIT 20'
+        );
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return null;
+        }
+
+        foreach ($rows as $row) {
+            $id  = (int) $row['id'];
+            $pid = (int) ($row['worker_pid'] ?? 0);
+            if ($this->isProcessAlive($pid)) {
+                continue;
+            }
+
+            $claim = $this->db()->prepare(
+                'UPDATE scan_jobs
+                 SET started_at = now(),
+                     processed_files = 0,
+                     total_files = 0,
+                     error_message = NULL,
+                     cancel_requested = false
+                 WHERE id = ?
+                   AND status = \'RUNNING\'
+                 RETURNING id'
+            );
+            $claim->execute([$id]);
+            if ($claim->fetchColumn() !== false) {
+                return $id;
+            }
+        }
+
+        return null;
+    }
+
+    private function isProcessAlive(int $pid): bool
+    {
+        if ($pid <= 0) {
+            return false;
+        }
+
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            exec('tasklist /FI "PID eq ' . $pid . '" 2>NUL', $output, $code);
+
+            return $code === 0 && count($output) > 1;
+        }
+
+        exec('kill -0 ' . $pid . ' 2>/dev/null', $output, $exitCode);
+
+        return $exitCode === 0;
     }
 
     /**
@@ -99,7 +178,7 @@ final class ScanJobRepository extends BaseRepository
                  total_files = 0,
                  error_message = NULL
              WHERE id = ?
-               AND status IN (\'PENDING\', \'FAILED\')
+               AND status IN (\'PENDING\', \'PAUSED\', \'FAILED\')
              RETURNING id'
         );
         $stmt->execute([$id]);
@@ -195,6 +274,48 @@ final class ScanJobRepository extends BaseRepository
                  worker_pid = NULL
              WHERE id = ?'
         )->execute([$id]);
+    }
+
+    public function markPaused(int $id): void
+    {
+        $this->db()->prepare(
+            'UPDATE scan_jobs
+             SET status = \'PAUSED\',
+                 cancel_requested = false,
+                 completed_at = NULL,
+                 error_message = NULL,
+                 worker_pid = NULL
+             WHERE id = ?'
+        )->execute([$id]);
+    }
+
+    /**
+     * Stop a running scan — paused when partially complete, cancelled otherwise.
+     *
+     * @return 'PAUSED'|'CANCELLED'
+     */
+    public function markStopped(int $id): string
+    {
+        $job = $this->findById($id);
+        if ($job === null) {
+            $this->markCancelled($id);
+
+            return 'CANCELLED';
+        }
+
+        $processed = (int) ($job['processed_files'] ?? 0);
+        $total     = (int) ($job['total_files'] ?? 0);
+        $resumable = $processed > 0 && ($total === 0 || $processed < $total);
+
+        if ($resumable) {
+            $this->markPaused($id);
+
+            return 'PAUSED';
+        }
+
+        $this->markCancelled($id);
+
+        return 'CANCELLED';
     }
 
     public function setWorkerPid(int $id, int $pid): void

@@ -115,6 +115,7 @@ use MediaManager\Support\View;
                 $badge  = match ($status) {
                     'COMPLETED' => 'success',
                     'RUNNING'   => 'primary',
+                    'PAUSED'    => 'info',
                     'FAILED'    => 'danger',
                     'CANCELLED' => 'warning',
                     default     => 'secondary',
@@ -134,6 +135,13 @@ use MediaManager\Support\View;
               </td>
               <td class="path-text"><?php echo View::e(substr((string) ($job['started_at'] ?? $job['created_at']), 0, 16)); ?></td>
               <td class="text-end text-nowrap">
+                <?php if ($status === 'PAUSED'): ?>
+                <form method="post" action="/scan/resume" class="d-inline">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+                  <button type="submit" class="btn btn-outline-primary btn-xs">Resume</button>
+                </form>
+                <?php endif; ?>
                 <?php if ($canStopRow): ?>
                 <form method="post" action="/scan/cancel" class="d-inline"
                       onsubmit="return confirm('Stop scan #<?php echo (int) $job['id']; ?>?');">

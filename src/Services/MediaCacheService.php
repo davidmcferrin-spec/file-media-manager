@@ -27,7 +27,7 @@ final class MediaCacheService
 
     public function previewPath(int $fileId): string
     {
-        return $this->previewDir . '/' . $fileId . '.webm';
+        return $this->previewDir . '/' . $fileId . '_av.webm';
     }
 
     public function invalidate(int $fileId): void
@@ -40,6 +40,11 @@ final class MediaCacheService
         $preview = $this->previewPath($fileId);
         if (is_file($preview)) {
             @unlink($preview);
+        }
+
+        $legacyPreview = $this->previewDir . '/' . $fileId . '.webm';
+        if (is_file($legacyPreview)) {
+            @unlink($legacyPreview);
         }
 
         $this->files->clearThumbnailPath($fileId);

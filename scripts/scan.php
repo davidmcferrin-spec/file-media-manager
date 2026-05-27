@@ -115,6 +115,10 @@ $progress = static function (string $event, array $data) use ($verbose, $flushOu
         case 'cancelled':
             echo "\nScan cancelled.\n";
             break;
+
+        case 'paused':
+            echo "\nScan paused — run scan.php again (no flags) to resume.\n";
+            break;
     }
 
     $flushOutput();
@@ -133,7 +137,7 @@ try {
 
     $ranJobId = $service->runNextPending();
     if ($ranJobId === null) {
-        echo "No pending scan jobs.\n";
+        echo "No pending, paused, or failed scan jobs.\n";
         exit(0);
     }
 

@@ -490,7 +490,8 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
           <img id="media-preview-image" src="" alt="" class="img-fluid rounded"
                style="max-height:55vh;cursor:pointer" title="Click to play video preview">
           <p class="path-text mt-2 mb-0" style="font-size:0.75rem">
-            Click image to load <?php echo $previewDurationMin; ?>-minute preview
+            Click image to load <?php echo $previewDurationMin; ?>-minute preview (with audio).
+            <span style="color:var(--text-soft)">First run may take 45–60 seconds to generate.</span>
           </p>
         </div>
         <div id="media-preview-video-wrap" class="d-none">
@@ -498,12 +499,15 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
                  style="width:100%;max-width:<?php echo $previewWidth; ?>px;max-height:<?php echo (int) round($previewHeight * 1.2); ?>px;background:#000;border-radius:6px">
           </video>
           <p class="path-text mt-2 mb-0" style="font-size:0.75rem">
-            <?php echo $previewDurationMin; ?>-minute proxy · <?php echo $previewWidth; ?>×<?php echo $previewHeight; ?>
+            <?php echo $previewDurationMin; ?>-minute proxy · <?php echo $previewWidth; ?>×<?php echo $previewHeight; ?> · with audio
           </p>
         </div>
         <div id="media-preview-loading" class="d-none py-5">
           <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
           <span class="ms-2 path-text">Generating preview…</span>
+          <p class="path-text mt-2 mb-0" style="font-size:0.72rem;color:var(--text-soft)">
+            First-time generation often takes 45–60 seconds. Cached previews load immediately.
+          </p>
         </div>
 
         <div id="media-meta-panel" class="text-start mt-3 pt-3" style="border-top:1px solid var(--border-color)">

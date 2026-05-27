@@ -92,8 +92,8 @@ final class PreviewService
         );
 
         $codecs = [
-            '-c:v libvpx-vp9 -b:v 800k -deadline realtime -cpu-used 4',
-            '-c:v libvpx -b:v 800k -deadline realtime -cpu-used 4',
+            '-map 0:v:0 -map 0:a:0? -c:v libvpx-vp9 -b:v 800k -deadline realtime -cpu-used 4 -c:a libopus -b:a 96k',
+            '-map 0:v:0 -map 0:a:0? -c:v libvpx -b:v 800k -deadline realtime -cpu-used 4 -c:a libopus -b:a 96k',
         ];
 
         $lastOutput = '';
@@ -103,7 +103,7 @@ final class PreviewService
             }
 
             $cmd = sprintf(
-                '%s -hide_banner -nostdin -loglevel error -ss %d -i %s -t %d -vf %s %s -an -f webm -y %s 2>&1',
+                '%s -hide_banner -nostdin -loglevel error -ss %d -i %s -t %d -vf %s %s -f webm -y %s 2>&1',
                 escapeshellcmd($this->ffmpegBin),
                 $offset,
                 escapeshellarg($source),

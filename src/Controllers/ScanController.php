@@ -183,14 +183,15 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
         exit;
     }
 
-    $killed = false;
-    $pid    = null;
+    $killed      = false;
+    $pid         = null;
+    $stopOutcome = null;
     if ($status === 'RUNNING') {
         $pid = $scanJobs->getWorkerPid($jobId);
         if ($pid !== null && $pid > 0) {
             $killed = kill_scan_worker($pid);
             if ($killed) {
-                $scanJobs->markCancelled($jobId);
+                $stopOutcome = $scanJobs->markStopped($jobId);
             }
         }
     }
@@ -205,15 +206,64 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
         $jobId,
         null,
         null,
-        ['previous_status' => $status, 'worker_pid' => $pid ?? null, 'killed' => $killed]
+        ['previous_status' => $status, 'worker_pid' => $pid ?? null, 'killed' => $killed, 'outcome' => $stopOutcome ?? null]
     );
 
-    $message = $status === 'PENDING'
-        ? 'Scan job #' . $jobId . ' cancelled.'
-        : ($killed
-            ? 'Scan job #' . $jobId . ' stopped.'
-            : 'Stop requested for scan job #' . $jobId . '. It will halt after the current file.');
+    $message = match ($status) {
+        'PENDING' => 'Scan job #' . $jobId . ' cancelled.',
+        'RUNNING' => match ($stopOutcome ?? null) {
+            'PAUSED'  => 'Scan job #' . $jobId . ' paused. Run scan.php or click Resume to continue.',
+            'CANCELLED' => 'Scan job #' . $jobId . ' stopped.',
+            default   => $killed
+                ? 'Scan job #' . $jobId . ' stopped.'
+                : 'Stop requested for scan job #' . $jobId . '. It will halt after the current file.',
+        },
+        default => 'Scan job #' . $jobId . ' updated.',
+    };
     Session::flash('success', $message);
+    header('Location: /scan/' . $jobId);
+    exit;
+}
+
+// ── POST: resume paused scan ────────────────────────────────────
+if ($method === 'POST' && $uri === '/scan/resume') {
+    $csrf = $_POST['_csrf'] ?? '';
+    if (!Session::validateCsrf($csrf)) {
+        Session::flash('error', 'Invalid request.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $jobId = (int) ($_POST['id'] ?? 0);
+    $job   = $jobId > 0 ? $scanJobs->findById($jobId) : null;
+    if ($job === null) {
+        Session::flash('error', 'Scan job not found.');
+        header('Location: /scan');
+        exit;
+    }
+
+    if ((string) ($job['status'] ?? '') !== 'PAUSED') {
+        Session::flash('error', 'Only paused scans can be resumed.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    spawn_scan_worker($jobId, $projectRoot);
+
+    $user = Auth::user();
+    $audit->record(
+        Auth::id(),
+        $user['email'] ?? '',
+        $_SERVER['REMOTE_ADDR'] ?? '',
+        'SCAN_RESUMED',
+        'scan_job',
+        $jobId,
+        null,
+        null,
+        []
+    );
+
+    Session::flash('success', 'Scan job #' . $jobId . ' resumed.');
     header('Location: /scan/' . $jobId);
     exit;
 }
@@ -301,6 +351,7 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $confidence    = $files->confidenceSummary($jobId);
     $protectedCount = $files->countProtectedByScanJob($jobId);
     $canStop       = in_array((string) $job['status'], ['PENDING', 'RUNNING'], true);
+    $canResume     = (string) $job['status'] === 'PAUSED';
     $canDelete     = (string) $job['status'] !== 'RUNNING' && $protectedCount === 0;
 
     $title = 'Scan Job #' . $jobId . ' — Media Manager';

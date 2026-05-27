@@ -23,7 +23,7 @@ final class ScanService
     }
 
     /**
-     * Claim and run the oldest pending/failed job. Returns job ID or null when idle.
+     * Claim and run the oldest pending/paused/failed job. Returns job ID or null when idle.
      */
     public function runNextPending(): ?int
     {
@@ -49,7 +49,7 @@ final class ScanService
             return;
         }
 
-        if ($status === 'PENDING' || $status === 'FAILED') {
+        if ($status === 'PENDING' || $status === 'PAUSED' || $status === 'FAILED') {
             if (!$this->scanJobs->tryClaim($jobId)) {
                 $job = $this->scanJobs->findById($jobId);
                 $status = (string) ($job['status'] ?? '');
@@ -199,15 +199,15 @@ final class ScanService
             return;
         }
 
-        $this->scanJobs->markCancelled($jobId);
-
         $job = $this->scanJobs->findById($jobId);
+        $outcome = $this->scanJobs->markStopped($jobId);
+
         if ($job !== null) {
             $this->audit->record(
                 (int) $job['created_by'],
                 (string) ($job['created_by_email'] ?? ''),
                 '127.0.0.1',
-                'SCAN_CANCELLED',
+                $outcome === 'PAUSED' ? 'SCAN_PAUSED' : 'SCAN_CANCELLED',
                 'scan_job',
                 $jobId,
                 null,
@@ -219,10 +219,15 @@ final class ScanService
             );
         }
 
-        $this->progress('cancelled', ['job_id' => $jobId]);
-        error_log('[scan] Job ' . $jobId . ' cancelled.');
+        if ($outcome === 'PAUSED') {
+            $this->progress('paused', ['job_id' => $jobId]);
+            error_log('[scan] Job ' . $jobId . ' paused.');
+        } else {
+            $this->progress('cancelled', ['job_id' => $jobId]);
+            error_log('[scan] Job ' . $jobId . ' cancelled.');
+        }
 
-        throw new ScanCancelledException("Scan job {$jobId} was cancelled.");
+        throw new ScanCancelledException("Scan job {$jobId} was stopped.");
     }
 
     /**
