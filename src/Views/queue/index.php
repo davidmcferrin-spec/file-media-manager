@@ -185,12 +185,16 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
                     data-file-id="<?php echo (int) $item['id']; ?>"
                     data-filename="<?php echo View::e($item['original_filename']); ?>"
                     data-meta="<?php echo View::e(json_encode(View::mediaMetaPayload($item), JSON_THROW_ON_ERROR)); ?>"
-                    title="Preview">
+                    title="Preview thumbnail, video proxy, and FFprobe details">
               <img src="/queue/thumbnail/<?php echo (int) $item['id']; ?>"
-                   alt="" width="80" height="45" class="rounded"
+                   alt="" width="80" height="45" class="rounded queue-thumb-img"
                    style="object-fit:cover;background:var(--form-bg);cursor:pointer"
                    loading="lazy"
-                   onerror="this.style.display='none'">
+                   onerror="this.classList.add('d-none');var f=this.parentElement.querySelector('.queue-thumb-fallback');if(f)f.classList.remove('d-none');">
+              <span class="queue-thumb-fallback d-none rounded d-inline-flex align-items-center justify-content-center"
+                    style="width:80px;height:45px;background:var(--form-bg);cursor:pointer;font-size:0.68rem;color:var(--text-soft);border:1px solid var(--border-color)">
+                Preview
+              </span>
             </button>
           </td>
           <td>
@@ -267,6 +271,11 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
             <div class="path-text" style="font-size:0.72rem" title="Scan-time FFprobe summary">
               <?php echo View::e(View::mediaTechSummary($item)); ?>
             </div>
+            <button type="button" class="btn btn-link btn-sm p-0 queue-open-preview"
+                    style="font-size:0.72rem;text-decoration:none"
+                    title="Open preview modal with FFprobe details">
+              Preview / FFprobe
+            </button>
           </td>
           <td class="text-end text-nowrap">
             <?php if (Auth::isEditor() && in_array($item['status'], ['PENDING', 'FLAGGED'], true)): ?>
@@ -500,12 +509,15 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
         <div id="media-meta-panel" class="text-start mt-3 pt-3" style="border-top:1px solid var(--border-color)">
           <div class="d-flex justify-content-between align-items-center mb-2">
             <span style="font-size:0.74rem;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-soft)">
-              Technical Metadata
+              FFprobe / Technical Metadata
             </span>
             <button type="button" class="btn btn-outline-secondary btn-xs" id="media-ffprobe-load-btn">
               Refresh FFprobe
             </button>
           </div>
+          <p class="path-text mb-2" style="font-size:0.72rem">
+            Scan-time summary below. Expand for full JSON or click Refresh to re-run ffprobe on the source file.
+          </p>
           <dl id="media-meta-summary" class="row mb-0" style="font-size:0.78rem"></dl>
           <div class="mt-2">
             <button class="btn btn-link btn-sm p-0 path-text" type="button"
@@ -618,7 +630,7 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
     document.querySelectorAll('#queue-table .queue-select-row').forEach(function (row) {
         row.addEventListener('click', function (e) {
             if (e.target.closest(
-                'a, button, input, form, select, textarea, label, [data-bs-toggle], .queue-thumb-btn'
+                'a, button, input, form, select, textarea, label, [data-bs-toggle], .queue-thumb-btn, .queue-open-preview'
             )) {
                 return;
             }
@@ -681,137 +693,131 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             if (s.file_time) form.querySelector('[name="file_time"]').value = s.file_time;
         });
     });
+})();
 
-    var previewModal = document.getElementById('media-preview-modal');
-    if (!previewModal) return;
-
-    var modal = bootstrap.Modal.getOrCreateInstance(previewModal);
-    var img = document.getElementById('media-preview-image');
-    var stage = document.getElementById('media-preview-stage');
-    var videoWrap = document.getElementById('media-preview-video-wrap');
-    var video = document.getElementById('media-preview-video');
-    var loading = document.getElementById('media-preview-loading');
-    var title = document.getElementById('media-preview-title');
-    var metaSummary = document.getElementById('media-meta-summary');
-    var ffprobeRaw = document.getElementById('media-ffprobe-raw');
-    var ffprobeLoading = document.getElementById('media-ffprobe-loading');
-    var ffprobeLoadBtn = document.getElementById('media-ffprobe-load-btn');
-    var ffprobeRawWrap = document.getElementById('media-ffprobe-raw-wrap');
-    var currentFileId = null;
-    var ffprobeLoadedFor = null;
-
-    function renderMetaSummary(meta) {
-        if (!metaSummary) return;
-        var rows = [
-            ['Duration', meta.duration_label || '—'],
-            ['Resolution', meta.resolution || '—'],
-            ['Video', meta.codec_video ? meta.codec_video.toUpperCase() : '—'],
-            ['Audio', meta.codec_audio ? meta.codec_audio.toUpperCase() : '—'],
-            ['Frame rate', meta.framerate ? meta.framerate + ' fps' : '—'],
-            ['Container', meta.container ? meta.container.toUpperCase() : '—'],
-            ['File size', meta.filesize_label || '—'],
-            ['At scan', meta.metadata_extracted ? 'Yes' : 'No']
-        ];
-        metaSummary.innerHTML = rows.map(function (row) {
-            return '<dt class="col-sm-4 path-text">' + row[0] + '</dt>'
-                + '<dd class="col-sm-8 mb-1">' + row[1] + '</dd>';
-        }).join('');
-    }
-
-    function loadFfprobeReport(fileId, force) {
-        if (!fileId || (!force && ffprobeLoadedFor === fileId)) return;
-        ffprobeLoadedFor = fileId;
-        if (ffprobeLoading) ffprobeLoading.classList.remove('d-none');
-        if (ffprobeRaw) ffprobeRaw.textContent = '';
-
-        fetch('/queue/ffprobe/' + fileId + '?_=' + Date.now())
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (ffprobeLoading) ffprobeLoading.classList.add('d-none');
-                var summary = data.live_summary || data.stored_summary || {};
-                if (summary.duration !== undefined && summary.duration !== null) {
-                    summary.duration_label = formatDuration(summary.duration);
-                }
-                if (summary.filesize_bytes !== undefined && summary.filesize_bytes !== null) {
-                    summary.filesize_label = formatBytes(summary.filesize_bytes);
-                }
-                if (data.live_summary) {
-                    summary.metadata_extracted = true;
-                    renderMetaSummary(summary);
-                }
-                if (ffprobeRaw) {
-                    if (data.error && !data.raw) {
-                        ffprobeRaw.textContent = data.error;
-                    } else if (data.raw) {
-                        ffprobeRaw.textContent = JSON.stringify(data.raw, null, 2);
-                    } else {
-                        ffprobeRaw.textContent = 'No FFprobe data available.';
-                    }
-                }
-            })
-            .catch(function () {
-                if (ffprobeLoading) ffprobeLoading.classList.add('d-none');
-                if (ffprobeRaw) ffprobeRaw.textContent = 'Could not load FFprobe report.';
-            });
-    }
-
-    function formatDuration(seconds) {
-        seconds = Math.floor(Number(seconds) || 0);
-        var h = Math.floor(seconds / 3600);
-        var m = Math.floor((seconds % 3600) / 60);
-        var s = seconds % 60;
-        return h > 0
-            ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
-            : m + ':' + String(s).padStart(2, '0');
-    }
-
-    function formatBytes(bytes) {
-        bytes = Number(bytes) || 0;
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-        return (bytes / 1073741824).toFixed(2) + ' GB';
-    }
-
-    function resetPreview() {
-        currentFileId = null;
-        ffprobeLoadedFor = null;
-        stage.classList.remove('d-none');
-        videoWrap.classList.add('d-none');
-        loading.classList.add('d-none');
-        video.pause();
-        video.removeAttribute('src');
-        video.load();
-        if (metaSummary) metaSummary.innerHTML = '';
-        if (ffprobeRaw) ffprobeRaw.textContent = '';
-        if (ffprobeRawWrap) {
-            var collapse = bootstrap.Collapse.getInstance(ffprobeRawWrap);
-            if (collapse) collapse.hide();
+(function () {
+    function initMediaPreview() {
+        if (typeof bootstrap === 'undefined') {
+            console.error('Bootstrap is not loaded — preview modal unavailable.');
+            return;
         }
-    }
 
-    previewModal.addEventListener('hidden.bs.modal', resetPreview);
+        var previewModal = document.getElementById('media-preview-modal');
+        if (!previewModal) {
+            return;
+        }
 
-    if (ffprobeLoadBtn) {
-        ffprobeLoadBtn.addEventListener('click', function () {
-            if (currentFileId) loadFfprobeReport(currentFileId, true);
-        });
-    }
+        var modal = bootstrap.Modal.getOrCreateInstance(previewModal);
+        var img = document.getElementById('media-preview-image');
+        var stage = document.getElementById('media-preview-stage');
+        var videoWrap = document.getElementById('media-preview-video-wrap');
+        var video = document.getElementById('media-preview-video');
+        var loading = document.getElementById('media-preview-loading');
+        var title = document.getElementById('media-preview-title');
+        var metaSummary = document.getElementById('media-meta-summary');
+        var ffprobeRaw = document.getElementById('media-ffprobe-raw');
+        var ffprobeLoading = document.getElementById('media-ffprobe-loading');
+        var ffprobeLoadBtn = document.getElementById('media-ffprobe-load-btn');
+        var ffprobeRawWrap = document.getElementById('media-ffprobe-raw-wrap');
+        var currentFileId = null;
+        var ffprobeLoadedFor = null;
 
-    if (ffprobeRawWrap) {
-        ffprobeRawWrap.addEventListener('show.bs.collapse', function () {
-            if (currentFileId && ffprobeLoadedFor !== currentFileId) {
-                loadFfprobeReport(currentFileId, false);
+        function renderMetaSummary(meta) {
+            if (!metaSummary) return;
+            var rows = [
+                ['Duration', meta.duration_label || '—'],
+                ['Resolution', meta.resolution || '—'],
+                ['Video', meta.codec_video ? meta.codec_video.toUpperCase() : '—'],
+                ['Audio', meta.codec_audio ? meta.codec_audio.toUpperCase() : '—'],
+                ['Frame rate', meta.framerate ? meta.framerate + ' fps' : '—'],
+                ['Container', meta.container ? meta.container.toUpperCase() : '—'],
+                ['File size', meta.filesize_label || '—'],
+                ['At scan', meta.metadata_extracted ? 'Yes' : 'No']
+            ];
+            metaSummary.innerHTML = rows.map(function (row) {
+                return '<dt class="col-sm-4 path-text">' + row[0] + '</dt>'
+                    + '<dd class="col-sm-8 mb-1">' + row[1] + '</dd>';
+            }).join('');
+        }
+
+        function loadFfprobeReport(fileId, force) {
+            if (!fileId || (!force && ffprobeLoadedFor === fileId)) return;
+            ffprobeLoadedFor = fileId;
+            if (ffprobeLoading) ffprobeLoading.classList.remove('d-none');
+            if (ffprobeRaw) ffprobeRaw.textContent = '';
+
+            fetch('/queue/ffprobe/' + fileId + '?_=' + Date.now())
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (ffprobeLoading) ffprobeLoading.classList.add('d-none');
+                    var summary = data.live_summary || data.stored_summary || {};
+                    if (summary.duration !== undefined && summary.duration !== null) {
+                        summary.duration_label = formatDuration(summary.duration);
+                    }
+                    if (summary.filesize_bytes !== undefined && summary.filesize_bytes !== null) {
+                        summary.filesize_label = formatBytes(summary.filesize_bytes);
+                    }
+                    if (data.live_summary) {
+                        summary.metadata_extracted = true;
+                        renderMetaSummary(summary);
+                    }
+                    if (ffprobeRaw) {
+                        if (data.error && !data.raw) {
+                            ffprobeRaw.textContent = data.error;
+                        } else if (data.raw) {
+                            ffprobeRaw.textContent = JSON.stringify(data.raw, null, 2);
+                        } else {
+                            ffprobeRaw.textContent = 'No FFprobe data available.';
+                        }
+                    }
+                })
+                .catch(function () {
+                    if (ffprobeLoading) ffprobeLoading.classList.add('d-none');
+                    if (ffprobeRaw) ffprobeRaw.textContent = 'Could not load FFprobe report.';
+                });
+        }
+
+        function formatDuration(seconds) {
+            seconds = Math.floor(Number(seconds) || 0);
+            var h = Math.floor(seconds / 3600);
+            var m = Math.floor((seconds % 3600) / 60);
+            var s = seconds % 60;
+            return h > 0
+                ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+                : m + ':' + String(s).padStart(2, '0');
+        }
+
+        function formatBytes(bytes) {
+            bytes = Number(bytes) || 0;
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+            return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        function resetPreview() {
+            currentFileId = null;
+            ffprobeLoadedFor = null;
+            stage.classList.remove('d-none');
+            videoWrap.classList.add('d-none');
+            loading.classList.add('d-none');
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+            if (metaSummary) metaSummary.innerHTML = '';
+            if (ffprobeRaw) ffprobeRaw.textContent = '';
+            if (ffprobeRawWrap) {
+                var collapse = bootstrap.Collapse.getInstance(ffprobeRawWrap);
+                if (collapse) collapse.hide();
             }
-        });
-    }
+        }
 
-    document.querySelectorAll('.queue-thumb-btn').forEach(function (btn) {
-        btn.addEventListener('click', function () {
+        function openPreviewFromButton(btn) {
             var fileId = btn.getAttribute('data-file-id');
             var filename = btn.getAttribute('data-filename') || 'Preview';
             var metaRaw = btn.getAttribute('data-meta') || '{}';
             if (!fileId) return;
+
             currentFileId = fileId;
             ffprobeLoadedFor = null;
             resetPreview();
@@ -823,29 +829,69 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
                 renderMetaSummary({});
             }
             img.src = '/queue/thumbnail/' + fileId + '?size=large&_=' + Date.now();
+            img.classList.remove('d-none');
             modal.show();
+        }
+
+        previewModal.addEventListener('hidden.bs.modal', resetPreview);
+
+        if (ffprobeLoadBtn) {
+            ffprobeLoadBtn.addEventListener('click', function () {
+                if (currentFileId) loadFfprobeReport(currentFileId, true);
+            });
+        }
+
+        if (ffprobeRawWrap) {
+            ffprobeRawWrap.addEventListener('show.bs.collapse', function () {
+                if (currentFileId && ffprobeLoadedFor !== currentFileId) {
+                    loadFfprobeReport(currentFileId, false);
+                }
+            });
+        }
+
+        document.addEventListener('click', function (e) {
+            var openLink = e.target.closest('.queue-open-preview');
+            if (openLink) {
+                e.preventDefault();
+                e.stopPropagation();
+                var row = openLink.closest('tr');
+                var thumbBtn = row ? row.querySelector('.queue-thumb-btn') : null;
+                if (thumbBtn) {
+                    openPreviewFromButton(thumbBtn);
+                }
+                return;
+            }
+
+            var thumbBtn = e.target.closest('.queue-thumb-btn');
+            if (thumbBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                openPreviewFromButton(thumbBtn);
+            }
         });
-    });
 
-    img.addEventListener('click', function () {
-        if (!currentFileId) return;
-        stage.classList.add('d-none');
-        loading.classList.remove('d-none');
-        videoWrap.classList.add('d-none');
+        img.addEventListener('click', function () {
+            if (!currentFileId) return;
+            stage.classList.add('d-none');
+            loading.classList.remove('d-none');
+            videoWrap.classList.add('d-none');
 
-        var previewUrl = '/queue/preview/' + currentFileId + '?_=' + Date.now();
-        video.onloadeddata = function () {
-            loading.classList.add('d-none');
-            videoWrap.classList.remove('d-none');
-        };
-        video.onerror = function () {
-            loading.classList.add('d-none');
-            stage.classList.remove('d-none');
-            alert('Preview could not be generated. The source file may be unavailable.');
-        };
-        video.src = previewUrl;
-        video.load();
-    });
+            var previewUrl = '/queue/preview/' + currentFileId + '?_=' + Date.now();
+            video.onloadeddata = function () {
+                loading.classList.add('d-none');
+                videoWrap.classList.remove('d-none');
+            };
+            video.onerror = function () {
+                loading.classList.add('d-none');
+                stage.classList.remove('d-none');
+                alert('Preview could not be generated. The source file may be unavailable.');
+            };
+            video.src = previewUrl;
+            video.load();
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', initMediaPreview);
 })();
 
 function confirmSplitSelected(form) {
