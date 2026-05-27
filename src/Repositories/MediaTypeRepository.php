@@ -29,12 +29,25 @@ final class MediaTypeRepository extends BaseRepository
         return is_array($row) ? $row : null;
     }
 
-    public function update(int $id, string $name, string $abbreviation, string $description, bool $active): bool
-    {
+    public function update(
+        int $id,
+        string $name,
+        string $abbreviation,
+        string $folderName,
+        string $description,
+        bool $active
+    ): bool {
         $stmt = $this->db()->prepare(
-            'UPDATE media_types SET name = ?, abbreviation = ?, description = ?, active = ? WHERE id = ?'
+            'UPDATE media_types SET name = ?, abbreviation = ?, folder_name = ?, description = ?, active = ? WHERE id = ?'
         );
 
-        return $stmt->execute([trim($name), trim($abbreviation), trim($description), $active, $id]);
+        return $stmt->execute([
+            trim($name),
+            trim($abbreviation),
+            trim($folderName),
+            trim($description),
+            $active,
+            $id,
+        ]);
     }
 }

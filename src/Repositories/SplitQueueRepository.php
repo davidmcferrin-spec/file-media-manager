@@ -148,6 +148,23 @@ final class SplitQueueRepository extends BaseRepository
         return $stmt->execute([$id]);
     }
 
+    /** @return list<int> */
+    public function deleteActiveForFile(int $fileId): array
+    {
+        $stmt = $this->db()->prepare(
+            "DELETE FROM split_queue
+             WHERE file_id = ? AND status IN ('PENDING', 'IN_PROGRESS')
+             RETURNING id"
+        );
+        $stmt->execute([$fileId]);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        return array_map(static fn (array $row): int => (int) $row['id'], $rows);
+    }
+
     /** @return list<array<string, mixed>> */
     public function splittableFiles(int $limit = 50): array
     {

@@ -70,11 +70,12 @@ if ($method === 'POST') {
         $name        = trim($_POST['name'] ?? '');
         $mountPath   = trim($_POST['mount_path'] ?? '');
         $description = trim($_POST['description'] ?? '');
+        $sourceCode  = trim($_POST['source_code'] ?? '');
         $active      = isset($_POST['active']);
 
         if ($id <= 0 || $name === '' || $mountPath === '') {
             Session::flash('error', 'Source name and mount path are required.');
-        } elseif ($sourceRepo->update($id, $name, $mountPath, $description, $active)) {
+        } elseif ($sourceRepo->update($id, $name, $mountPath, $description, $sourceCode, $active)) {
             settings_audit($audit, 'SOURCE_UPDATED', 'source', $id, [
                 'name'       => $name,
                 'mount_path' => $mountPath,
@@ -178,12 +179,13 @@ if ($method === 'POST') {
         $id           = (int) ($_POST['id'] ?? 0);
         $name         = trim($_POST['name'] ?? '');
         $abbreviation = trim($_POST['abbreviation'] ?? '');
+        $folderName   = trim($_POST['folder_name'] ?? '');
         $description  = trim($_POST['description'] ?? '');
         $active       = isset($_POST['active']);
 
-        if ($id <= 0 || $name === '' || $abbreviation === '') {
-            Session::flash('error', 'Name and abbreviation are required.');
-        } elseif ($mediaTypeRepo->update($id, $name, $abbreviation, $description, $active)) {
+        if ($id <= 0 || $name === '' || $abbreviation === '' || $folderName === '') {
+            Session::flash('error', 'Name, abbreviation, and folder name are required.');
+        } elseif ($mediaTypeRepo->update($id, $name, $abbreviation, $folderName, $description, $active)) {
             settings_audit($audit, 'MEDIA_TYPE_UPDATED', 'media_type', $id);
             Session::flash('success', 'Media type updated.');
         } else {

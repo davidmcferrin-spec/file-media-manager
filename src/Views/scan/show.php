@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
 use MediaManager\Support\View;
 
@@ -12,6 +13,7 @@ use MediaManager\Support\View;
 /** @var int $protectedCount */
 /** @var bool $canStop */
 /** @var bool $canDelete */
+$status = (string) ($job['status'] ?? '');
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
@@ -47,12 +49,19 @@ use MediaManager\Support\View;
     </span>
     <?php endif; ?>
     <a href="/scan" class="btn btn-outline-secondary btn-sm">All Scans</a>
-    <a href="/queue" class="btn btn-primary btn-sm">Review Queue</a>
+    <?php if (Auth::isAdmin() && in_array($status, ['COMPLETED', 'CANCELLED', 'FAILED'], true) && $totalQueued > 0): ?>
+    <form method="post" action="/scan/apply-map" class="d-inline"
+          onsubmit="return confirm('Apply legacy rename map to this scan job? Matches map rows and reconciles confidence.');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <button type="submit" class="btn btn-outline-warning btn-sm">Apply Legacy Map</button>
+    </form>
+    <?php endif; ?>
+    <a href="/queue?scan_job_id=<?php echo (int) $job['id']; ?>" class="btn btn-primary btn-sm">Review Queue</a>
   </div>
 </div>
 
 <?php
-$status = (string) $job['status'];
 $total  = (int) ($job['total_files'] ?? 0);
 $done   = (int) ($job['processed_files'] ?? 0);
 $pct    = $total > 0 ? round(($done / $total) * 100) : 0;

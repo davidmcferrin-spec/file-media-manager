@@ -64,13 +64,22 @@ match (true) {
     str_starts_with($uri, '/queue/preview')
         => require dirname(__DIR__) . '/src/Controllers/PreviewController.php',
 
+    str_starts_with($uri, '/queue/ffprobe')
+        => require dirname(__DIR__) . '/src/Controllers/FFprobeController.php',
+
     // Queue actions (POST)
     $uri === '/queue/approve'
     || $uri === '/queue/reject'
     || $uri === '/queue/edit'
     || $uri === '/queue/batch'
     || $uri === '/queue/add-split'
+    || $uri === '/queue/adopt-proposal'
+    || $uri === '/queue/clear-split'
         => require dirname(__DIR__) . '/src/Controllers/QueueActionController.php',
+
+    // Scan: apply legacy map (before general scan routes)
+    $uri === '/scan/apply-map'
+        => require dirname(__DIR__) . '/src/Controllers/LegacyMapController.php',
 
     // Scanner (admin only)
     $uri === '/scan' || str_starts_with($uri, '/scan/')
@@ -83,6 +92,12 @@ match (true) {
     // Program schedule (admin only)
     $uri === '/schedule' || str_starts_with($uri, '/schedule/')
         => require dirname(__DIR__) . '/src/Controllers/ProgramScheduleController.php',
+
+    // Legacy rename map (admin only)
+    $uri === '/legacy-map'
+    || $uri === '/legacy-map/import'
+    || $uri === '/legacy-map/apply'
+        => require dirname(__DIR__) . '/src/Controllers/LegacyMapController.php',
 
     // Execute / Rollback (admin only)
     $uri === '/execute' || $uri === '/rollback'

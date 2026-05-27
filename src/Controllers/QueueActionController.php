@@ -67,6 +67,27 @@ function redirect_queue(): void
     exit;
 }
 
+/** @return list<int> */
+function remove_active_split_jobs(
+    SplitQueueRepository $splitRepo,
+    AuditRepository $audit,
+    int $fileId,
+    int $userId,
+    string $email,
+    string $ip,
+    string $filePath
+): array {
+    $removed = $splitRepo->deleteActiveForFile($fileId);
+    foreach ($removed as $jobId) {
+        $audit->record($userId, $email, $ip, 'SPLIT_QUEUE_REMOVED', 'split_queue', $jobId, $filePath, null, [
+            'file_id' => $fileId,
+            'reason'  => 'split_flag_cleared',
+        ]);
+    }
+
+    return $removed;
+}
+
 // ── Single approve ────────────────────────────────────────────
 if ($uri === '/queue/approve') {
     $ids = parse_ids();
@@ -190,7 +211,35 @@ if ($uri === '/queue/edit') {
         redirect_queue();
     }
 
-    $files->updateProposed($id, $proposedDir, $proposedFilename, $showId, $mediaTypeId, $fileDate, $fileTime);
+    $needsSplit  = isset($_POST['needs_split']);
+    $splitNotes  = trim($_POST['split_notes'] ?? '');
+    $wasSplit    = !empty($file['needs_split']);
+    $removedJobs = [];
+
+    if ($wasSplit && !$needsSplit) {
+        $splitRepo   = new SplitQueueRepository();
+        $removedJobs = remove_active_split_jobs(
+            $splitRepo,
+            $audit,
+            $id,
+            $userId,
+            $user['email'] ?? '',
+            $ip,
+            (string) $file['original_path']
+        );
+    }
+
+    $files->updateProposed(
+        $id,
+        $proposedDir,
+        $proposedFilename,
+        $showId,
+        $mediaTypeId,
+        $fileDate,
+        $fileTime,
+        $needsSplit,
+        $splitNotes
+    );
 
     $audit->record(
         $userId,
@@ -204,10 +253,118 @@ if ($uri === '/queue/edit') {
         [
             'proposed_dir'      => $proposedDir,
             'proposed_filename' => $proposedFilename,
+            'needs_split'       => $needsSplit,
+            'split_notes'       => $splitNotes,
         ]
     );
 
-    Session::flash('success', 'Proposed path updated.');
+    if (!$wasSplit && $needsSplit) {
+        $audit->record(
+            $userId,
+            $user['email'] ?? '',
+            $ip,
+            'FILE_SPLIT_FLAGGED',
+            'file',
+            $id,
+            $file['original_path'],
+            null,
+            ['split_notes' => $splitNotes, 'source' => 'edit_modal']
+        );
+    } elseif ($wasSplit && !$needsSplit) {
+        $audit->record(
+            $userId,
+            $user['email'] ?? '',
+            $ip,
+            'FILE_SPLIT_CLEARED',
+            'file',
+            $id,
+            $file['original_path'],
+            null,
+            ['removed_split_jobs' => count($removedJobs)]
+        );
+    }
+
+    $message = 'Proposed path updated.';
+    if ($removedJobs !== []) {
+        $message .= ' ' . count($removedJobs) . ' active split job(s) removed.';
+    }
+    Session::flash('success', $message);
+    redirect_queue();
+}
+
+// ── Adopt classifier or legacy map proposal ───────────────────
+if ($uri === '/queue/adopt-proposal') {
+    $id     = (int) ($_POST['id'] ?? 0);
+    $source = trim($_POST['source'] ?? '');
+    $file   = $id > 0 ? $files->findById($id) : null;
+
+    if ($file === null || !in_array($file['status'] ?? '', ['PENDING', 'FLAGGED'], true)) {
+        Session::flash('error', 'File not eligible for proposal switch.');
+        redirect_queue();
+    }
+
+    if (!in_array($source, ['classifier', 'legacy_map'], true)) {
+        Session::flash('error', 'Invalid proposal source.');
+        redirect_queue();
+    }
+
+    if (!$files->adoptProposalSource($id, $source)) {
+        Session::flash('error', 'Could not switch proposal — alternate not available.');
+        redirect_queue();
+    }
+
+    $audit->record($userId, $user['email'] ?? '', $ip, 'FILE_PROPOSAL_ADOPTED', 'file', $id, null, null, [
+        'source' => $source,
+    ]);
+    Session::flash('success', 'Active proposal updated.');
+    redirect_queue();
+}
+
+// ── Clear split flag (editor) ─────────────────────────────────
+if ($uri === '/queue/clear-split') {
+    $id   = (int) ($_POST['id'] ?? 0);
+    $file = $id > 0 ? $files->findById($id) : null;
+
+    if ($file === null || empty($file['needs_split'])) {
+        Session::flash('error', 'File is not flagged for split.');
+        redirect_queue();
+    }
+
+    if (!in_array($file['status'] ?? '', ['PENDING', 'FLAGGED', 'APPROVED'], true)) {
+        Session::flash('error', 'File is not eligible for split flag changes.');
+        redirect_queue();
+    }
+
+    $splitRepo   = new SplitQueueRepository();
+    $removedJobs = remove_active_split_jobs(
+        $splitRepo,
+        $audit,
+        $id,
+        $userId,
+        $user['email'] ?? '',
+        $ip,
+        (string) $file['original_path']
+    );
+
+    $files->updateSplitFlag($id, false, '');
+
+    $audit->record(
+        $userId,
+        $user['email'] ?? '',
+        $ip,
+        'FILE_SPLIT_CLEARED',
+        'file',
+        $id,
+        $file['original_path'],
+        null,
+        ['removed_split_jobs' => count($removedJobs), 'source' => 'queue_row']
+    );
+
+    $message = 'Split flag cleared.';
+    if ($removedJobs !== []) {
+        $message .= ' ' . count($removedJobs) . ' active split job(s) removed.';
+    }
+    Session::flash('success', $message);
     redirect_queue();
 }
 

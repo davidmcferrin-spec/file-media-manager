@@ -26,6 +26,9 @@ $returnQuery = http_build_query(array_filter([
     'page'        => $page > 1 ? (string) $page : '',
 ]));
 $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
+$previewWidth       = (int) env('PREVIEW_WIDTH', 420);
+$previewHeight      = (int) env('PREVIEW_HEIGHT', 236);
+$previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) / 60);
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
@@ -118,13 +121,19 @@ $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
 <form method="post" action="/queue/batch" id="batch-form">
   <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
   <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
-  <div class="d-flex gap-2 mb-3 flex-wrap">
+  <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
     <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">Approve Selected</button>
     <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
     <button type="submit" name="action" value="flag" class="btn btn-outline-warning btn-sm">Flag Selected</button>
     <?php if (Auth::isAdmin()): ?>
     <button type="submit" formaction="/queue/add-split" class="btn btn-outline-info btn-sm">Add to Split Queue</button>
     <?php endif; ?>
+    <span id="selection-count" class="path-text ms-1" style="font-size:0.78rem"></span>
+    <button type="button" id="clear-selection" class="btn btn-link btn-sm p-0 path-text d-none"
+            style="font-size:0.78rem">Clear selection</button>
+    <span class="path-text ms-auto d-none d-md-inline" style="font-size:0.72rem;color:var(--text-soft)">
+      Click row to toggle · Shift+click for range · Header box selects all on this page
+    </span>
   </div>
 <?php endif; ?>
 
@@ -139,11 +148,13 @@ $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
 
 <div class="card">
   <div class="table-responsive">
-    <table class="table table-hover mb-0 align-middle">
+    <table class="table table-hover mb-0 align-middle" id="queue-table">
       <thead>
         <tr>
           <?php if (($filters['status'] ?? '') === 'PENDING' || !empty($filters['needs_split'])): ?>
-          <th style="width:32px"><input type="checkbox" id="check-all"></th>
+          <th style="width:32px">
+            <input type="checkbox" id="check-all" title="Select all on this page" aria-label="Select all on this page">
+          </th>
           <?php endif; ?>
           <th style="width:90px"></th>
           <th>Original</th>
@@ -162,14 +173,18 @@ $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
         </tr>
         <?php else: ?>
         <?php foreach ($queueItems as $item): ?>
-        <tr>
+        <tr class="queue-select-row">
           <?php if (($filters['status'] ?? '') === 'PENDING' || !empty($filters['needs_split'])): ?>
-          <td><input type="checkbox" name="ids[]" value="<?php echo (int) $item['id']; ?>" class="row-check"></td>
+          <td class="queue-check-cell">
+            <input type="checkbox" name="ids[]" value="<?php echo (int) $item['id']; ?>" class="row-check"
+                   aria-label="Select <?php echo View::e($item['original_filename']); ?>">
+          </td>
           <?php endif; ?>
           <td>
             <button type="button" class="btn p-0 border-0 queue-thumb-btn"
                     data-file-id="<?php echo (int) $item['id']; ?>"
                     data-filename="<?php echo View::e($item['original_filename']); ?>"
+                    data-meta="<?php echo View::e(json_encode(View::mediaMetaPayload($item), JSON_THROW_ON_ERROR)); ?>"
                     title="Preview">
               <img src="/queue/thumbnail/<?php echo (int) $item['id']; ?>"
                    alt="" width="80" height="45" class="rounded"
@@ -186,9 +201,56 @@ $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
             <?php endif; ?>
           </td>
           <td>
+            <?php
+            $primarySource = (string) ($item['proposed_source'] ?? 'classifier');
+            $altDir  = (string) ($item['alt_proposed_dir'] ?? '');
+            $altFile = (string) ($item['alt_proposed_filename'] ?? '');
+            $agreement = (string) ($item['proposal_agreement'] ?? '');
+            $mapScore = (int) ($item['map_curator_confidence'] ?? 0);
+            $hasAlt = $altDir !== '' && $altFile !== '';
+            ?>
             <?php if ($item['proposed_filename']): ?>
-            <div class="path-filename proposed"><?php echo View::e($item['proposed_filename']); ?></div>
+            <div class="path-filename proposed">
+              <?php if ($primarySource === 'legacy_map'): ?>★ <?php endif; ?>
+              <?php echo View::e($item['proposed_filename']); ?>
+            </div>
             <div class="path-text proposed"><?php echo View::e($item['proposed_dir']); ?></div>
+            <div class="path-text mt-1" style="font-size:0.72rem">
+              <?php echo $primarySource === 'legacy_map' ? 'Legacy map' : 'Classifier'; ?>
+              <?php if ($agreement !== '' && $agreement !== 'classifier_only'): ?>
+              · <?php echo View::e($agreement); ?>
+              <?php endif; ?>
+            </div>
+            <?php if ($hasAlt): ?>
+            <div class="mt-2 pt-2" style="border-top:1px dashed var(--border-color);font-size:0.76rem">
+              <div class="path-text">Alternate (<?php echo View::e((string) ($item['alt_source'] ?? 'legacy_map')); ?>
+                <?php if ($mapScore > 0): ?> · <?php echo $mapScore; ?>/10<?php endif; ?>):</div>
+              <div class="path-filename"><?php echo View::e($altFile); ?></div>
+              <div class="path-text"><?php echo View::e($altDir); ?></div>
+              <?php if (Auth::isEditor() && in_array($item['status'], ['PENDING', 'FLAGGED'], true)): ?>
+              <div class="d-flex gap-1 mt-1">
+                <?php if ($primarySource !== 'classifier'): ?>
+                <form method="post" action="/queue/adopt-proposal" class="d-inline">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
+                  <input type="hidden" name="source" value="classifier">
+                  <button type="submit" class="btn btn-outline-secondary btn-xs">Use classifier</button>
+                </form>
+                <?php endif; ?>
+                <?php if ($primarySource !== 'legacy_map'): ?>
+                <form method="post" action="/queue/adopt-proposal" class="d-inline">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
+                  <input type="hidden" name="source" value="legacy_map">
+                  <button type="submit" class="btn btn-outline-secondary btn-xs">Use map</button>
+                </form>
+                <?php endif; ?>
+              </div>
+              <?php endif; ?>
+            </div>
+            <?php endif; ?>
             <?php else: ?>
             <span style="color:var(--text-soft)">—</span>
             <?php endif; ?>
@@ -202,6 +264,9 @@ $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
               · <?php echo View::e($item['media_type_name'] ?? '—'); ?>
             </div>
             <div class="path-text"><?php echo View::duration($item['duration_seconds'] ?? null); ?></div>
+            <div class="path-text" style="font-size:0.72rem" title="Scan-time FFprobe summary">
+              <?php echo View::e(View::mediaTechSummary($item)); ?>
+            </div>
           </td>
           <td class="text-end text-nowrap">
             <?php if (Auth::isEditor() && in_array($item['status'], ['PENDING', 'FLAGGED'], true)): ?>
@@ -217,6 +282,16 @@ $returnUrl = '/queue' . ($returnQuery !== '' ? '?' . $returnQuery : '');
               <button type="submit" class="btn btn-success btn-xs">Approve</button>
             </form>
             <?php endif; ?>
+            <?php endif; ?>
+            <?php if (Auth::isEditor() && !empty($item['needs_split'])
+                && in_array($item['status'], ['PENDING', 'FLAGGED', 'APPROVED'], true)): ?>
+            <form method="post" action="/queue/clear-split" class="d-inline"
+                  onsubmit="return confirm('Clear split flag for this file? Any pending split jobs will be removed.');">
+              <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+              <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+              <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
+              <button type="submit" class="btn btn-outline-warning btn-xs">Clear split</button>
+            </form>
             <?php endif; ?>
             <?php if (Auth::isAdmin() && !empty($item['needs_split'])
                 && in_array($item['status'], ['PENDING', 'FLAGGED', 'APPROVED'], true)): ?>
@@ -357,6 +432,27 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
               <input type="text" name="file_time" class="form-control" maxlength="4"
                      value="<?php echo View::e($editTime); ?>" placeholder="HHMM">
             </div>
+            <div class="col-12">
+              <hr class="border-secondary my-1">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" name="needs_split" id="needs-split-<?php echo (int) $item['id']; ?>"
+                       value="1" <?php echo !empty($item['needs_split']) ? 'checked' : ''; ?>>
+                <label class="form-check-label" for="needs-split-<?php echo (int) $item['id']; ?>">
+                  Needs split
+                </label>
+                <?php if (!empty($item['duration_seconds'])): ?>
+                <span class="text-muted ms-2" style="font-size:0.78rem">
+                  Duration: <?php echo View::e(View::duration($item['duration_seconds'])); ?>
+                </span>
+                <?php endif; ?>
+              </div>
+              <label class="form-label mt-2 mb-1">Split notes</label>
+              <textarea name="split_notes" class="form-control form-control-sm" rows="2"
+                        placeholder="Why this file should be split (optional)"><?php echo View::e((string) ($item['split_notes'] ?? '')); ?></textarea>
+              <?php if (!empty($item['split_notes']) && empty($item['needs_split'])): ?>
+              <div class="form-text">Previous scan notes shown; check “Needs split” to re-flag.</div>
+              <?php endif; ?>
+            </div>
           </div>
         </div>
         <div class="modal-footer border-secondary d-flex justify-content-between">
@@ -374,7 +470,7 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 
 <!-- Media preview modal -->
 <div class="modal fade" id="media-preview-modal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
     <div class="modal-content" style="background:var(--panel);border-color:var(--border-color)">
       <div class="modal-header border-secondary py-2">
         <h6 class="modal-title fs-6 mb-0" id="media-preview-title">Preview</h6>
@@ -383,34 +479,188 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
       <div class="modal-body p-2 text-center">
         <div id="media-preview-stage">
           <img id="media-preview-image" src="" alt="" class="img-fluid rounded"
-               style="max-height:70vh;cursor:pointer" title="Click to play 2-minute preview">
-          <p class="path-text mt-2 mb-0" style="font-size:0.75rem">Click image to load video preview</p>
+               style="max-height:55vh;cursor:pointer" title="Click to play video preview">
+          <p class="path-text mt-2 mb-0" style="font-size:0.75rem">
+            Click image to load <?php echo $previewDurationMin; ?>-minute preview
+          </p>
         </div>
         <div id="media-preview-video-wrap" class="d-none">
           <video id="media-preview-video" controls autoplay
-                 style="width:100%;max-width:640px;max-height:360px;background:#000;border-radius:6px">
+                 style="width:100%;max-width:<?php echo $previewWidth; ?>px;max-height:<?php echo (int) round($previewHeight * 1.2); ?>px;background:#000;border-radius:6px">
           </video>
-          <p class="path-text mt-2 mb-0" style="font-size:0.75rem">2-minute proxy · 640×320</p>
+          <p class="path-text mt-2 mb-0" style="font-size:0.75rem">
+            <?php echo $previewDurationMin; ?>-minute proxy · <?php echo $previewWidth; ?>×<?php echo $previewHeight; ?>
+          </p>
         </div>
         <div id="media-preview-loading" class="d-none py-5">
           <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
           <span class="ms-2 path-text">Generating preview…</span>
+        </div>
+
+        <div id="media-meta-panel" class="text-start mt-3 pt-3" style="border-top:1px solid var(--border-color)">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span style="font-size:0.74rem;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-soft)">
+              Technical Metadata
+            </span>
+            <button type="button" class="btn btn-outline-secondary btn-xs" id="media-ffprobe-load-btn">
+              Refresh FFprobe
+            </button>
+          </div>
+          <dl id="media-meta-summary" class="row mb-0" style="font-size:0.78rem"></dl>
+          <div class="mt-2">
+            <button class="btn btn-link btn-sm p-0 path-text" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#media-ffprobe-raw-wrap"
+                    id="media-ffprobe-toggle" style="font-size:0.76rem">
+              Show full FFprobe JSON
+            </button>
+            <div class="collapse mt-2" id="media-ffprobe-raw-wrap">
+              <div id="media-ffprobe-loading" class="d-none path-text py-2" style="font-size:0.76rem">
+                Running ffprobe…
+              </div>
+              <pre id="media-ffprobe-raw" class="path-text mb-0 p-2 rounded"
+                   style="font-size:0.68rem;max-height:240px;overflow:auto;background:var(--form-bg);white-space:pre-wrap"></pre>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </div>
 
+<style>
+#queue-table .queue-select-row.queue-row-selected > td {
+    background: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08);
+}
+#queue-table .queue-select-row:not(.queue-row-selected):hover > td {
+    background: rgba(255, 255, 255, 0.03);
+}
+#queue-table .queue-check-cell {
+    cursor: default;
+}
+#queue-table .queue-select-row:has(.row-check) {
+    cursor: pointer;
+}
+</style>
+
 <script>
 (function () {
     var checkAll = document.getElementById('check-all');
-    if (checkAll) {
-        checkAll.addEventListener('change', function () {
-            document.querySelectorAll('.row-check').forEach(function (cb) {
-                cb.checked = checkAll.checked;
-            });
+    var countEl = document.getElementById('selection-count');
+    var clearBtn = document.getElementById('clear-selection');
+    var batchForm = document.getElementById('batch-form');
+    var lastIndex = -1;
+
+    function rowChecks() {
+        return Array.prototype.slice.call(document.querySelectorAll('.row-check'));
+    }
+
+    function updateSelectionUi() {
+        var checks = rowChecks();
+        var checked = checks.filter(function (cb) { return cb.checked; });
+        if (checkAll) {
+            checkAll.checked = checks.length > 0 && checked.length === checks.length;
+            checkAll.indeterminate = checked.length > 0 && checked.length < checks.length;
+        }
+        if (countEl) {
+            countEl.textContent = checked.length > 0
+                ? checked.length + ' of ' + checks.length + ' selected'
+                : '';
+        }
+        if (clearBtn) {
+            clearBtn.classList.toggle('d-none', checked.length === 0);
+        }
+        checks.forEach(function (cb) {
+            var row = cb.closest('tr');
+            if (row) {
+                row.classList.toggle('queue-row-selected', cb.checked);
+            }
         });
     }
+
+    function setRange(fromIndex, toIndex, state) {
+        var checks = rowChecks();
+        var start = Math.min(fromIndex, toIndex);
+        var end = Math.max(fromIndex, toIndex);
+        for (var i = start; i <= end; i++) {
+            if (checks[i]) {
+                checks[i].checked = state;
+            }
+        }
+        updateSelectionUi();
+    }
+
+    function toggleAtIndex(index, shiftKey, state) {
+        if (shiftKey && lastIndex >= 0) {
+            setRange(lastIndex, index, state);
+            return;
+        }
+        lastIndex = index;
+        updateSelectionUi();
+    }
+
+    if (checkAll) {
+        checkAll.addEventListener('change', function () {
+            rowChecks().forEach(function (cb) {
+                cb.checked = checkAll.checked;
+            });
+            lastIndex = -1;
+            updateSelectionUi();
+        });
+    }
+
+    rowChecks().forEach(function (cb, index) {
+        cb.addEventListener('click', function (e) {
+            e.stopPropagation();
+            toggleAtIndex(index, e.shiftKey, cb.checked);
+        });
+    });
+
+    document.querySelectorAll('#queue-table .queue-select-row').forEach(function (row) {
+        row.addEventListener('click', function (e) {
+            if (e.target.closest(
+                'a, button, input, form, select, textarea, label, [data-bs-toggle], .queue-thumb-btn'
+            )) {
+                return;
+            }
+            var cb = row.querySelector('.row-check');
+            if (!cb) {
+                return;
+            }
+            var index = rowChecks().indexOf(cb);
+            if (index < 0) {
+                return;
+            }
+            var newState = !cb.checked;
+            cb.checked = newState;
+            toggleAtIndex(index, e.shiftKey, newState);
+        });
+    });
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+            rowChecks().forEach(function (cb) {
+                cb.checked = false;
+            });
+            lastIndex = -1;
+            if (checkAll) {
+                checkAll.checked = false;
+                checkAll.indeterminate = false;
+            }
+            updateSelectionUi();
+        });
+    }
+
+    if (batchForm) {
+        batchForm.addEventListener('submit', function (e) {
+            var checked = rowChecks().filter(function (cb) { return cb.checked; });
+            if (checked.length === 0) {
+                e.preventDefault();
+                alert('Select at least one file.');
+            }
+        });
+    }
+
+    updateSelectionUi();
 
     document.querySelectorAll('.apply-suggest-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -442,28 +692,136 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
     var video = document.getElementById('media-preview-video');
     var loading = document.getElementById('media-preview-loading');
     var title = document.getElementById('media-preview-title');
+    var metaSummary = document.getElementById('media-meta-summary');
+    var ffprobeRaw = document.getElementById('media-ffprobe-raw');
+    var ffprobeLoading = document.getElementById('media-ffprobe-loading');
+    var ffprobeLoadBtn = document.getElementById('media-ffprobe-load-btn');
+    var ffprobeRawWrap = document.getElementById('media-ffprobe-raw-wrap');
     var currentFileId = null;
+    var ffprobeLoadedFor = null;
+
+    function renderMetaSummary(meta) {
+        if (!metaSummary) return;
+        var rows = [
+            ['Duration', meta.duration_label || '—'],
+            ['Resolution', meta.resolution || '—'],
+            ['Video', meta.codec_video ? meta.codec_video.toUpperCase() : '—'],
+            ['Audio', meta.codec_audio ? meta.codec_audio.toUpperCase() : '—'],
+            ['Frame rate', meta.framerate ? meta.framerate + ' fps' : '—'],
+            ['Container', meta.container ? meta.container.toUpperCase() : '—'],
+            ['File size', meta.filesize_label || '—'],
+            ['At scan', meta.metadata_extracted ? 'Yes' : 'No']
+        ];
+        metaSummary.innerHTML = rows.map(function (row) {
+            return '<dt class="col-sm-4 path-text">' + row[0] + '</dt>'
+                + '<dd class="col-sm-8 mb-1">' + row[1] + '</dd>';
+        }).join('');
+    }
+
+    function loadFfprobeReport(fileId, force) {
+        if (!fileId || (!force && ffprobeLoadedFor === fileId)) return;
+        ffprobeLoadedFor = fileId;
+        if (ffprobeLoading) ffprobeLoading.classList.remove('d-none');
+        if (ffprobeRaw) ffprobeRaw.textContent = '';
+
+        fetch('/queue/ffprobe/' + fileId + '?_=' + Date.now())
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (ffprobeLoading) ffprobeLoading.classList.add('d-none');
+                var summary = data.live_summary || data.stored_summary || {};
+                if (summary.duration !== undefined && summary.duration !== null) {
+                    summary.duration_label = formatDuration(summary.duration);
+                }
+                if (summary.filesize_bytes !== undefined && summary.filesize_bytes !== null) {
+                    summary.filesize_label = formatBytes(summary.filesize_bytes);
+                }
+                if (data.live_summary) {
+                    summary.metadata_extracted = true;
+                    renderMetaSummary(summary);
+                }
+                if (ffprobeRaw) {
+                    if (data.error && !data.raw) {
+                        ffprobeRaw.textContent = data.error;
+                    } else if (data.raw) {
+                        ffprobeRaw.textContent = JSON.stringify(data.raw, null, 2);
+                    } else {
+                        ffprobeRaw.textContent = 'No FFprobe data available.';
+                    }
+                }
+            })
+            .catch(function () {
+                if (ffprobeLoading) ffprobeLoading.classList.add('d-none');
+                if (ffprobeRaw) ffprobeRaw.textContent = 'Could not load FFprobe report.';
+            });
+    }
+
+    function formatDuration(seconds) {
+        seconds = Math.floor(Number(seconds) || 0);
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        var s = seconds % 60;
+        return h > 0
+            ? h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+            : m + ':' + String(s).padStart(2, '0');
+    }
+
+    function formatBytes(bytes) {
+        bytes = Number(bytes) || 0;
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+        return (bytes / 1073741824).toFixed(2) + ' GB';
+    }
 
     function resetPreview() {
         currentFileId = null;
+        ffprobeLoadedFor = null;
         stage.classList.remove('d-none');
         videoWrap.classList.add('d-none');
         loading.classList.add('d-none');
         video.pause();
         video.removeAttribute('src');
         video.load();
+        if (metaSummary) metaSummary.innerHTML = '';
+        if (ffprobeRaw) ffprobeRaw.textContent = '';
+        if (ffprobeRawWrap) {
+            var collapse = bootstrap.Collapse.getInstance(ffprobeRawWrap);
+            if (collapse) collapse.hide();
+        }
     }
 
     previewModal.addEventListener('hidden.bs.modal', resetPreview);
+
+    if (ffprobeLoadBtn) {
+        ffprobeLoadBtn.addEventListener('click', function () {
+            if (currentFileId) loadFfprobeReport(currentFileId, true);
+        });
+    }
+
+    if (ffprobeRawWrap) {
+        ffprobeRawWrap.addEventListener('show.bs.collapse', function () {
+            if (currentFileId && ffprobeLoadedFor !== currentFileId) {
+                loadFfprobeReport(currentFileId, false);
+            }
+        });
+    }
 
     document.querySelectorAll('.queue-thumb-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var fileId = btn.getAttribute('data-file-id');
             var filename = btn.getAttribute('data-filename') || 'Preview';
+            var metaRaw = btn.getAttribute('data-meta') || '{}';
             if (!fileId) return;
             currentFileId = fileId;
+            ffprobeLoadedFor = null;
             resetPreview();
+            currentFileId = fileId;
             title.textContent = filename;
+            try {
+                renderMetaSummary(JSON.parse(metaRaw));
+            } catch (e) {
+                renderMetaSummary({});
+            }
             img.src = '/queue/thumbnail/' + fileId + '?size=large&_=' + Date.now();
             modal.show();
         });

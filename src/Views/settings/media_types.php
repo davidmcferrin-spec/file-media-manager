@@ -16,6 +16,7 @@ use MediaManager\Support\View;
         <tr>
           <th>Name</th>
           <th>Abbreviation</th>
+          <th>Folder Name</th>
           <th>Description</th>
           <th>Status</th>
           <th></th>
@@ -24,7 +25,7 @@ use MediaManager\Support\View;
       <tbody>
         <?php foreach ($mediaTypes as $mt): ?>
         <tr>
-          <td colspan="5" class="p-0">
+          <td colspan="6" class="p-0">
             <form method="post" action="/settings/media-types" class="p-3">
               <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
               <input type="hidden" name="id" value="<?php echo (int) $mt['id']; ?>">
@@ -37,7 +38,12 @@ use MediaManager\Support\View;
                   <input type="text" name="abbreviation" class="form-control form-control-sm" required
                          value="<?php echo View::e($mt['abbreviation']); ?>">
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-2">
+                  <input type="text" name="folder_name" class="form-control form-control-sm" required
+                         value="<?php echo View::e($mt['folder_name'] ?? $mt['name']); ?>"
+                         title="Path segment: SHOW/YYYY/MM/this">
+                </div>
+                <div class="col-md-3">
                   <input type="text" name="description" class="form-control form-control-sm"
                          value="<?php echo View::e($mt['description']); ?>">
                 </div>

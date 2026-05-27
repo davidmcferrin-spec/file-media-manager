@@ -23,16 +23,28 @@ final class SourceRepository extends BaseRepository
         return is_array($row) ? $row : null;
     }
 
-    public function update(int $id, string $name, string $mountPath, string $description, bool $active): bool
-    {
+    public function update(
+        int $id,
+        string $name,
+        string $mountPath,
+        string $description,
+        ?string $sourceCode,
+        bool $active
+    ): bool {
+        $code = $sourceCode !== null ? strtoupper(trim($sourceCode)) : null;
+        if ($code === '') {
+            $code = null;
+        }
+
         $stmt = $this->db()->prepare(
-            'UPDATE sources SET name = ?, mount_path = ?, description = ?, active = ? WHERE id = ?'
+            'UPDATE sources SET name = ?, mount_path = ?, description = ?, source_code = ?, active = ? WHERE id = ?'
         );
 
         return $stmt->execute([
             trim($name),
             rtrim(trim($mountPath), '/'),
             trim($description),
+            $code,
             $active,
             $id,
         ]);

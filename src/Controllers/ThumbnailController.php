@@ -18,7 +18,7 @@ if (preg_match('#^/queue/thumbnail/(\d+)$#', $uri, $m) !== 1) {
 
 $fileId = (int) $m[1];
 $size   = $_GET['size'] ?? '';
-$width  = $size === 'large' ? (int) env('PREVIEW_WIDTH', 640) : null;
+$width  = $size === 'large' ? (int) env('PREVIEW_WIDTH', 420) : null;
 
 try {
     $path = (new ThumbnailService())->ensureThumbnail($fileId, $width);

@@ -23,13 +23,16 @@ final class FileRepository extends BaseRepository
                 proposed_dir, proposed_filename, show_id, media_type_id,
                 file_date, file_time, confidence, classifier_notes, status,
                 duration_seconds, filesize_bytes, container, codec_video, codec_audio,
-                resolution, framerate, metadata_extracted, needs_split, split_notes
+                resolution, framerate, metadata_extracted, needs_split, split_notes,
+                classifier_confidence, classifier_proposed_dir, classifier_proposed_filename,
+                proposed_source
              ) VALUES (
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?
              )
              RETURNING id'
         );
@@ -59,6 +62,10 @@ final class FileRepository extends BaseRepository
             $this->pgBool((bool) ($data['metadata_extracted'] ?? false)),
             $this->pgBool((bool) ($data['needs_split'] ?? false)),
             $data['split_notes'] ?? '',
+            $data['classifier_confidence'] ?? $data['confidence'],
+            $data['classifier_proposed_dir'] ?? $data['proposed_dir'],
+            $data['classifier_proposed_filename'] ?? $data['proposed_filename'],
+            $data['proposed_source'] ?? 'classifier',
         ]);
 
         return (int) $stmt->fetchColumn();
@@ -198,8 +205,37 @@ final class FileRepository extends BaseRepository
         ?int $showId,
         ?int $mediaTypeId,
         ?string $fileDate,
-        ?string $fileTime
+        ?string $fileTime,
+        ?bool $needsSplit = null,
+        ?string $splitNotes = null
     ): bool {
+        if ($needsSplit !== null) {
+            $stmt = $this->db()->prepare(
+                'UPDATE files SET
+                    proposed_dir = ?,
+                    proposed_filename = ?,
+                    show_id = ?,
+                    media_type_id = ?,
+                    file_date = ?,
+                    file_time = ?,
+                    needs_split = ?,
+                    split_notes = ?
+                 WHERE id = ?'
+            );
+
+            return $stmt->execute([
+                $proposedDir,
+                $proposedFilename,
+                $showId,
+                $mediaTypeId,
+                $fileDate,
+                $fileTime,
+                $this->pgBool($needsSplit),
+                $splitNotes ?? '',
+                $id,
+            ]);
+        }
+
         $stmt = $this->db()->prepare(
             'UPDATE files SET
                 proposed_dir = ?,
@@ -220,6 +256,15 @@ final class FileRepository extends BaseRepository
             $fileTime,
             $id,
         ]);
+    }
+
+    public function updateSplitFlag(int $id, bool $needsSplit, string $splitNotes = ''): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE files SET needs_split = ?, split_notes = ? WHERE id = ?'
+        );
+
+        return $stmt->execute([$this->pgBool($needsSplit), trim($splitNotes), $id]);
     }
 
     public function markExecuted(int $id, string $executedPath, int $userId): bool
@@ -425,6 +470,153 @@ final class FileRepository extends BaseRepository
         $stmt->execute([$scanJobId]);
 
         return $stmt->rowCount();
+    }
+
+    public function ensureClassifierSnapshot(int $id): void
+    {
+        $this->db()->prepare(
+            'UPDATE files SET
+                classifier_confidence = COALESCE(classifier_confidence, confidence),
+                classifier_proposed_dir = COALESCE(classifier_proposed_dir, proposed_dir),
+                classifier_proposed_filename = COALESCE(classifier_proposed_filename, proposed_filename),
+                proposed_source = COALESCE(proposed_source, \'classifier\')
+             WHERE id = ?'
+        )->execute([$id]);
+    }
+
+    /** @param array<string, mixed> $result */
+    public function updateProposalReconciliation(int $id, array $result): bool
+    {
+        $file = $this->findById($id);
+        if ($file === null) {
+            return false;
+        }
+
+        $notes = self::mergeReconcileNotes((string) ($file['classifier_notes'] ?? ''), $result);
+
+        $sql = 'UPDATE files SET
+            classifier_confidence = COALESCE(classifier_confidence, ?),
+            classifier_proposed_dir = COALESCE(classifier_proposed_dir, ?),
+            classifier_proposed_filename = COALESCE(classifier_proposed_filename, ?),
+            proposed_dir = ?,
+            proposed_filename = ?,
+            confidence = ?,
+            proposed_source = ?,
+            alt_proposed_dir = ?,
+            alt_proposed_filename = ?,
+            alt_source = ?,
+            legacy_map_id = ?,
+            map_curator_confidence = ?,
+            proposal_agreement = ?,
+            classifier_notes = ?';
+
+        $params = [
+            $result['classifier_confidence'] ?? $file['confidence'],
+            $result['classifier_proposed_dir'] ?? $file['proposed_dir'],
+            $result['classifier_proposed_filename'] ?? $file['proposed_filename'],
+            $result['proposed_dir'],
+            $result['proposed_filename'],
+            $result['confidence'],
+            $result['proposed_source'],
+            $result['alt_proposed_dir'],
+            $result['alt_proposed_filename'],
+            $result['alt_source'],
+            $result['legacy_map_id'],
+            $result['map_curator_confidence'],
+            $result['proposal_agreement'],
+            $notes,
+        ];
+
+        if (!empty($result['show_id'])) {
+            $sql .= ', show_id = ?';
+            $params[] = $result['show_id'];
+        }
+        if (!empty($result['media_type_id'])) {
+            $sql .= ', media_type_id = ?';
+            $params[] = $result['media_type_id'];
+        }
+        if (!empty($result['file_date'])) {
+            $sql .= ', file_date = ?';
+            $params[] = $result['file_date'];
+        }
+        if (!empty($result['file_time'])) {
+            $sql .= ', file_time = ?';
+            $params[] = $result['file_time'];
+        }
+        if (!empty($result['status'])) {
+            $sql .= ', status = ?';
+            $params[] = $result['status'];
+        }
+
+        $sql .= ' WHERE id = ?';
+        $params[] = $id;
+
+        $stmt = $this->db()->prepare($sql);
+
+        return $stmt->execute($params);
+    }
+
+    public function adoptProposalSource(int $id, string $source): bool
+    {
+        $file = $this->findById($id);
+        if ($file === null) {
+            return false;
+        }
+
+        if ($source === 'legacy_map') {
+            $dir = $file['alt_proposed_dir'] ?? null;
+            $name = $file['alt_proposed_filename'] ?? null;
+            if ($dir === null || $name === null) {
+                return false;
+            }
+            $altDir = $file['proposed_dir'];
+            $altName = $file['proposed_filename'];
+            $altSource = $file['proposed_source'];
+        } elseif ($source === 'classifier') {
+            $dir = $file['classifier_proposed_dir'] ?? $file['proposed_dir'];
+            $name = $file['classifier_proposed_filename'] ?? $file['proposed_filename'];
+            $altDir = $file['alt_proposed_dir'];
+            $altName = $file['alt_proposed_filename'];
+            $altSource = 'legacy_map';
+        } else {
+            return false;
+        }
+
+        $stmt = $this->db()->prepare(
+            'UPDATE files SET
+                proposed_dir = ?,
+                proposed_filename = ?,
+                proposed_source = ?,
+                alt_proposed_dir = ?,
+                alt_proposed_filename = ?,
+                alt_source = ?
+             WHERE id = ?'
+        );
+
+        return $stmt->execute([$dir, $name, $source, $altDir, $altName, $altSource, $id]);
+    }
+
+    /** @param array<string, mixed> $result */
+    private static function mergeReconcileNotes(string $existingJson, array $result): string
+    {
+        $data = json_decode($existingJson, true);
+        if (!is_array($data)) {
+            $data = ['signals' => [], 'sidecars' => [], 'guest' => null, 'exact' => false];
+        }
+        $signals = is_array($data['signals'] ?? null) ? $data['signals'] : [];
+        foreach ($result['reconcile_signals'] ?? [] as $signal) {
+            if (is_string($signal) && $signal !== '') {
+                $signals[] = $signal;
+            }
+        }
+        $data['signals'] = array_values(array_unique($signals));
+        $data['map'] = [
+            'agreement'           => $result['proposal_agreement'] ?? null,
+            'curator_confidence'  => $result['map_curator_confidence'] ?? null,
+            'legacy_map_id'       => $result['legacy_map_id'] ?? null,
+        ];
+
+        return json_encode($data, JSON_THROW_ON_ERROR);
     }
 
     /** @return list<array{original_path: string, proposed_filename: string}> */

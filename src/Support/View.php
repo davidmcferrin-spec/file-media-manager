@@ -53,6 +53,57 @@ class View
     }
 
     /**
+     * Compact technical summary for queue Meta column (from scan-time ffprobe fields).
+     *
+     * @param array<string, mixed> $file
+     */
+    public static function mediaTechSummary(array $file): string
+    {
+        $parts = [];
+        if (!empty($file['resolution'])) {
+            $parts[] = (string) $file['resolution'];
+        }
+        if (!empty($file['codec_video'])) {
+            $parts[] = strtoupper((string) $file['codec_video']);
+        }
+        if (!empty($file['codec_audio'])) {
+            $parts[] = 'A:' . strtoupper((string) $file['codec_audio']);
+        }
+        if (!empty($file['container'])) {
+            $parts[] = strtoupper((string) $file['container']);
+        }
+        if ($parts === []) {
+            return empty($file['metadata_extracted']) ? 'No metadata' : '—';
+        }
+
+        return implode(' · ', $parts);
+    }
+
+    /**
+     * @param array<string, mixed> $file
+     * @return array<string, mixed>
+     */
+    public static function mediaMetaPayload(array $file): array
+    {
+        return [
+            'duration'            => $file['duration_seconds'] ?? null,
+            'duration_label'      => self::duration(
+                isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : null
+            ),
+            'resolution'          => $file['resolution'] ?? null,
+            'codec_video'         => $file['codec_video'] ?? null,
+            'codec_audio'         => $file['codec_audio'] ?? null,
+            'framerate'           => $file['framerate'] ?? null,
+            'container'           => $file['container'] ?? null,
+            'filesize_bytes'      => $file['filesize_bytes'] ?? null,
+            'filesize_label'      => self::filesize(
+                isset($file['filesize_bytes']) ? (int) $file['filesize_bytes'] : null
+            ),
+            'metadata_extracted'  => !empty($file['metadata_extracted']),
+        ];
+    }
+
+    /**
      * Confidence badge HTML.
      */
     public static function confidenceBadge(string $confidence): string

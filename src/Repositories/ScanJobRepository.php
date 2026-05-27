@@ -27,7 +27,7 @@ final class ScanJobRepository extends BaseRepository
     public function findById(int $id): ?array
     {
         $stmt = $this->db()->prepare(
-            'SELECT sj.*, s.name AS source_name, s.mount_path, u.email AS created_by_email
+            'SELECT sj.*, s.name AS source_name, s.mount_path, s.source_code, u.email AS created_by_email
              FROM scan_jobs sj
              JOIN sources s ON s.id = sj.source_id
              JOIN users u ON u.id = sj.created_by

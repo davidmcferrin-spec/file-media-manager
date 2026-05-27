@@ -316,7 +316,7 @@ body {
           </a>
         </li>
         <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath); ?>" href="/dictionary">
+          <a class="nav-link<?php echo navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>" href="/dictionary">
             Shows
           </a>
         </li>

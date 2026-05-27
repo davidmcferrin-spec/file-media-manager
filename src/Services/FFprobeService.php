@@ -27,9 +27,9 @@ final class FFprobeService
     }
 
     /**
-     * @return array<string, mixed>|null
+     * @return array{summary: array<string, mixed>, raw: array<string, mixed>}|null
      */
-    public function probe(string $filePath): ?array
+    public function probeRaw(string $filePath): ?array
     {
         if (!$this->isAvailable() || !is_readable($filePath)) {
             return null;
@@ -51,7 +51,20 @@ final class FFprobeService
             return null;
         }
 
-        return $this->normalize($data);
+        return [
+            'summary' => $this->normalize($data),
+            'raw'     => $data,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function probe(string $filePath): ?array
+    {
+        $result = $this->probeRaw($filePath);
+
+        return $result !== null ? $result['summary'] : null;
     }
 
     /**

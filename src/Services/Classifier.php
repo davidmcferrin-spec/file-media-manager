@@ -104,7 +104,11 @@ final class Classifier
         if ($showAbbr !== null && $date !== null && $typeAbbr !== null) {
             $year  = substr($date, 0, 4);
             $month = substr($date, 4, 2);
-            $folderType = $this->folderMediaType($typeName ?? '', $typeAbbr);
+            $folderType = $this->folderNameForType(
+                $typeMatch['id'] ?? null,
+                $typeMatch['name'] ?? '',
+                $typeMatch['abbreviation'] ?? ''
+            );
             $proposedDir = $showAbbr . '/' . $year . '/' . $month . '/' . $folderType;
 
             $ext = MediaExtensions::extension($filename);
@@ -341,6 +345,19 @@ final class Classifier
         }
 
         return null;
+    }
+
+    private function folderNameForType(?int $typeId, string $typeName, string $typeAbbr): string
+    {
+        if ($typeId !== null) {
+            foreach ($this->mediaTypes as $mt) {
+                if ((int) $mt['id'] === $typeId) {
+                    return (string) ($mt['folder_name'] ?? $mt['name'] ?? $typeAbbr);
+                }
+            }
+        }
+
+        return $this->folderMediaType($typeName, $typeAbbr);
     }
 
     private function folderMediaType(string $typeName, string $typeAbbr): string

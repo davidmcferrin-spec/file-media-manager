@@ -14,4 +14,8 @@ $showsTab = $showsTab ?? 'dictionary';
     <a class="nav-link<?php echo $showsTab === 'schedule' ? ' active' : ''; ?>"
        href="/schedule">Program Schedule</a>
   </li>
+  <li class="nav-item">
+    <a class="nav-link<?php echo $showsTab === 'legacy-map' ? ' active' : ''; ?>"
+       href="/legacy-map">Legacy Map</a>
+  </li>
 </ul>

@@ -27,7 +27,14 @@ use MediaManager\Support\View;
           <input type="text" name="name" class="form-control" required
                  value="<?php echo View::e($source['name']); ?>">
         </div>
-        <div class="col-md-8">
+        <div class="col-md-2">
+          <label class="form-label">Map Code</label>
+          <input type="text" name="source_code" class="form-control" maxlength="8"
+                 value="<?php echo View::e($source['source_code'] ?? ''); ?>"
+                 placeholder="NY / CHI">
+          <div class="form-text" style="color:var(--text-soft)">Legacy map Source column</div>
+        </div>
+        <div class="col-md-6">
           <label class="form-label">Mount Path</label>
           <input type="text" name="mount_path" class="form-control" required
                  value="<?php echo View::e($source['mount_path']); ?>"

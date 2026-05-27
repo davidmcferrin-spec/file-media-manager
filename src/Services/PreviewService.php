@@ -23,9 +23,9 @@ final class PreviewService
     ) {
         $this->ffmpegBin        = (string) env('FFMPEG_BIN', '/usr/bin/ffmpeg');
         $this->offsetSeconds    = (int) ($settings->get('thumbnail_offset_seconds') ?? env('THUMBNAIL_OFFSET_SECONDS', 50));
-        $this->durationSeconds  = (int) env('PREVIEW_DURATION_SECONDS', 120);
-        $this->width            = (int) env('PREVIEW_WIDTH', 640);
-        $this->height           = (int) env('PREVIEW_HEIGHT', 320);
+        $this->durationSeconds  = (int) env('PREVIEW_DURATION_SECONDS', 180);
+        $this->width            = (int) env('PREVIEW_WIDTH', 420);
+        $this->height           = (int) env('PREVIEW_HEIGHT', 236);
     }
 
     public function ensurePreview(int $fileId): string
