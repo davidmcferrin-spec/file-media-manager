@@ -55,6 +55,7 @@ $splitPending = (int) $pdo->query("
     SELECT COUNT(*) FROM split_queue WHERE status = 'PENDING'
 ")->fetchColumn();
 
+$dashboardTab = 'operations';
 $title = 'Dashboard — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/dashboard/index.php';

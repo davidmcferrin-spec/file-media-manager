@@ -194,4 +194,263 @@ class View
 
         return $basePath . ($qs !== '' ? '?' . $qs : '');
     }
+
+    /**
+     * @param list<array{label: string, count: int}> $slices
+     */
+    public static function pieChartHtml(array $slices, int $size = 220): string
+    {
+        $total = array_sum(array_column($slices, 'count'));
+        if ($total <= 0) {
+            return '<p class="path-text mb-0" style="color:var(--text-soft)">No data yet.</p>';
+        }
+
+        $colors = [
+            '#56c4f5', '#22c55e', '#facc15', '#f87171', '#a78bfa',
+            '#fb923c', '#2dd4bf', '#f472b6', '#94a3b8', '#e879f9',
+            '#38bdf8', '#4ade80', '#fcd34d',
+        ];
+
+        $cx     = $size / 2;
+        $cy     = $size / 2;
+        $radius = ($size / 2) - 4;
+        $angle  = 0.0;
+        $paths  = [];
+
+        foreach ($slices as $i => $slice) {
+            $count = (int) $slice['count'];
+            if ($count <= 0) {
+                continue;
+            }
+            $sliceAngle = ($count / $total) * 360.0;
+            if ($sliceAngle <= 0) {
+                continue;
+            }
+            $color = $colors[$i % count($colors)];
+            $paths[] = sprintf(
+                '<path d="%s" fill="%s" stroke="var(--panel)" stroke-width="1"><title>%s: %s (%s%%)</title></path>',
+                self::pieSlicePath($cx, $cy, $radius, $angle, $angle + $sliceAngle),
+                $color,
+                self::e((string) $slice['label']),
+                number_format($count),
+                number_format(($count / $total) * 100, 1)
+            );
+            $angle += $sliceAngle;
+        }
+
+        $legend = '';
+        foreach ($slices as $i => $slice) {
+            $count = (int) $slice['count'];
+            if ($count <= 0) {
+                continue;
+            }
+            $pct   = ($count / $total) * 100;
+            $color = $colors[$i % count($colors)];
+            $legend .= sprintf(
+                '<div class="d-flex align-items-center gap-2 mb-1" style="font-size:0.76rem">'
+                . '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:%s"></span>'
+                . '<span class="flex-grow-1 text-truncate" title="%s">%s</span>'
+                . '<span class="path-text text-nowrap">%s <span style="color:var(--text-soft)">(%s%%)</span></span>'
+                . '</div>',
+                $color,
+                self::e((string) $slice['label']),
+                self::e((string) $slice['label']),
+                number_format($count),
+                number_format($pct, 1)
+            );
+        }
+
+        return '<div class="d-flex flex-wrap align-items-start gap-3">'
+            . '<svg width="' . $size . '" height="' . $size . '" viewBox="0 0 ' . $size . ' ' . $size . '" role="img" aria-hidden="true">'
+            . implode('', $paths)
+            . '</svg>'
+            . '<div class="flex-grow-1" style="min-width:160px;max-height:220px;overflow:auto">' . $legend . '</div>'
+            . '</div>';
+    }
+
+    /**
+     * @param list<array{label: string, total_seconds: float, file_count: int, href?: string}> $bars
+     */
+    public static function hoursBarChartHtml(array $bars): string
+    {
+        if ($bars === []) {
+            return '<p class="path-text mb-0" style="color:var(--text-soft)">No dated content with duration yet.</p>';
+        }
+
+        $hours = array_map(
+            static fn (array $bar): float => max(0.0, ((float) $bar['total_seconds']) / 3600.0),
+            $bars
+        );
+        $maxHours = max($hours) ?: 1.0;
+        $count    = count($bars);
+
+        $leftPad    = 52.0;
+        $rightPad   = 16.0;
+        $topPad     = 16.0;
+        $bottomPad  = 44.0;
+        $chartHeight = 220.0;
+        $barGap     = 6.0;
+        $minBarWidth = 14.0;
+        $plotWidth  = max(320.0, ($count * ($minBarWidth + $barGap)) - $barGap);
+        $width      = $leftPad + $plotWidth + $rightPad;
+        $height     = $topPad + $chartHeight + $bottomPad;
+        $barWidth   = ($plotWidth - (($count - 1) * $barGap)) / $count;
+
+        $gridLines = [0.0, 0.25, 0.5, 0.75, 1.0];
+        $svg       = '';
+
+        foreach ($gridLines as $pct) {
+            $y     = $topPad + $chartHeight - ($pct * $chartHeight);
+            $label = self::formatHours($maxHours * $pct);
+            $svg .= sprintf(
+                '<line x1="%.1F" y1="%.1F" x2="%.1F" y2="%.1F" stroke="var(--border-color)" stroke-width="1"/>',
+                $leftPad,
+                $y,
+                $leftPad + $plotWidth,
+                $y
+            );
+            $svg .= sprintf(
+                '<text x="%.1F" y="%.1F" text-anchor="end" fill="var(--text-soft)" font-size="10">%s</text>',
+                $leftPad - 6,
+                $y + 3,
+                self::e($label)
+            );
+        }
+
+        $barColor = '#56c4f5';
+        $hoverColor = '#38bdf8';
+
+        foreach ($bars as $i => $bar) {
+            $h        = $hours[$i];
+            $barH     = $maxHours > 0 ? ($h / $maxHours) * $chartHeight : 0.0;
+            $x        = $leftPad + ($i * ($barWidth + $barGap));
+            $y        = $topPad + $chartHeight - $barH;
+            $label    = (string) $bar['label'];
+            $fileCount = (int) ($bar['file_count'] ?? 0);
+            $title    = sprintf(
+                '%s: %s hours (%s files)',
+                $label,
+                self::formatHours((float) $bar['total_seconds']),
+                number_format($fileCount)
+            );
+            $href     = isset($bar['href']) && $bar['href'] !== '' ? (string) $bar['href'] : null;
+
+            $rect = sprintf(
+                '<rect x="%.2F" y="%.2F" width="%.2F" height="%.2F" rx="2" fill="%s" class="hours-bar%s">'
+                . '<title>%s</title></rect>',
+                $x,
+                $y,
+                $barWidth,
+                max(0.0, $barH),
+                $barColor,
+                $href !== null ? ' hours-bar-clickable' : '',
+                self::e($title)
+            );
+
+            if ($href !== null) {
+                $rect = sprintf(
+                    '<a href="%s" class="hours-bar-link">%s</a>',
+                    self::e($href),
+                    $rect
+                );
+            }
+
+            $svg .= $rect;
+
+            $labelY = $topPad + $chartHeight + 14;
+            if ($count > 8) {
+                $svg .= sprintf(
+                    '<text x="%.1F" y="%.1F" text-anchor="end" fill="var(--text-soft)" font-size="9" '
+                    . 'transform="rotate(-45 %.1F %.1F)">%s</text>',
+                    $x + ($barWidth / 2),
+                    $labelY + 10,
+                    $x + ($barWidth / 2),
+                    $labelY + 10,
+                    self::e($label)
+                );
+            } else {
+                $svg .= sprintf(
+                    '<text x="%.1F" y="%.1F" text-anchor="middle" fill="var(--text-soft)" font-size="10">%s</text>',
+                    $x + ($barWidth / 2),
+                    $labelY,
+                    self::e($label)
+                );
+            }
+        }
+
+        $style = '<style>'
+            . '.hours-bar-chart{width:100%;max-width:100%;height:auto;display:block}'
+            . '.hours-bar-link{cursor:pointer}'
+            . '.hours-bar-clickable{transition:fill 0.15s ease}'
+            . '.hours-bar-link:hover .hours-bar-clickable{fill:' . $hoverColor . '}'
+            . '</style>';
+
+        return $style
+            . '<svg class="hours-bar-chart" viewBox="0 0 ' . round($width, 1) . ' ' . round($height, 1) . '" '
+            . 'role="img" aria-label="Hours of content bar chart">'
+            . $svg
+            . '</svg>';
+    }
+
+    public static function formatHours(float $seconds): string
+    {
+        if ($seconds <= 0) {
+            return '0';
+        }
+
+        $hours = $seconds / 3600;
+
+        return number_format($hours, $hours >= 100 ? 0 : 1);
+    }
+
+    private static function pieSlicePath(
+        float $cx,
+        float $cy,
+        float $radius,
+        float $startAngle,
+        float $endAngle
+    ): string {
+        if ($endAngle - $startAngle >= 359.999) {
+            return sprintf(
+                'M %.2F,%.2F m -%.2F,0 a %.2F,%.2F 0 1,0 %.4F,0 a %.2F,%.2F 0 1,0 -%.4F,0',
+                $cx,
+                $cy,
+                $radius,
+                $radius,
+                $radius,
+                $radius * 2,
+                $radius,
+                $radius,
+                $radius * 2
+            );
+        }
+
+        $start = self::polarToCartesian($cx, $cy, $radius, $endAngle);
+        $end   = self::polarToCartesian($cx, $cy, $radius, $startAngle);
+        $large = ($endAngle - $startAngle) > 180 ? 1 : 0;
+
+        return sprintf(
+            'M %.2F,%.2F L %.2F,%.2F A %.2F,%.2F 0 %d,0 %.2F,%.2F Z',
+            $cx,
+            $cy,
+            $start[0],
+            $start[1],
+            $radius,
+            $radius,
+            $large,
+            $end[0],
+            $end[1]
+        );
+    }
+
+    /** @return array{0: float, 1: float} */
+    private static function polarToCartesian(float $cx, float $cy, float $radius, float $angleDeg): array
+    {
+        $rad = deg2rad($angleDeg - 90);
+
+        return [
+            round($cx + ($radius * cos($rad)), 2),
+            round($cy + ($radius * sin($rad)), 2),
+        ];
+    }
 }

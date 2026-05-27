@@ -14,7 +14,7 @@ $totalPending = (int) ($queueStats['pending'] ?? 0);
 ?>
 
 <!-- ── Page header ──────────────────────────────────────────── -->
-<div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
+<div class="d-flex flex-wrap justify-content-between align-items-start mb-2 gap-3">
   <div>
     <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Operations Dashboard</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
@@ -28,6 +28,8 @@ $totalPending = (int) ($queueStats['pending'] ?? 0);
   </div>
   <?php endif; ?>
 </div>
+
+<?php require __DIR__ . '/_nav.php'; ?>
 
 <!-- ── Stat cards ────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">

@@ -53,6 +53,9 @@ match (true) {
     $uri === '/' || $uri === '/dashboard'
         => require dirname(__DIR__) . '/src/Controllers/DashboardController.php',
 
+    $uri === '/dashboard/library'
+        => require dirname(__DIR__) . '/src/Controllers/DashboardLibraryController.php',
+
     // Queue
     $uri === '/queue'
         => require dirname(__DIR__) . '/src/Controllers/QueueController.php',
