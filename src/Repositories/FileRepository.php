@@ -198,6 +198,104 @@ final class FileRepository extends BaseRepository
         return $stmt->execute([$status, $userId, $id]);
     }
 
+    /** Reset APPROVED → PENDING (clears review stamp). */
+    public function unapprove(int $id): bool
+    {
+        $stmt = $this->db()->prepare(
+            "UPDATE files SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL
+             WHERE id = ? AND status = 'APPROVED'"
+        );
+
+        return $stmt->execute([$id]) && $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Delete a queue row that has not been executed / rolled back.
+     * Removes related split_queue rows first.
+     */
+    public function deleteRemovable(int $id): bool
+    {
+        $file = $this->findById($id);
+        if ($file === null) {
+            return false;
+        }
+        if (!in_array((string) ($file['status'] ?? ''), ['PENDING', 'FLAGGED', 'REJECTED', 'APPROVED'], true)) {
+            return false;
+        }
+
+        $this->db()->prepare('DELETE FROM split_queue WHERE file_id = ?')->execute([$id]);
+        $stmt = $this->db()->prepare('DELETE FROM files WHERE id = ?');
+        $stmt->execute([$id]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Full classifier overwrite for reclassify (resets review + dual-proposal state).
+     *
+     * @param array<string, mixed> $data
+     */
+    public function updateClassification(int $id, array $data): bool
+    {
+        $stmt = $this->db()->prepare(
+            "UPDATE files SET
+                proposed_dir = ?,
+                proposed_filename = ?,
+                show_id = ?,
+                media_type_id = ?,
+                file_date = ?,
+                file_time = ?,
+                confidence = ?,
+                classifier_confidence = ?,
+                classifier_proposed_dir = ?,
+                classifier_proposed_filename = ?,
+                proposed_source = 'classifier',
+                classifier_notes = ?,
+                needs_split = ?,
+                split_notes = ?,
+                status = 'PENDING',
+                reviewed_by = NULL,
+                reviewed_at = NULL,
+                alt_proposed_dir = NULL,
+                alt_proposed_filename = NULL,
+                alt_source = NULL,
+                legacy_map_id = NULL,
+                map_curator_confidence = NULL,
+                proposal_agreement = NULL
+             WHERE id = ?
+               AND status IN ('PENDING', 'FLAGGED', 'REJECTED')"
+        );
+
+        return $stmt->execute([
+            $data['proposed_dir'] ?? null,
+            $data['proposed_filename'] ?? null,
+            $data['show_id'] ?? null,
+            $data['media_type_id'] ?? null,
+            $data['file_date'] ?? null,
+            $data['file_time'] ?? null,
+            $data['confidence'] ?? 'LOW',
+            $data['confidence'] ?? 'LOW',
+            $data['proposed_dir'] ?? null,
+            $data['proposed_filename'] ?? null,
+            $data['classifier_notes'] ?? '{}',
+            $this->pgBool((bool) ($data['needs_split'] ?? false)),
+            $data['split_notes'] ?? '',
+            $id,
+        ]) && $stmt->rowCount() > 0;
+    }
+
+    public function countReclassifiableByScanJob(int $scanJobId): int
+    {
+        $stmt = $this->db()->prepare(
+            "SELECT COUNT(*) FROM files
+             WHERE scan_job_id = ?
+               AND status IN ('PENDING', 'FLAGGED', 'REJECTED')"
+        );
+        $stmt->execute([$scanJobId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     public function updateProposed(
         int $id,
         ?string $proposedDir,

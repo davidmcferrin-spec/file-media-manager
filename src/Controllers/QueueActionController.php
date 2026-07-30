@@ -124,6 +124,52 @@ if ($uri === '/queue/reject') {
     redirect_queue();
 }
 
+// ── Unapprove (APPROVED → PENDING) ────────────────────────────
+if ($uri === '/queue/unapprove') {
+    $ids = parse_ids();
+    $count = 0;
+    foreach ($ids as $id) {
+        $file = $files->findById($id);
+        if ($file === null || ($file['status'] ?? '') !== 'APPROVED') {
+            continue;
+        }
+        if ($files->unapprove($id)) {
+            $audit->record($userId, $user['email'] ?? '', $ip, 'FILE_UNAPPROVED', 'file', $id, $file['original_path'], null, []);
+            $count++;
+        }
+    }
+    Session::flash('success', $count . ' file(s) returned to pending.');
+    redirect_queue();
+}
+
+// ── Remove from queue (not executed) ──────────────────────────
+if ($uri === '/queue/remove') {
+    $ids = parse_ids();
+    $count = 0;
+    $cache = new \MediaManager\Services\MediaCacheService(
+        projectRoot: dirname(__DIR__, 2)
+    );
+    foreach ($ids as $id) {
+        $file = $files->findById($id);
+        if ($file === null) {
+            continue;
+        }
+        if (!in_array($file['status'] ?? '', ['PENDING', 'FLAGGED', 'REJECTED', 'APPROVED'], true)) {
+            continue;
+        }
+        $path = (string) ($file['original_path'] ?? '');
+        if ($files->deleteRemovable($id)) {
+            $cache->invalidate($id);
+            $audit->record($userId, $user['email'] ?? '', $ip, 'FILE_REMOVED', 'file', $id, $path, null, [
+                'prior_status' => $file['status'] ?? null,
+            ]);
+            $count++;
+        }
+    }
+    Session::flash('success', $count . ' file(s) removed from queue.');
+    redirect_queue();
+}
+
 // ── Batch: approve | reject | flag ───────────────────────────
 if ($uri === '/queue/batch') {
     $action = $_POST['action'] ?? '';
@@ -131,9 +177,10 @@ if ($uri === '/queue/batch') {
     $count  = 0;
 
     $statusMap = [
-        'approve' => 'APPROVED',
-        'reject'  => 'REJECTED',
-        'flag'    => 'FLAGGED',
+        'approve'   => 'APPROVED',
+        'reject'    => 'REJECTED',
+        'flag'      => 'FLAGGED',
+        'unapprove' => 'PENDING',
     ];
     if (!isset($statusMap[$action])) {
         Session::flash('error', 'Unknown batch action.');
@@ -142,10 +189,11 @@ if ($uri === '/queue/batch') {
 
     $newStatus = $statusMap[$action];
     $auditAction = match ($action) {
-        'approve' => 'FILE_APPROVED',
-        'reject'  => 'FILE_REJECTED',
-        'flag'    => 'FILE_FLAGGED',
-        default   => 'FILE_UPDATED',
+        'approve'   => 'FILE_APPROVED',
+        'reject'    => 'FILE_REJECTED',
+        'flag'      => 'FILE_FLAGGED',
+        'unapprove' => 'FILE_UNAPPROVED',
+        default     => 'FILE_UPDATED',
     };
 
     foreach ($ids as $id) {
@@ -154,6 +202,19 @@ if ($uri === '/queue/batch') {
             continue;
         }
         if ($action === 'approve' && ($file['status'] ?? '') !== 'PENDING') {
+            continue;
+        }
+        if ($action === 'unapprove') {
+            if (($file['status'] ?? '') !== 'APPROVED') {
+                continue;
+            }
+            if ($files->unapprove($id)) {
+                $audit->record($userId, $user['email'] ?? '', $ip, $auditAction, 'file', $id, $file['original_path'], null, []);
+                $count++;
+            }
+            continue;
+        }
+        if ($action === 'reject' && !in_array($file['status'] ?? '', ['PENDING', 'FLAGGED'], true)) {
             continue;
         }
         if ($files->updateStatus($id, $newStatus, $userId)) {

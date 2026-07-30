@@ -14,6 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.2.0] — 2026-07-30
+
+### Added
+
+- Queue unapprove (APPROVED → PENDING) for single files and batch selection
+- Remove files from the review queue (PENDING / FLAGGED / REJECTED / APPROVED; disk untouched)
+- Reclassify Files on finished scan jobs — re-runs classifier in place; leaves approved/executed alone
+- Merge Shows on the Dictionary page (same merge as Program Schedule)
+
 ## [0.1.0] — 2026-07-30
 
 ### Added

@@ -73,6 +73,8 @@ match (true) {
     // Queue actions (POST)
     $uri === '/queue/approve'
     || $uri === '/queue/reject'
+    || $uri === '/queue/unapprove'
+    || $uri === '/queue/remove'
     || $uri === '/queue/edit'
     || $uri === '/queue/batch'
     || $uri === '/queue/add-split'
@@ -80,9 +82,12 @@ match (true) {
     || $uri === '/queue/clear-split'
         => require dirname(__DIR__) . '/src/Controllers/QueueActionController.php',
 
-    // Scan: apply legacy map (before general scan routes)
+    // Scan: apply legacy map / reclassify (before general scan routes)
     $uri === '/scan/apply-map'
         => require dirname(__DIR__) . '/src/Controllers/LegacyMapController.php',
+
+    $uri === '/scan/reclassify'
+        => require dirname(__DIR__) . '/src/Controllers/ScanController.php',
 
     // Scanner (admin only)
     $uri === '/scan' || str_starts_with($uri, '/scan/')

@@ -18,9 +18,9 @@ final class AppVersionTest extends TestCase
     {
         $entries = AppVersion::changelogEntries(5);
         $this->assertNotEmpty($entries);
-        $this->assertSame('0.1.0', $entries[0]['version']);
+        $this->assertSame('0.2.0', $entries[0]['version']);
         $this->assertSame('2026-07-30', $entries[0]['date']);
-        $this->assertStringContainsString('Review queue', $entries[0]['body']);
+        $this->assertStringContainsString('Queue unapprove', $entries[0]['body']);
     }
 
     public function test_format_body_html_escapes_and_lists(): void

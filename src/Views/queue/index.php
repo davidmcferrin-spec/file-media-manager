@@ -140,16 +140,28 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
   </div>
 </form>
 
-<?php if (($filters['status'] ?? '') === 'PENDING' && Auth::isEditor()): ?>
+<?php if (Auth::isEditor() && in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)): ?>
 <form method="post" action="/queue/batch" id="batch-form">
   <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
   <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
   <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+    <?php if (($filters['status'] ?? '') === 'PENDING'): ?>
     <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">Approve Selected</button>
     <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
     <button type="submit" name="action" value="flag" class="btn btn-outline-warning btn-sm">Flag Selected</button>
     <?php if (Auth::isAdmin()): ?>
     <button type="submit" formaction="/queue/add-split" class="btn btn-outline-info btn-sm">Add to Split Queue</button>
+    <?php endif; ?>
+    <?php elseif (($filters['status'] ?? '') === 'FLAGGED'): ?>
+    <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
+    <?php endif; ?>
+    <?php if (($filters['status'] ?? '') === 'APPROVED'): ?>
+    <button type="submit" name="action" value="unapprove" class="btn btn-outline-warning btn-sm"
+            onclick="return confirm('Return selected approved files to pending?');">Unapprove Selected</button>
+    <?php endif; ?>
+    <?php if (in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)): ?>
+    <button type="submit" formaction="/queue/remove" class="btn btn-outline-danger btn-sm"
+            onclick="return confirm('Permanently remove selected files from the queue? This does not delete files on disk.');">Remove Selected</button>
     <?php endif; ?>
     <span id="selection-count" class="path-text ms-1" style="font-size:0.78rem"></span>
     <button type="button" id="clear-selection" class="btn btn-link btn-sm p-0 path-text d-none"
@@ -174,7 +186,13 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
     <table class="table table-hover mb-0 align-middle" id="queue-table">
       <thead>
         <tr>
-          <?php if (($filters['status'] ?? '') === 'PENDING' || !empty($filters['needs_split'])): ?>
+          <?php
+          $showChecks = Auth::isEditor() && (
+              in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)
+              || !empty($filters['needs_split'])
+          );
+          ?>
+          <?php if ($showChecks): ?>
           <th style="width:32px">
             <input type="checkbox" id="check-all" title="Select all on this page" aria-label="Select all on this page">
           </th>
@@ -188,7 +206,11 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
       </thead>
       <tbody>
         <?php
-        $colspan = (($filters['status'] ?? '') === 'PENDING' || !empty($filters['needs_split'])) ? 6 : 5;
+        $showChecks = Auth::isEditor() && (
+            in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)
+            || !empty($filters['needs_split'])
+        );
+        $colspan = $showChecks ? 6 : 5;
         if ($queueItems === []):
         ?>
         <tr>
@@ -197,7 +219,7 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
         <?php else: ?>
         <?php foreach ($queueItems as $item): ?>
         <tr class="queue-select-row">
-          <?php if (($filters['status'] ?? '') === 'PENDING' || !empty($filters['needs_split'])): ?>
+          <?php if ($showChecks): ?>
           <td class="queue-check-cell">
             <input type="checkbox" name="ids[]" value="<?php echo (int) $item['id']; ?>" class="row-check"
                    aria-label="Select <?php echo View::e($item['original_filename']); ?>">
@@ -315,6 +337,24 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
             </form>
             <?php endif; ?>
             <?php endif; ?>
+            <?php if (Auth::isEditor() && ($item['status'] ?? '') === 'APPROVED'): ?>
+            <form method="post" action="/queue/unapprove" class="d-inline"
+                  onsubmit="return confirm('Return this file to pending?');">
+              <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+              <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+              <input type="hidden" name="ids[]" value="<?php echo (int) $item['id']; ?>">
+              <button type="submit" class="btn btn-outline-warning btn-xs">Unapprove</button>
+            </form>
+            <?php endif; ?>
+            <?php if (Auth::isEditor() && in_array($item['status'] ?? '', ['PENDING', 'FLAGGED', 'REJECTED', 'APPROVED'], true)): ?>
+            <form method="post" action="/queue/remove" class="d-inline"
+                  onsubmit="return confirm('Remove this file from the queue? Disk file is not deleted.');">
+              <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+              <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+              <input type="hidden" name="ids[]" value="<?php echo (int) $item['id']; ?>">
+              <button type="submit" class="btn btn-outline-danger btn-xs">Remove</button>
+            </form>
+            <?php endif; ?>
             <?php if (Auth::isEditor() && !empty($item['needs_split'])
                 && in_array($item['status'], ['PENDING', 'FLAGGED', 'APPROVED'], true)): ?>
             <form method="post" action="/queue/clear-split" class="d-inline"
@@ -343,7 +383,7 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
   </div>
 </div>
 
-<?php if (($filters['status'] ?? '') === 'PENDING' && Auth::isEditor()): ?>
+<?php if (Auth::isEditor() && in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)): ?>
 </form>
 <?php endif; ?>
 

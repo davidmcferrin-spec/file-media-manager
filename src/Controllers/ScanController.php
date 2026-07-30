@@ -335,6 +335,62 @@ if ($method === 'POST' && $uri === '/scan/delete') {
     exit;
 }
 
+// ── POST: reclassify existing files in a scan job ─────────────
+if ($method === 'POST' && $uri === '/scan/reclassify') {
+    $csrf = $_POST['_csrf'] ?? '';
+    if (!Session::validateCsrf($csrf)) {
+        Session::flash('error', 'Invalid request.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $jobId = (int) ($_POST['id'] ?? 0);
+    $job   = $jobId > 0 ? $scanJobs->findById($jobId) : null;
+    if ($job === null) {
+        Session::flash('error', 'Scan job not found.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $status = (string) ($job['status'] ?? '');
+    if (!in_array($status, ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true)) {
+        Session::flash('error', 'Finish or pause the scan before reclassifying.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    try {
+        $stats = (new \MediaManager\Services\ReclassifyService())->reclassifyScanJob($jobId);
+        $user = Auth::user();
+        $audit->record(
+            Auth::id(),
+            $user['email'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? '',
+            'SCAN_RECLASSIFIED',
+            'scan_job',
+            $jobId,
+            null,
+            null,
+            $stats
+        );
+        Session::flash(
+            'success',
+            sprintf(
+                'Reclassified %d file(s) (%d skipped, %d failed, %d protected left unchanged).',
+                $stats['reclassified'],
+                $stats['skipped'],
+                $stats['failed'],
+                $stats['protected']
+            )
+        );
+    } catch (\Throwable $e) {
+        Session::flash('error', 'Reclassify failed: ' . $e->getMessage());
+    }
+
+    header('Location: /scan/' . $jobId);
+    exit;
+}
+
 // ── GET: job detail ───────────────────────────────────────────
 if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $jobId = (int) $m[1];
@@ -350,9 +406,12 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $totalQueued   = $files->countByScanJob($jobId);
     $confidence    = $files->confidenceSummary($jobId);
     $protectedCount = $files->countProtectedByScanJob($jobId);
+    $reclassifiableCount = $files->countReclassifiableByScanJob($jobId);
     $canStop       = in_array((string) $job['status'], ['PENDING', 'RUNNING'], true);
     $canResume     = (string) $job['status'] === 'PAUSED';
     $canDelete     = (string) $job['status'] !== 'RUNNING' && $protectedCount === 0;
+    $canReclassify = in_array((string) $job['status'], ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true)
+        && $reclassifiableCount > 0;
 
     $title = 'Scan Job #' . $jobId . ' — Media Manager';
     require dirname(__DIR__) . '/Views/layouts/header.php';

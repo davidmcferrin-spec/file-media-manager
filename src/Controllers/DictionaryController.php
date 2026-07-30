@@ -127,6 +127,44 @@ if ($method === 'POST') {
         exit;
     }
 
+    if ($uri === '/dictionary/merge') {
+        $canonicalId = (int) ($_POST['canonical_id'] ?? 0);
+        $absorbedRaw = $_POST['absorbed_ids'] ?? [];
+        if (!is_array($absorbedRaw)) {
+            $absorbedRaw = [$absorbedRaw];
+        }
+        $absorbedIds = array_values(array_filter(array_map('intval', $absorbedRaw)));
+
+        if ($canonicalId <= 0 || $absorbedIds === []) {
+            Session::flash('error', 'Select a canonical show and at least one show to merge.');
+            header('Location: /dictionary');
+            exit;
+        }
+
+        try {
+            $counts = $showRepo->mergeInto($canonicalId, $absorbedIds);
+            dictionary_audit($audit, 'SHOWS_MERGED', $canonicalId, [
+                'absorbed_ids' => $absorbedIds,
+                'counts'       => $counts,
+            ]);
+            Session::flash(
+                'success',
+                sprintf(
+                    'Merged %d show(s): %d schedule row(s), %d file(s), %d rule(s) updated.',
+                    $counts['deleted'],
+                    $counts['schedule'],
+                    $counts['files'],
+                    $counts['rules']
+                )
+            );
+        } catch (\Throwable $e) {
+            Session::flash('error', 'Merge failed: ' . $e->getMessage());
+        }
+
+        header('Location: /dictionary');
+        exit;
+    }
+
     http_response_code(404);
     exit;
 }

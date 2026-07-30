@@ -170,3 +170,41 @@ use MediaManager\Support\View;
     </div>
   </div>
 </div>
+
+<div class="card mt-4">
+  <div class="card-header">Merge Shows</div>
+  <div class="card-body">
+    <form method="post" action="/dictionary/merge"
+          onsubmit="return confirm('Merge selected shows into the canonical entry? Schedule rows, queue files, and conversion rules will be rewired.');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <p class="path-text mb-3" style="font-size:0.78rem">
+        Consolidate duplicate or auto-generated shows into one dictionary entry
+        (e.g. merge schedule-created duplicates into the canonical abbreviation).
+      </p>
+      <div class="row g-2">
+        <div class="col-md-5">
+          <label class="form-label">Keep (canonical)</label>
+          <select name="canonical_id" class="form-select form-select-sm" required>
+            <option value="">—</option>
+            <?php foreach ($shows as $show): ?>
+            <option value="<?php echo (int) $show['id']; ?>">
+              <?php echo View::e($show['abbreviation']); ?> — <?php echo View::e($show['canonical_name']); ?>
+            </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="col-md-7">
+          <label class="form-label">Merge into canonical (select one or more)</label>
+          <select name="absorbed_ids[]" class="form-select form-select-sm" multiple size="6" required>
+            <?php foreach ($shows as $show): ?>
+            <option value="<?php echo (int) $show['id']; ?>">
+              <?php echo View::e($show['abbreviation']); ?> — <?php echo View::e($show['canonical_name']); ?>
+            </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-outline-warning btn-sm mt-3">Merge Shows</button>
+    </form>
+  </div>
+</div>
