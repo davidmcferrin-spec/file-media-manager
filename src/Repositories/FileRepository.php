@@ -14,6 +14,21 @@ final class FileRepository extends BaseRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    public function findByOriginalPath(string $path): ?array
+    {
+        $stmt = $this->db()->prepare(
+            'SELECT f.*, s.mount_path AS source_mount
+             FROM files f
+             LEFT JOIN sources s ON s.id = f.source_id
+             WHERE f.original_path = ?
+             LIMIT 1'
+        );
+        $stmt->execute([$path]);
+        $row = $stmt->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
     /** @param array<string, mixed> $data */
     public function insert(array $data): int
     {

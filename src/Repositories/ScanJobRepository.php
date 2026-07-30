@@ -201,6 +201,29 @@ final class ScanJobRepository extends BaseRepository
         )->execute([$id]);
     }
 
+    /**
+     * Reset a finished job so the worker can walk the tree again (full rescan).
+     */
+    public function prepareRescan(int $id): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE scan_jobs
+             SET status = \'PENDING\',
+                 cancel_requested = false,
+                 worker_pid = NULL,
+                 completed_at = NULL,
+                 error_message = NULL,
+                 processed_files = 0,
+                 total_files = 0
+             WHERE id = ?
+               AND status IN (\'COMPLETED\', \'CANCELLED\', \'PAUSED\', \'FAILED\')
+             RETURNING id'
+        );
+        $stmt->execute([$id]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function incrementProcessed(int $id): void
     {
         $this->db()->prepare(

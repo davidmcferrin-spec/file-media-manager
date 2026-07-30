@@ -87,6 +87,7 @@ match (true) {
         => require dirname(__DIR__) . '/src/Controllers/LegacyMapController.php',
 
     $uri === '/scan/reclassify'
+    || $uri === '/scan/rescan'
         => require dirname(__DIR__) . '/src/Controllers/ScanController.php',
 
     // Scanner (admin only)

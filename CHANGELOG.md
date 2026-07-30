@@ -14,6 +14,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.3.0] — 2026-07-30
+
+### Added
+
+- Full **Rescan** on finished scan jobs — re-walks the same source/path, reclassifies pending/flagged/rejected files, queues newly found files; approved/executed left unchanged
+
 ## [0.2.0] — 2026-07-30
 
 ### Added

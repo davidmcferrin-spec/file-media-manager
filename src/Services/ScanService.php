@@ -7,10 +7,13 @@ namespace MediaManager\Services;
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\ScanJobRepository;
+use MediaManager\Repositories\SplitQueueRepository;
 use RuntimeException;
 
 final class ScanService
 {
+    private bool $rescanMode = false;
+
     /** @param ?\Closure(string, array<string, mixed>): void $onProgress */
     public function __construct(
         private readonly ScanJobRepository $scanJobs = new ScanJobRepository(),
@@ -18,6 +21,7 @@ final class ScanService
         private readonly Classifier $classifier = new Classifier(),
         private readonly FFprobeService $ffprobe = new FFprobeService(),
         private readonly AuditRepository $audit = new AuditRepository(),
+        private readonly SplitQueueRepository $splitQueue = new SplitQueueRepository(),
         private readonly ?\Closure $onProgress = null,
     ) {
     }
@@ -37,15 +41,17 @@ final class ScanService
         return $jobId;
     }
 
-    public function runJob(int $jobId): void
+    public function runJob(int $jobId, bool $rescan = false): void
     {
+        $this->rescanMode = $rescan;
+
         $job = $this->scanJobs->findById($jobId);
         if ($job === null) {
             throw new RuntimeException("Scan job {$jobId} not found.");
         }
 
         $status = (string) ($job['status'] ?? '');
-        if ($status === 'COMPLETED' || $status === 'CANCELLED') {
+        if (!$rescan && ($status === 'COMPLETED' || $status === 'CANCELLED')) {
             return;
         }
 
@@ -91,8 +97,10 @@ final class ScanService
 
         $this->scanJobs->resetProgress($jobId);
 
-        $skipped = 0;
-        $queued  = 0;
+        $skipped      = 0;
+        $queued       = 0;
+        $reclassified = 0;
+        $duplicates   = 0;
 
         $this->scanJobs->setWorkerPid($jobId, getmypid());
 
@@ -101,6 +109,7 @@ final class ScanService
             'source_name' => (string) ($job['source_name'] ?? ''),
             'scan_root'   => $scanRoot,
             'extract'     => $extract,
+            'rescan'      => $this->rescanMode,
         ]);
 
         try {
@@ -125,6 +134,10 @@ final class ScanService
                 $outcome = $this->processFile($job, $entry, $extract);
                 if ($outcome === 'queued') {
                     $queued++;
+                } elseif ($outcome === 'reclassified') {
+                    $reclassified++;
+                } elseif ($outcome === 'duplicate') {
+                    $duplicates++;
                 } elseif ($outcome === 'skipped') {
                     $skipped++;
                 }
@@ -144,31 +157,39 @@ final class ScanService
                 (int) $job['created_by'],
                 (string) ($job['created_by_email'] ?? ''),
                 '127.0.0.1',
-                'SCAN_COMPLETED',
+                $this->rescanMode ? 'SCAN_RESCAN_COMPLETED' : 'SCAN_COMPLETED',
                 'scan_job',
                 $jobId,
                 null,
                 null,
                 [
-                    'total_files' => count($mediaFiles),
-                    'queued'      => $queued,
-                    'skipped'     => $skipped,
-                    'subpath'     => $subpath,
+                    'total_files'  => count($mediaFiles),
+                    'queued'       => $queued,
+                    'reclassified' => $reclassified,
+                    'duplicates'   => $duplicates,
+                    'skipped'      => $skipped,
+                    'subpath'      => $subpath,
+                    'rescan'       => $this->rescanMode,
                 ]
             );
 
             $this->progress('complete', [
-                'job_id'  => $jobId,
-                'total'   => $totalFiles,
-                'queued'  => $queued,
-                'skipped' => $skipped,
+                'job_id'       => $jobId,
+                'total'        => $totalFiles,
+                'queued'       => $queued,
+                'reclassified' => $reclassified,
+                'duplicates'   => $duplicates,
+                'skipped'      => $skipped,
             ]);
 
             error_log(sprintf(
-                '[scan] Job %d completed: %d discovered, %d queued, %d skipped.',
+                '[scan] Job %d completed%s: %d discovered, %d queued, %d reclassified, %d duplicate, %d skipped.',
                 $jobId,
+                $this->rescanMode ? ' (rescan)' : '',
                 $totalFiles,
                 $queued,
+                $reclassified,
+                $duplicates,
                 $skipped
             ));
         } catch (ScanCancelledException $e) {
@@ -434,7 +455,7 @@ final class ScanService
 
     /**
      * @param array{path: string, sidecars: list<string>} $entry
-     * @return 'queued'|'skipped'|'duplicate'
+     * @return 'queued'|'reclassified'|'skipped'|'duplicate'
      */
     private function processFile(array $job, array $entry, bool $extractMetadata): string
     {
@@ -447,7 +468,15 @@ final class ScanService
             return 'skipped';
         }
 
-        if ($this->files->existsByOriginalPath($path)) {
+        $existing = $this->files->findByOriginalPath($path);
+        if ($existing !== null) {
+            if ($this->rescanMode
+                && (int) ($existing['scan_job_id'] ?? 0) === (int) $job['id']
+                && in_array((string) ($existing['status'] ?? ''), ['PENDING', 'FLAGGED', 'REJECTED'], true)
+            ) {
+                return $this->reclassifyExisting($job, $existing, $entry, $extractMetadata);
+            }
+
             return 'duplicate';
         }
 
@@ -501,6 +530,72 @@ final class ScanService
             return 'queued';
         } catch (\Throwable $e) {
             error_log('[scan] Skipping ' . $path . ': ' . $e->getMessage());
+            return 'skipped';
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $job
+     * @param array<string, mixed> $file
+     * @param array{path: string, sidecars: list<string>} $entry
+     * @return 'reclassified'|'skipped'
+     */
+    private function reclassifyExisting(array $job, array $file, array $entry, bool $extractMetadata): string
+    {
+        $id = (int) $file['id'];
+        $sidecarPaths = $entry['sidecars'];
+        if ($sidecarPaths === []) {
+            foreach (FileRepository::parseSidecars($file['classifier_notes'] ?? null) as $sidecar) {
+                $sidecarPath = (string) ($sidecar['original_path'] ?? '');
+                if ($sidecarPath !== '') {
+                    $sidecarPaths[] = $sidecarPath;
+                }
+            }
+        }
+
+        try {
+            $probe = null;
+            if ($extractMetadata) {
+                $probe = $this->ffprobe->probe((string) $file['original_path']);
+            } elseif (!empty($file['duration_seconds']) || !empty($file['codec_video'])) {
+                $probe = [
+                    'duration'      => $file['duration_seconds'] ?? null,
+                    'creation_time' => null,
+                ];
+            }
+
+            $result = $this->classifier->classify(
+                (string) $file['original_path'],
+                (string) $job['mount_path'],
+                $probe,
+                $sidecarPaths
+            );
+
+            $wasSplit = !empty($file['needs_split']);
+            $ok = $this->files->updateClassification($id, [
+                'proposed_dir'      => $result->proposedDir,
+                'proposed_filename' => $result->proposedFilename,
+                'show_id'           => $result->showId,
+                'media_type_id'     => $result->mediaTypeId,
+                'file_date'         => $result->fileDate,
+                'file_time'         => $result->fileTime,
+                'confidence'        => $result->confidence,
+                'classifier_notes'  => $result->classifierNotesJson(),
+                'needs_split'       => $result->needsSplit,
+                'split_notes'       => $result->splitNotes,
+            ]);
+
+            if (!$ok) {
+                return 'skipped';
+            }
+
+            if ($wasSplit && !$result->needsSplit) {
+                $this->splitQueue->deleteActiveForFile($id);
+            }
+
+            return 'reclassified';
+        } catch (\Throwable $e) {
+            error_log('[scan] Rescan reclassify failed for file #' . $id . ': ' . $e->getMessage());
             return 'skipped';
         }
     }

@@ -16,9 +16,11 @@ use MediaManager\Support\View;
 /** @var bool $canDelete */
 /** @var bool $canResume */
 /** @var bool $canReclassify */
+/** @var bool $canRescan */
 $status = (string) ($job['status'] ?? '');
 $reclassifiableCount = $reclassifiableCount ?? 0;
 $canReclassify = $canReclassify ?? false;
+$canRescan = $canRescan ?? false;
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
@@ -69,6 +71,14 @@ $canReclassify = $canReclassify ?? false;
       <button type="submit" class="btn btn-outline-warning btn-sm">Apply Legacy Map</button>
     </form>
     <?php endif; ?>
+    <?php if ($canRescan): ?>
+    <form method="post" action="/scan/rescan" class="d-inline"
+          onsubmit="return confirm('Full rescan job #<?php echo (int) $job['id']; ?>?\n\n• Re-walks the same source/path\n• Reclassifies pending/flagged/rejected files\n• Queues newly found files\n• Leaves approved/executed files unchanged');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <button type="submit" class="btn btn-primary btn-sm">Rescan</button>
+    </form>
+    <?php endif; ?>
     <?php if ($canReclassify): ?>
     <form method="post" action="/scan/reclassify" class="d-inline"
           onsubmit="return confirm('Re-run the classifier on <?php echo number_format($reclassifiableCount); ?> pending/flagged/rejected file(s)? Approved and executed files are left unchanged. Legacy map matches will be cleared until you re-apply the map.');">
@@ -77,7 +87,7 @@ $canReclassify = $canReclassify ?? false;
       <button type="submit" class="btn btn-outline-primary btn-sm">Reclassify Files</button>
     </form>
     <?php endif; ?>
-    <a href="/queue?scan_job_id=<?php echo (int) $job['id']; ?>" class="btn btn-primary btn-sm">Review Queue</a>
+    <a href="/queue?scan_job_id=<?php echo (int) $job['id']; ?>" class="btn btn-outline-secondary btn-sm">Review Queue</a>
   </div>
 </div>
 

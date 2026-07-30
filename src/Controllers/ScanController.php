@@ -26,21 +26,22 @@ $ffprobe   = new FFprobeService();
 /** @var string $projectRoot */
 $projectRoot = dirname(__DIR__, 2);
 
-function spawn_scan_worker(int $jobId, string $projectRoot): void
+function spawn_scan_worker(int $jobId, string $projectRoot, bool $rescan = false): void
 {
     $phpBin  = PHP_BINARY;
     $script  = $projectRoot . '/scripts/scan.php';
     $logFile = $projectRoot . '/storage/logs/scan-' . $jobId . '.log';
+    $flags   = '--job-id=' . $jobId . ($rescan ? ' --rescan' : '');
 
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
         pclose(popen('start /B "" ' . escapeshellarg($phpBin) . ' ' . escapeshellarg($script)
-            . ' --job-id=' . $jobId . ' >> ' . escapeshellarg($logFile) . ' 2>&1', 'r'));
+            . ' ' . $flags . ' >> ' . escapeshellarg($logFile) . ' 2>&1', 'r'));
     } else {
         $cmd = sprintf(
-            '%s %s --job-id=%d >> %s 2>&1 &',
+            '%s %s %s >> %s 2>&1 &',
             escapeshellarg($phpBin),
             escapeshellarg($script),
-            $jobId,
+            $flags,
             escapeshellarg($logFile)
         );
         exec($cmd);
@@ -335,6 +336,64 @@ if ($method === 'POST' && $uri === '/scan/delete') {
     exit;
 }
 
+// ── POST: full rescan (re-walk + reclassify eligible + queue new) ─
+if ($method === 'POST' && $uri === '/scan/rescan') {
+    $csrf = $_POST['_csrf'] ?? '';
+    if (!Session::validateCsrf($csrf)) {
+        Session::flash('error', 'Invalid request.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $jobId = (int) ($_POST['id'] ?? 0);
+    $job   = $jobId > 0 ? $scanJobs->findById($jobId) : null;
+    if ($job === null) {
+        Session::flash('error', 'Scan job not found.');
+        header('Location: /scan');
+        exit;
+    }
+
+    $status = (string) ($job['status'] ?? '');
+    if (!in_array($status, ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true)) {
+        Session::flash('error', 'Finish or pause the scan before starting a full rescan.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    if (!$scanJobs->prepareRescan($jobId)) {
+        Session::flash('error', 'Could not prepare job for rescan.');
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+
+    $user = Auth::user();
+    $audit->record(
+        Auth::id(),
+        $user['email'] ?? '',
+        $_SERVER['REMOTE_ADDR'] ?? '',
+        'SCAN_RESCAN_START',
+        'scan_job',
+        $jobId,
+        null,
+        null,
+        [
+            'source_id' => (int) $job['source_id'],
+            'subpath'   => (string) ($job['subpath'] ?? ''),
+            'prior_status' => $status,
+        ]
+    );
+
+    spawn_scan_worker($jobId, $projectRoot, true);
+
+    Session::flash(
+        'success',
+        'Full rescan started for job #' . $jobId
+        . ' — re-walking the path, reclassifying pending/flagged/rejected files, queueing new ones. Approved/executed files are left unchanged.'
+    );
+    header('Location: /scan/' . $jobId);
+    exit;
+}
+
 // ── POST: reclassify existing files in a scan job ─────────────
 if ($method === 'POST' && $uri === '/scan/reclassify') {
     $csrf = $_POST['_csrf'] ?? '';
@@ -412,6 +471,7 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $canDelete     = (string) $job['status'] !== 'RUNNING' && $protectedCount === 0;
     $canReclassify = in_array((string) $job['status'], ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true)
         && $reclassifiableCount > 0;
+    $canRescan = in_array((string) $job['status'], ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true);
 
     $title = 'Scan Job #' . $jobId . ' — Media Manager';
     require dirname(__DIR__) . '/Views/layouts/header.php';

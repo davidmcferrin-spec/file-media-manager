@@ -11,10 +11,13 @@ use MediaManager\Services\ScanCancelledException;
 
 $jobId = null;
 $verbose = null;
+$rescan = false;
 
 foreach ($argv as $arg) {
     if (str_starts_with($arg, '--job-id=')) {
         $jobId = (int) substr($arg, 9);
+    } elseif ($arg === '--rescan') {
+        $rescan = true;
     } elseif ($arg === '--verbose' || $arg === '-v') {
         $verbose = true;
     } elseif ($arg === '--quiet' || $arg === '-q') {
@@ -101,9 +104,11 @@ $progress = static function (string $event, array $data) use ($verbose, $flushOu
 
         case 'complete':
             echo sprintf(
-                "Done: %d discovered, %d queued, %d skipped.\n",
+                "Done: %d discovered, %d queued, %d reclassified, %d duplicate, %d skipped.\n",
                 (int) $data['total'],
                 (int) $data['queued'],
+                (int) ($data['reclassified'] ?? 0),
+                (int) ($data['duplicates'] ?? 0),
                 (int) $data['skipped']
             );
             break;
@@ -128,9 +133,11 @@ $service = new ScanService(onProgress: $verbose ? $progress : null);
 
 try {
     if ($jobId !== null && $jobId > 0) {
-        $service->runJob($jobId);
+        $service->runJob($jobId, $rescan);
         if (!$verbose) {
-            echo "Scan job {$jobId} completed.\n";
+            echo $rescan
+                ? "Rescan job {$jobId} completed.\n"
+                : "Scan job {$jobId} completed.\n";
         }
         exit(0);
     }
