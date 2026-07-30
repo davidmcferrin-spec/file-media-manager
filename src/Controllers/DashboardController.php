@@ -45,13 +45,6 @@ $recentScans = $pdo->query("
     LIMIT 5
 ")->fetchAll();
 
-// ── Recent audit entries ─────────────────────────────────────
-$recentAudit = $pdo->query("
-    SELECT * FROM audit_log
-    ORDER BY created_at DESC
-    LIMIT 10
-")->fetchAll();
-
 // ── Pending split queue count ─────────────────────────────────
 $splitPending = (int) $pdo->query("
     SELECT COUNT(*) FROM split_queue WHERE status = 'PENDING'
