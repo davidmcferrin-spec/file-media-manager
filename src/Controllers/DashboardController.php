@@ -6,10 +6,12 @@ namespace MediaManager\Controllers;
 
 use MediaManager\Auth\Auth;
 use MediaManager\Database;
+use MediaManager\Support\WorkflowSteps;
 
 Auth::requireLogin();
 
 $pdo = Database::connection();
+$readiness = WorkflowSteps::readiness();
 
 // ── Queue stats ──────────────────────────────────────────────
 $queueStats = $pdo->query("
@@ -56,7 +58,7 @@ $splitPending = (int) $pdo->query("
 ")->fetchColumn();
 
 $dashboardTab = 'operations';
-$title = 'Dashboard — Media Manager';
+$title = 'Home — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/dashboard/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';

@@ -284,9 +284,9 @@ class View
         $maxHours = max($hours) ?: 1.0;
         $count    = count($bars);
 
-        $leftPad     = 44.0;
+        $leftPad     = 52.0;
         $rightPad    = 12.0;
-        $topPad      = 10.0;
+        $topPad      = 18.0;
         $bottomPad   = 36.0;
         $chartHeight = 140.0;
         $barGap      = 4.0;
@@ -299,9 +299,19 @@ class View
         $gridLines = [0.0, 0.25, 0.5, 0.75, 1.0];
         $svg       = '';
 
+        // Unit label — values are hours of media duration (not file counts).
+        $svg .= sprintf(
+            '<text x="%.1F" y="%.1F" fill="var(--text-soft)" font-size="10">hours</text>',
+            $leftPad,
+            12.0
+        );
+
         foreach ($gridLines as $pct) {
-            $y     = $topPad + $chartHeight - ($pct * $chartHeight);
-            $label = self::formatHours($maxHours * $pct);
+            $y        = $topPad + $chartHeight - ($pct * $chartHeight);
+            $tickHrs  = $maxHours * $pct;
+            $tickLabel = $tickHrs <= 0
+                ? '0'
+                : number_format($tickHrs, $tickHrs >= 100 ? 0 : 1);
             $svg .= sprintf(
                 '<line x1="%.1F" y1="%.1F" x2="%.1F" y2="%.1F" stroke="var(--border-color)" stroke-width="1"/>',
                 $leftPad,
@@ -313,7 +323,7 @@ class View
                 '<text x="%.1F" y="%.1F" text-anchor="end" fill="var(--text-soft)" font-size="10">%s</text>',
                 $leftPad - 6,
                 $y + 3,
-                self::e($label)
+                self::e($tickLabel)
             );
         }
 
@@ -328,7 +338,7 @@ class View
             $label    = (string) $bar['label'];
             $fileCount = (int) ($bar['file_count'] ?? 0);
             $title    = sprintf(
-                '%s: %s hours (%s files)',
+                '%s: %s hours of content (%s files with duration)',
                 $label,
                 self::formatHours((float) $bar['total_seconds']),
                 number_format($fileCount)

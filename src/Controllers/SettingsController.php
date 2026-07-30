@@ -13,7 +13,9 @@ use MediaManager\Repositories\LdapRepository;
 use MediaManager\Repositories\MediaTypeRepository;
 use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SourceRepository;
+use MediaManager\Repositories\SystemRepository;
 use MediaManager\Repositories\UserRepository;
+use MediaManager\Services\DatabaseWipeService;
 use PDOException;
 
 Auth::requireAdmin();
@@ -33,7 +35,9 @@ $showRepo       = new ShowRepository();
 $ldapRepo       = new LdapRepository();
 $ignoreRepo     = new IgnorePathRepository();
 $userRepo       = new UserRepository();
+$systemRepo     = new SystemRepository();
 $audit          = new AuditRepository();
+$projectRoot    = dirname(__DIR__, 2);
 
 function settings_audit(
     AuditRepository $audit,
@@ -348,6 +352,68 @@ if ($method === 'POST') {
         exit;
     }
 
+    if ($uri === '/settings/processing') {
+        $flagMinutes   = max(1, (int) ($_POST['split_flag_minutes'] ?? 0));
+        $strongMinutes = max(1, (int) ($_POST['split_strong_minutes'] ?? 0));
+        if ($strongMinutes < $flagMinutes) {
+            Session::flash('error', 'Strong split duration must be greater than or equal to the split flag duration.');
+            header('Location: /settings/processing');
+            exit;
+        }
+        $systemRepo->set('split_flag_threshold_seconds', (string) ($flagMinutes * 60));
+        $systemRepo->set('split_strong_threshold_seconds', (string) ($strongMinutes * 60));
+        settings_audit($audit, 'PROCESSING_SETTINGS_UPDATED', 'system_settings', null, [
+            'split_flag_threshold_seconds'   => $flagMinutes * 60,
+            'split_strong_threshold_seconds' => $strongMinutes * 60,
+        ]);
+        Session::flash('success', 'Processing settings saved. New scans and reclassifies will use the updated thresholds.');
+        header('Location: /settings/processing');
+        exit;
+    }
+
+    if ($uri === '/settings/danger/wipe') {
+        if (env('ALLOW_DB_WIPE', false) !== true) {
+            Session::flash('error', 'Wipe is disabled. Set ALLOW_DB_WIPE=true in .env first.');
+            header('Location: /settings/danger');
+            exit;
+        }
+        $confirm = trim((string) ($_POST['confirm'] ?? ''));
+        if ($confirm !== 'WIPE') {
+            Session::flash('error', 'Confirmation text must be exactly WIPE.');
+            header('Location: /settings/danger');
+            exit;
+        }
+
+        try {
+            $result = (new DatabaseWipeService())->wipe($projectRoot);
+            $user = Auth::user();
+            $logLine = sprintf(
+                "[%s] DB_WIPE by %s from %s — tables: %s; thumbnails=%d; previews=%d\n",
+                date('c'),
+                (string) ($user['email'] ?? 'unknown'),
+                (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+                implode(',', $result['tables']),
+                $result['thumbnail_files'],
+                $result['preview_files']
+            );
+            $logPath = $projectRoot . '/' . trim((string) env('STORAGE_LOGS', 'storage/logs'), '/') . '/app.log';
+            @file_put_contents($logPath, $logLine, FILE_APPEND);
+            Session::flash(
+                'success',
+                sprintf(
+                    'Workflow data wiped (%d tables). Cleared %d thumbnails and %d previews. Users and settings preserved.',
+                    count($result['tables']),
+                    $result['thumbnail_files'],
+                    $result['preview_files']
+                )
+            );
+        } catch (\Throwable $e) {
+            Session::flash('error', 'Wipe failed: ' . $e->getMessage());
+        }
+        header('Location: /settings/danger');
+        exit;
+    }
+
     http_response_code(404);
     exit;
 }
@@ -359,6 +425,8 @@ $settingsTab = match (true) {
     str_starts_with($uri, '/settings/ignore-paths') => 'ignore-paths',
     str_starts_with($uri, '/settings/ldap') => 'ldap',
     str_starts_with($uri, '/settings/users') => 'users',
+    str_starts_with($uri, '/settings/processing') => 'processing',
+    str_starts_with($uri, '/settings/danger') => 'danger',
     default => 'sources',
 };
 
@@ -393,6 +461,19 @@ match ($settingsTab) {
         $editUserId = isset($_GET['edit']) ? (int) $_GET['edit'] : null;
         $editUser   = $editUserId > 0 ? $userRepo->findById($editUserId) : null;
         require dirname(__DIR__) . '/Views/settings/users.php';
+    })(),
+    'processing' => (function () use ($systemRepo): void {
+        $flagSeconds = (int) ($systemRepo->get('split_flag_threshold_seconds')
+            ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', 5400));
+        $strongSeconds = (int) ($systemRepo->get('split_strong_threshold_seconds')
+            ?? env('SPLIT_STRONG_THRESHOLD_SECONDS', 10800));
+        $splitFlagMinutes   = max(1, (int) round($flagSeconds / 60));
+        $splitStrongMinutes = max(1, (int) round($strongSeconds / 60));
+        require dirname(__DIR__) . '/Views/settings/processing.php';
+    })(),
+    'danger' => (function (): void {
+        $wipeEnabled = env('ALLOW_DB_WIPE', false) === true;
+        require dirname(__DIR__) . '/Views/settings/danger.php';
     })(),
     default => (function () use ($sourceRepo): void {
         $sources = $sourceRepo->all();

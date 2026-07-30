@@ -175,7 +175,7 @@ $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
 $editShow = $editId > 0 ? $showRepo->findById($editId) : null;
 $showsTab = 'dictionary';
 
-$title = 'Dictionary — Media Manager';
+$title = 'Shows — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/dictionary/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';

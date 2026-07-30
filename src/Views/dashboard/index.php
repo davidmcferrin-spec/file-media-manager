@@ -16,20 +16,28 @@ $totalPending = (int) ($queueStats['pending'] ?? 0);
 <!-- ── Page header ──────────────────────────────────────────── -->
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-2 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Operations Dashboard</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Home</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
-      File queue status, scan activity, and recent audit trail.
+      Follow the workflow: define Shows and Timeline, Scan libraries, Catalog files, check Gaps, then Execute.
     </p>
   </div>
   <?php if (Auth::isAdmin()): ?>
   <div class="d-flex gap-2 flex-wrap">
-    <a href="/scan" class="btn btn-outline-secondary btn-sm">New Scan</a>
-    <a href="/queue" class="btn btn-primary btn-sm">Review Queue</a>
+    <a href="/scan" class="btn btn-outline-secondary btn-sm">Scan</a>
+    <a href="/queue" class="btn btn-primary btn-sm">Catalog</a>
   </div>
+  <?php else: ?>
+  <a href="/queue" class="btn btn-primary btn-sm">Catalog</a>
   <?php endif; ?>
 </div>
 
 <?php require __DIR__ . '/_nav.php'; ?>
+<?php require __DIR__ . '/_workflow.php'; ?>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+  <h2 class="h6 mb-0" style="letter-spacing:0.03em;">Pipeline health</h2>
+  <span class="path-text" style="font-size:0.72rem">Queue and scan activity</span>
+</div>
 
 <!-- ── Stat cards ────────────────────────────────────────────── -->
 <div class="row g-3 mb-4">

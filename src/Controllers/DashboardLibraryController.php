@@ -46,7 +46,7 @@ function formatTimelineWindowTitle(string $fromYm, int $monthCount): string
     }
 
     return sprintf(
-        '%s – %s',
+        'Content hours · %s – %s',
         $start->format('M Y'),
         $end->format('M Y')
     );

@@ -71,11 +71,19 @@ storage/logs/           Application logs
 - Key classifier logic covered by unit tests in tests/
 
 ## App versioning
-- Single source of truth: root `VERSION` (semver, currently starts at 0.1.0)
+- Single source of truth: root `VERSION` (semver)
 - Release notes: root `CHANGELOG.md` (`## [x.y.z] — YYYY-MM-DD`, newest first)
 - Shown in the site footer as `vX.Y.Z` linking to `/versions`
 - On each release-worthy change set: bump `VERSION`, add a changelog section, deploy
 - Convention: patch = fixes; minor = features; major = breaking/behavior changes
+
+## User workflow (IA)
+- Setup: Shows → Timeline (admin)
+- Ingest: Scan
+- Review loop: Catalog ↔ Gaps
+- Commit: Execute
+- Support: Split, Settings; Admin menu: Audit / Rollback
+- Split duration: Settings → Processing (`system_settings`), not day-to-day `.env`
 
 ## Related Project
 Architecture and PostgreSQL patterns follow `studio-calendar` (davidmcferrin-spec/studio-calendar).

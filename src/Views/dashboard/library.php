@@ -26,7 +26,8 @@ $codecTotal = array_sum(array_column($codecs, 'count'));
   <div>
     <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Library Analytics</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
-      Breakdown of scanned media across the review queue and library.
+      Inventory metrics for archive planning — how much content you have, in what formats, and when it aired.
+      Use alongside Gaps to judge completeness; hours here are media duration, not file counts.
     </p>
   </div>
 </div>
@@ -40,8 +41,9 @@ $codecTotal = array_sum(array_column($codecs, 'count'));
         <div class="stat-label">Total Content Hours</div>
         <div class="stat-value"><?php echo View::e(View::formatHours($duration['total_seconds'])); ?></div>
         <div class="stat-sub">
-          Based on <?php echo number_format($duration['files_with_duration']); ?>
-          of <?php echo number_format($duration['total_files']); ?> files with duration metadata
+          Sum of FFprobe duration ÷ 3600 —
+          <?php echo number_format($duration['files_with_duration']); ?>
+          of <?php echo number_format($duration['total_files']); ?> files have duration metadata
         </div>
       </div>
     </div>
@@ -110,8 +112,8 @@ $codecTotal = array_sum(array_column($codecs, 'count'));
 </div>
 
 <p class="path-text mt-3 mb-4" style="font-size:0.72rem;color:var(--text-soft)">
-  Charts show top categories; remaining values are grouped as “Other”.
-  Duration totals require scan-time FFprobe metadata.
+  Extension / resolution / codec charts show the mix of material on disk (top categories; rest grouped as “Other”).
+  Useful for storage planning and codec migration. Duration totals require scan-time FFprobe metadata.
 </p>
 
 <div class="card mb-0">
@@ -119,9 +121,13 @@ $codecTotal = array_sum(array_column($codecs, 'count'));
     <div>
       <span><?php echo View::e($timelineTitle); ?></span>
       <?php if ($timelineView === 'month'): ?>
-        <span class="path-text d-block" style="font-size:0.72rem">13-month window — use Prev/Next to slide</span>
+        <span class="path-text d-block" style="font-size:0.72rem">
+          Bar height = hours of media (sum of FFprobe duration by <code>file_date</code>) · 13-month window
+        </span>
       <?php else: ?>
-        <span class="path-text d-block" style="font-size:0.72rem">Click a year to zoom into monthly detail</span>
+        <span class="path-text d-block" style="font-size:0.72rem">
+          Bar height = hours of media (sum of FFprobe duration by year of <code>file_date</code>) · click a year for months
+        </span>
       <?php endif; ?>
     </div>
     <div class="d-flex align-items-center gap-2">

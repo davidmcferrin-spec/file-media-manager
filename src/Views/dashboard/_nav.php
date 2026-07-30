@@ -8,7 +8,7 @@ $dashboardTab = $dashboardTab ?? 'operations';
 <ul class="nav nav-pills mb-4 gap-1">
   <li class="nav-item">
     <a class="nav-link<?php echo $dashboardTab === 'operations' ? ' active' : ''; ?>"
-       href="/dashboard">Operations</a>
+       href="/dashboard">Pipeline</a>
   </li>
   <li class="nav-item">
     <a class="nav-link<?php echo $dashboardTab === 'library' ? ' active' : ''; ?>"

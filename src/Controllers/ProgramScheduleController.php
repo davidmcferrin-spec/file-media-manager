@@ -279,7 +279,7 @@ $editEntry = $editId > 0 ? $scheduleRepo->findById($editId) : null;
 $importLog = Session::getFlash('schedule_import_log');
 $showsTab  = 'schedule';
 
-$title = 'Program Schedule — Media Manager';
+$title = 'Timeline — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/schedule/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';

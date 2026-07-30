@@ -41,13 +41,17 @@ $paginationBasePath = '/queue';
 $previewWidth       = (int) env('PREVIEW_WIDTH', 420);
 $previewHeight      = (int) env('PREVIEW_HEIGHT', 236);
 $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) / 60);
+
+$workflowStepId = 'catalog';
+require dirname(__DIR__) . '/partials/workflow_step.php';
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Review Queue</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Catalog</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
       <?php echo number_format($total); ?> files matching filters.
+      Match show, date, and type; approve rename proposals.
       <?php if (Auth::isAdmin() && ($statusCounts['APPROVED'] ?? 0) > 0): ?>
       <a href="/execute" class="ms-1"><?php echo (int) $statusCounts['APPROVED']; ?> approved — ready to execute</a>
       <?php endif; ?>

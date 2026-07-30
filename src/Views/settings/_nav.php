@@ -18,7 +18,7 @@ function settings_tab(string $tab, string $currentTab): string
   <div>
     <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Settings</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
-      NAS sources, conversion rules, media types, scan ignore paths, LDAP, and user accounts.
+      NAS sources, processing thresholds, conversion rules, media types, LDAP, users — and Danger Zone.
     </p>
   </div>
 </div>
@@ -27,6 +27,11 @@ function settings_tab(string $tab, string $currentTab): string
   <li class="nav-item">
     <a class="nav-link<?php echo settings_tab('sources', $settingsTab); ?>" href="/settings/sources">
       NAS Sources
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link<?php echo settings_tab('processing', $settingsTab); ?>" href="/settings/processing">
+      Processing
     </a>
   </li>
   <li class="nav-item">
@@ -52,6 +57,11 @@ function settings_tab(string $tab, string $currentTab): string
   <li class="nav-item">
     <a class="nav-link<?php echo settings_tab('users', $settingsTab); ?>" href="/settings/users">
       Users
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link<?php echo settings_tab('danger', $settingsTab); ?>" href="/settings/danger">
+      Danger Zone
     </a>
   </li>
 </ul>

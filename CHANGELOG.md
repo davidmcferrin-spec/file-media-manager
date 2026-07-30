@@ -14,6 +14,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.4.0] — 2026-07-30
+
+### Added
+
+- Workflow-first Home with Setup → Scan → Catalog ↔ Gaps → Execute strip and readiness chips
+- Top nav regroup: Setup dropdown, Pipeline labels (Catalog/Gaps/Scan/Execute), Admin dropdown (Audit/Rollback)
+- Step chrome on Shows, Timeline, Scan, Catalog, Gaps, Execute
+- Settings → Processing for split-flag duration (system_settings; .env is fallback only)
+- Settings → Danger Zone wipe for scan/catalog/shows/timeline data + thumbnail/preview caches (keeps users/settings; requires `ALLOW_DB_WIPE=true`)
+
+### Changed
+
+- Library Analytics copy clarifies content hours and chart utility
+- Dictionary / Program Schedule / Queue / Show Audit labels → Shows / Timeline / Catalog / Gaps
+
 ## [0.3.0] — 2026-07-30
 
 ### Added

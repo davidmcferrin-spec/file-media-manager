@@ -485,7 +485,7 @@ $activeSources = array_filter($sources->all(), fn ($s) => !empty($s['active']));
 $recentJobs    = $scanJobs->recent(15);
 $ffprobeOk     = $ffprobe->isAvailable();
 
-$title = 'Scanner — Media Manager';
+$title = 'Scan — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/scan/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';

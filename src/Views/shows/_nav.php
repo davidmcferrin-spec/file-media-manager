@@ -10,16 +10,16 @@ $showsTab = $showsTab ?? 'dictionary';
 <ul class="nav nav-pills mb-4 gap-1">
   <li class="nav-item">
     <a class="nav-link<?php echo $showsTab === 'show-audit' ? ' active' : ''; ?>"
-       href="/show-audit">Show Audit</a>
+       href="/show-audit">Gaps</a>
   </li>
   <?php if (Auth::isAdmin()): ?>
   <li class="nav-item">
     <a class="nav-link<?php echo $showsTab === 'dictionary' ? ' active' : ''; ?>"
-       href="/dictionary">Dictionary</a>
+       href="/dictionary">Shows</a>
   </li>
   <li class="nav-item">
     <a class="nav-link<?php echo $showsTab === 'schedule' ? ' active' : ''; ?>"
-       href="/schedule">Program Schedule</a>
+       href="/schedule">Timeline</a>
   </li>
   <li class="nav-item">
     <a class="nav-link<?php echo $showsTab === 'legacy-map' ? ' active' : ''; ?>"

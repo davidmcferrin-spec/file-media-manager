@@ -128,6 +128,16 @@ body {
     background: var(--hover-bg);
 }
 .nav-link.active { color: var(--accent) !important; }
+.navbar .dropdown-menu {
+    background: var(--panel-strong);
+    border: 1px solid var(--border-color);
+    --bs-dropdown-link-color: var(--text-main);
+    --bs-dropdown-link-hover-bg: var(--hover-bg);
+    --bs-dropdown-link-hover-color: var(--accent);
+    --bs-dropdown-link-active-bg: var(--hover-bg);
+    --bs-dropdown-link-active-color: var(--accent);
+}
+.navbar .dropdown-divider { border-color: var(--border-color); }
 
 /* ── Cards ──────────────────────────────────────────────────── */
 .card {
@@ -300,45 +310,53 @@ body {
         <?php if (Auth::check()): ?>
         <li class="nav-item">
           <a class="nav-link<?php echo navActive('/dashboard', $currentPath); ?>" href="/dashboard">
-            Dashboard
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/queue', $currentPath); ?>" href="/queue">
-            Queue
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/show-audit', $currentPath) . navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>"
-             href="<?php echo Auth::isAdmin() ? '/dictionary' : '/show-audit'; ?>">
-            Shows
+            Home
           </a>
         </li>
         <?php if (Auth::isAdmin()): ?>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/scan', $currentPath); ?>" href="/scan">
-            Scanner
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle<?php echo navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>"
+             href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+            Setup
           </a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="/dictionary">1. Shows</a></li>
+            <li><a class="dropdown-item" href="/schedule">2. Timeline</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="/legacy-map">Legacy Map</a></li>
+          </ul>
+        </li>
+        <?php endif; ?>
+        <?php if (Auth::isAdmin()): ?>
+        <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/scan', $currentPath); ?>" href="/scan">Scan</a>
+        </li>
+        <?php endif; ?>
+        <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/queue', $currentPath); ?>" href="/queue">Catalog</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/execute', $currentPath); ?>" href="/execute">
-            Execute
-          </a>
+          <a class="nav-link<?php echo navActive('/show-audit', $currentPath); ?>" href="/show-audit">Gaps</a>
+        </li>
+        <?php if (Auth::isAdmin()): ?>
+        <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/execute', $currentPath); ?>" href="/execute">Execute</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/split', $currentPath); ?>" href="/split">
-            Split Queue
-          </a>
+          <a class="nav-link<?php echo navActive('/split', $currentPath); ?>" href="/split">Split</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/audit', $currentPath); ?>" href="/audit">
-            Audit
-          </a>
+          <a class="nav-link<?php echo navActive('/settings', $currentPath); ?>" href="/settings">Settings</a>
         </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/settings', $currentPath); ?>" href="/settings">
-            Settings
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle<?php echo navActive('/audit', $currentPath) . navActive('/rollback', $currentPath); ?>"
+             href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+            Admin
           </a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="/audit">Audit log</a></li>
+            <li><a class="dropdown-item" href="/rollback">Rollback</a></li>
+          </ul>
         </li>
         <?php endif; ?>
         <?php endif; ?>

@@ -10,11 +10,15 @@ use MediaManager\Support\View;
 /** @var array<string, mixed>|null $editShow */
 ?>
 
-<?php require dirname(__DIR__) . '/shows/_nav.php'; ?>
+<?php
+$workflowStepId = 'shows';
+require dirname(__DIR__) . '/partials/workflow_step.php';
+require dirname(__DIR__) . '/shows/_nav.php';
+?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Show Dictionary</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Shows</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
       Canonical show names, abbreviations, and path/filename aliases used by the classifier.
     </p>

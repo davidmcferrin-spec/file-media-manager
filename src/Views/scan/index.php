@@ -8,13 +8,16 @@ use MediaManager\Support\View;
 /** @var list<array<string, mixed>> $activeSources */
 /** @var list<array<string, mixed>> $recentJobs */
 /** @var bool $ffprobeOk */
+
+$workflowStepId = 'scan';
+require dirname(__DIR__) . '/partials/workflow_step.php';
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">NAS Scanner</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Scan</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
-      Walk a NAS mount, classify files against naming policy, and queue them for review.
+      Walk a NAS mount, classify files against naming policy, and queue them for Catalog review.
     </p>
   </div>
 </div>

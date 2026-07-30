@@ -29,4 +29,15 @@ final class SystemRepository extends BaseRepository
 
         return $value !== false ? (string) $value : $default;
     }
+
+    public function set(string $key, string $value): void
+    {
+        $stmt = $this->db()->prepare(
+            'INSERT INTO system_settings (key, value, updated_at)
+             VALUES (?, ?, now())
+             ON CONFLICT (key) DO UPDATE
+             SET value = EXCLUDED.value, updated_at = now()'
+        );
+        $stmt->execute([$key, $value]);
+    }
 }

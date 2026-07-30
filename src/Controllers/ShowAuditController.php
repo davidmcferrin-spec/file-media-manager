@@ -262,7 +262,7 @@ $previewWidth       = (int) env('PREVIEW_WIDTH', 420);
 $previewHeight      = (int) env('PREVIEW_HEIGHT', 236);
 $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) / 60);
 
-$title = 'Show Audit — Media Manager';
+$title = 'Gaps — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/show_audit/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';

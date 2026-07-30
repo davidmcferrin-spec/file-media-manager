@@ -36,11 +36,15 @@ $formEntry = $editEntry ?? [
 $formMask = (int) ($formEntry['days_of_week'] ?? 31);
 ?>
 
-<?php require dirname(__DIR__) . '/shows/_nav.php'; ?>
+<?php
+$workflowStepId = 'timeline';
+require dirname(__DIR__) . '/partials/workflow_step.php';
+require dirname(__DIR__) . '/shows/_nav.php';
+?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Program Schedule</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Timeline</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
       <?php if ($filterShow !== null): ?>
       Hourly blocks for

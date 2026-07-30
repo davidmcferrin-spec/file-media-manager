@@ -77,13 +77,18 @@ $queueLink = static function (array $file): string {
 };
 ?>
 
-<?php require dirname(__DIR__) . '/shows/_nav.php'; ?>
+<?php
+$workflowStepId = 'gaps';
+require dirname(__DIR__) . '/partials/workflow_step.php';
+require dirname(__DIR__) . '/shows/_nav.php';
+?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-3 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Show Audit</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Gaps</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
-      Timeline schedule vs Program/Clean inventory — confirmed coverage, gaps, duplicates, and files that still need identification.
+      Timeline vs Program/Clean inventory — confirmed coverage, missing hours, duplicates, and files that still need identification.
+      Fix matches in Catalog, then re-check here.
     </p>
   </div>
 </div>

@@ -68,7 +68,7 @@ $recentScans = $scanJobs->recent(10);
 
 $totalPages = max(1, (int) ceil($total / $perPage));
 
-$title = 'Review Queue — Media Manager';
+$title = 'Catalog — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/queue/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';

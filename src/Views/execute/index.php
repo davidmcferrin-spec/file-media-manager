@@ -8,16 +8,22 @@ use MediaManager\Support\View;
 /** @var list<array<string, mixed>> $approvedFiles */
 /** @var list<array<string, mixed>> $executedFiles */
 /** @var int $approvedCount */
+
+$workflowStepId = 'execute';
+require dirname(__DIR__) . '/partials/workflow_step.php';
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Execute Approved Files</h1>
+    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Execute</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
       Move and rename approved files on disk. Every operation is audit-logged before and after.
     </p>
   </div>
-  <a href="/queue?status=APPROVED" class="btn btn-outline-secondary btn-sm">View Approved Queue</a>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/queue?status=APPROVED" class="btn btn-outline-secondary btn-sm">View Approved Catalog</a>
+    <a href="/rollback" class="btn btn-link btn-sm path-text">Need to undo? Rollback</a>
+  </div>
 </div>
 
 <div class="row g-4">
