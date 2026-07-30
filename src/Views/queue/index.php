@@ -150,6 +150,8 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
   <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
   <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
     <?php if (($filters['status'] ?? '') === 'PENDING'): ?>
+    <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-edit-open"
+            data-bs-toggle="modal" data-bs-target="#bulk-edit-modal">Edit Selected</button>
     <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">Approve Selected</button>
     <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
     <button type="submit" name="action" value="flag" class="btn btn-outline-warning btn-sm">Flag Selected</button>
@@ -157,6 +159,8 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
     <button type="submit" formaction="/queue/add-split" class="btn btn-outline-info btn-sm">Add to Split Queue</button>
     <?php endif; ?>
     <?php elseif (($filters['status'] ?? '') === 'FLAGGED'): ?>
+    <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-edit-open"
+            data-bs-toggle="modal" data-bs-target="#bulk-edit-modal">Edit Selected</button>
     <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
     <?php endif; ?>
     <?php if (($filters['status'] ?? '') === 'APPROVED'): ?>
@@ -524,6 +528,64 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 </div>
 <?php endforeach; ?>
 
+<?php if (Auth::isEditor() && in_array(($filters['status'] ?? ''), ['PENDING', 'FLAGGED'], true)): ?>
+<!-- Bulk edit modal -->
+<div class="modal fade" id="bulk-edit-modal" tabindex="-1" aria-labelledby="bulk-edit-title">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-secondary">
+      <form method="post" action="/queue/bulk-edit" id="bulk-edit-form">
+        <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+        <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+        <div id="bulk-edit-ids"></div>
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title" id="bulk-edit-title">Edit selected</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="path-text mb-3" style="font-size:0.82rem">
+            Empty fields are left unchanged. Proposed names update from the new values;
+            each file keeps its current time.
+          </p>
+          <div class="mb-3">
+            <label class="form-label" for="bulk-edit-show">Show</label>
+            <select name="show_id" id="bulk-edit-show" class="form-select">
+              <option value="">— leave unchanged —</option>
+              <?php foreach ($showList as $show): ?>
+              <option value="<?php echo (int) $show['id']; ?>">
+                <?php echo View::e($show['abbreviation']); ?>
+                <?php if (!empty($show['canonical_name'])): ?>
+                — <?php echo View::e($show['canonical_name']); ?>
+                <?php endif; ?>
+              </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="bulk-edit-type">Clean / Program</label>
+            <select name="media_type_id" id="bulk-edit-type" class="form-select">
+              <option value="">— leave unchanged —</option>
+              <?php foreach ($mediaTypeList as $mt): ?>
+              <option value="<?php echo (int) $mt['id']; ?>">
+                <?php echo View::e($mt['name']); ?>
+              </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="mb-0">
+            <label class="form-label" for="bulk-edit-date">Date</label>
+            <input type="date" name="file_date" id="bulk-edit-date" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="bulk-edit-apply" disabled>Apply</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <!-- Media preview modal -->
 <div class="modal fade" id="media-preview-modal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
@@ -723,6 +785,92 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             }
         });
     }
+
+    var bulkForm = document.getElementById('bulk-edit-form');
+    var bulkIds = document.getElementById('bulk-edit-ids');
+    var bulkApply = document.getElementById('bulk-edit-apply');
+    var bulkShow = document.getElementById('bulk-edit-show');
+    var bulkType = document.getElementById('bulk-edit-type');
+    var bulkDate = document.getElementById('bulk-edit-date');
+    var bulkOpen = document.getElementById('bulk-edit-open');
+
+    function bulkFieldFilled() {
+        return (bulkShow && bulkShow.value !== '')
+            || (bulkType && bulkType.value !== '')
+            || (bulkDate && bulkDate.value !== '');
+    }
+
+    function syncBulkEditUi() {
+        if (!bulkApply) {
+            return;
+        }
+        var n = rowChecks().filter(function (cb) { return cb.checked; }).length;
+        bulkApply.disabled = n === 0 || !bulkFieldFilled();
+        if (bulkOpen) {
+            bulkOpen.disabled = n === 0;
+        }
+    }
+
+    function syncBulkIds() {
+        if (!bulkIds) {
+            return 0;
+        }
+        bulkIds.innerHTML = '';
+        var checked = rowChecks().filter(function (cb) { return cb.checked; });
+        checked.forEach(function (cb) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'ids[]';
+            input.value = cb.value;
+            bulkIds.appendChild(input);
+        });
+        return checked.length;
+    }
+
+    if (bulkForm) {
+        [bulkShow, bulkType, bulkDate].forEach(function (el) {
+            if (el) {
+                el.addEventListener('change', syncBulkEditUi);
+                el.addEventListener('input', syncBulkEditUi);
+            }
+        });
+
+        var bulkModal = document.getElementById('bulk-edit-modal');
+        if (bulkModal) {
+            bulkModal.addEventListener('show.bs.modal', function (e) {
+                var n = syncBulkIds();
+                if (n === 0) {
+                    e.preventDefault();
+                    alert('Select at least one file.');
+                    return;
+                }
+                syncBulkEditUi();
+            });
+        }
+
+        bulkForm.addEventListener('submit', function (e) {
+            var n = syncBulkIds();
+            if (n === 0) {
+                e.preventDefault();
+                alert('Select at least one file.');
+                return;
+            }
+            if (!bulkFieldFilled()) {
+                e.preventDefault();
+                alert('Set at least one of show, type, or date.');
+                return;
+            }
+            if (!confirm('Apply to ' + n + ' selected file(s)?')) {
+                e.preventDefault();
+            }
+        });
+    }
+
+    var _updateSelectionUi = updateSelectionUi;
+    updateSelectionUi = function () {
+        _updateSelectionUi();
+        syncBulkEditUi();
+    };
 
     updateSelectionUi();
 

@@ -87,6 +87,11 @@ $canRescan = $canRescan ?? false;
       <button type="submit" class="btn btn-outline-primary btn-sm">Reclassify Files</button>
     </form>
     <?php endif; ?>
+    <?php if ($totalQueued > 0): ?>
+    <a href="/scan/<?php echo (int) $job['id']; ?>/export" class="btn btn-outline-secondary btn-sm">
+      Export XLSX
+    </a>
+    <?php endif; ?>
     <a href="/queue?scan_job_id=<?php echo (int) $job['id']; ?>" class="btn btn-outline-secondary btn-sm">Review Queue</a>
   </div>
 </div>

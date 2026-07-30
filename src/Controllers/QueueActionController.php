@@ -8,7 +8,10 @@ use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
+use MediaManager\Repositories\MediaTypeRepository;
+use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SplitQueueRepository;
+use MediaManager\Services\ProposalPathBuilder;
 use PDOException;
 
 Auth::requireLogin();
@@ -350,6 +353,135 @@ if ($uri === '/queue/edit') {
         $message .= ' ' . count($removedJobs) . ' active split job(s) removed.';
     }
     Session::flash('success', $message);
+    redirect_queue();
+}
+
+// ── Bulk edit show / media type / date ────────────────────────
+if ($uri === '/queue/bulk-edit') {
+    $ids = parse_ids();
+    if ($ids === []) {
+        Session::flash('error', 'Select at least one file.');
+        redirect_queue();
+    }
+
+    $postedShowId = trim((string) ($_POST['show_id'] ?? ''));
+    $postedTypeId = trim((string) ($_POST['media_type_id'] ?? ''));
+    $postedDate   = trim((string) ($_POST['file_date'] ?? ''));
+
+    $newShowId = $postedShowId !== '' ? (int) $postedShowId : null;
+    $newTypeId = $postedTypeId !== '' ? (int) $postedTypeId : null;
+    $dateProvided = $postedDate !== '';
+    $newDate = null;
+    if ($dateProvided) {
+        $newDate = ProposalPathBuilder::normalizeDateInput($postedDate);
+        if ($newDate === null) {
+            Session::flash('error', 'Invalid date. Use YYYY-MM-DD or YYYYMMDD.');
+            redirect_queue();
+        }
+    }
+
+    if ($newShowId === null && $newTypeId === null && !$dateProvided) {
+        Session::flash('error', 'Set at least one of show, type, or date.');
+        redirect_queue();
+    }
+
+    $showRepo = new ShowRepository();
+    $typeRepo = new MediaTypeRepository();
+    $showCache = [];
+    $typeCache = [];
+
+    $updated = 0;
+    $skipped = 0;
+
+    foreach ($ids as $id) {
+        $file = $files->findById($id);
+        if ($file === null || !in_array($file['status'] ?? '', ['PENDING', 'FLAGGED'], true)) {
+            $skipped++;
+            continue;
+        }
+
+        $showId = $newShowId ?? (isset($file['show_id']) && $file['show_id'] !== null && $file['show_id'] !== ''
+            ? (int) $file['show_id'] : null);
+        $typeId = $newTypeId ?? (isset($file['media_type_id']) && $file['media_type_id'] !== null && $file['media_type_id'] !== ''
+            ? (int) $file['media_type_id'] : null);
+        $fileDate = $dateProvided ? $newDate : (trim((string) ($file['file_date'] ?? '')) ?: null);
+        $fileTime = trim((string) ($file['file_time'] ?? '')) ?: null;
+
+        if ($showId === null || $typeId === null || $fileDate === null) {
+            $skipped++;
+            continue;
+        }
+
+        if (!isset($showCache[$showId])) {
+            $showCache[$showId] = $showRepo->findById($showId);
+        }
+        if (!isset($typeCache[$typeId])) {
+            $typeCache[$typeId] = $typeRepo->findById($typeId);
+        }
+        $show = $showCache[$showId];
+        $type = $typeCache[$typeId];
+        if ($show === null || $type === null) {
+            $skipped++;
+            continue;
+        }
+
+        $guest = ProposalPathBuilder::guestFromProposed(
+            (string) ($file['proposed_filename'] ?? '')
+        );
+        $built = ProposalPathBuilder::build(
+            (string) $show['abbreviation'],
+            $fileDate,
+            $fileTime,
+            (string) $type['abbreviation'],
+            (string) ($type['folder_name'] ?? $type['name']),
+            (string) ($file['original_filename'] ?? $file['original_path'] ?? ''),
+            $guest
+        );
+        if ($built === null) {
+            $skipped++;
+            continue;
+        }
+
+        $files->updateProposed(
+            $id,
+            $built['proposed_dir'],
+            $built['proposed_filename'],
+            $showId,
+            $typeId,
+            $fileDate,
+            $fileTime
+        );
+
+        $audit->record(
+            $userId,
+            $user['email'] ?? '',
+            $ip,
+            'FILE_BULK_EDITED',
+            'file',
+            $id,
+            $file['original_path'],
+            $built['proposed_dir'] . '/' . $built['proposed_filename'],
+            [
+                'show_id'           => $showId,
+                'media_type_id'     => $typeId,
+                'file_date'         => $fileDate,
+                'proposed_dir'      => $built['proposed_dir'],
+                'proposed_filename' => $built['proposed_filename'],
+                'fields'            => array_values(array_filter([
+                    $newShowId !== null ? 'show_id' : null,
+                    $newTypeId !== null ? 'media_type_id' : null,
+                    $dateProvided ? 'file_date' : null,
+                ])),
+            ]
+        );
+        $updated++;
+    }
+
+    $message = $updated . ' file(s) updated.';
+    if ($skipped > 0) {
+        $message .= ' ' . $skipped . ' skipped (not pending/flagged or missing show/type/date).';
+    }
+    Session::flash($updated > 0 ? 'success' : 'error', $message);
     redirect_queue();
 }
 

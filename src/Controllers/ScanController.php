@@ -450,6 +450,44 @@ if ($method === 'POST' && $uri === '/scan/reclassify') {
     exit;
 }
 
+// ── GET: export scan classification spreadsheet ───────────────
+if ($method === 'GET' && preg_match('#^/scan/(\d+)/export$#', $uri, $m) === 1) {
+    $jobId = (int) $m[1];
+    $job   = $scanJobs->findById($jobId);
+    if ($job === null) {
+        Session::flash('error', 'Scan job not found.');
+        header('Location: /scan');
+        exit;
+    }
+
+    try {
+        $export = (new \MediaManager\Services\ScanExportService())->exportScanJob($jobId);
+        $user = Auth::user();
+        $audit->record(
+            Auth::id(),
+            $user['email'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? '',
+            'SCAN_EXPORTED',
+            'scan_job',
+            $jobId,
+            null,
+            null,
+            ['rows' => $export['row_count'], 'filename' => $export['filename']]
+        );
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $export['filename'] . '"');
+        header('Content-Length: ' . (string) strlen($export['bytes']));
+        header('Cache-Control: no-store');
+        echo $export['bytes'];
+        exit;
+    } catch (\Throwable $e) {
+        Session::flash('error', 'Export failed: ' . $e->getMessage());
+        header('Location: /scan/' . $jobId);
+        exit;
+    }
+}
+
 // ── GET: job detail ───────────────────────────────────────────
 if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $jobId = (int) $m[1];

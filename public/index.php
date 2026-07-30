@@ -76,6 +76,7 @@ match (true) {
     || $uri === '/queue/unapprove'
     || $uri === '/queue/remove'
     || $uri === '/queue/edit'
+    || $uri === '/queue/bulk-edit'
     || $uri === '/queue/batch'
     || $uri === '/queue/add-split'
     || $uri === '/queue/adopt-proposal'

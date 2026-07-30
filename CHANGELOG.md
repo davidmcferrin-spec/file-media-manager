@@ -14,6 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.4.2] — 2026-07-30
+
+### Added
+
+- Catalog bulk edit: select files and set show, Clean/Program (media type), and/or date — proposed path/name rebuilds automatically; each file keeps its time
+
+## [0.4.1] — 2026-07-30
+
+### Added
+
+- Export scan classification spreadsheet (XLSX) from a scan job — path, show, date/time, proposed names, confidence, etc.
+
 ## [0.4.0] — 2026-07-30
 
 ### Added
