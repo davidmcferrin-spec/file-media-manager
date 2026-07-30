@@ -241,4 +241,73 @@ final class ProgramScheduleRepository extends BaseRepository
 
         return $stmt->rowCount();
     }
+
+    /**
+     * Active schedule entries overlapping [fromIso, toIso].
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listOverlapping(string $fromIso, string $toIso, ?int $showId = null): array
+    {
+        $sql = 'SELECT pse.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name
+                FROM program_schedule_entries pse
+                JOIN shows sh ON sh.id = pse.show_id
+                WHERE pse.active IS TRUE
+                  AND pse.effective_from <= ?::date
+                  AND (pse.effective_to IS NULL OR pse.effective_to >= ?::date)';
+        $params = [$toIso, $fromIso];
+
+        if ($showId !== null && $showId > 0) {
+            $sql .= ' AND pse.show_id = ?';
+            $params[] = $showId;
+        }
+
+        $sql .= ' ORDER BY pse.effective_from ASC, pse.hour_start_et ASC, pse.id ASC';
+
+        $stmt = $this->db()->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * Open-ended entries (no effective_to) — candidates for schedule hygiene.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listOpenEnded(int $limit = 200, int $offset = 0): array
+    {
+        $stmt = $this->db()->prepare(
+            'SELECT pse.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name
+             FROM program_schedule_entries pse
+             JOIN shows sh ON sh.id = pse.show_id
+             WHERE pse.active IS TRUE AND pse.effective_to IS NULL
+             ORDER BY pse.effective_from ASC, pse.hour_start_et ASC
+             LIMIT ? OFFSET ?'
+        );
+        $stmt->bindValue(1, $limit, \PDO::PARAM_INT);
+        $stmt->bindValue(2, $offset, \PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    public function countOpenEnded(): int
+    {
+        return (int) $this->db()->query(
+            'SELECT COUNT(*) FROM program_schedule_entries
+             WHERE active IS TRUE AND effective_to IS NULL'
+        )->fetchColumn();
+    }
+
+    public function setEffectiveTo(int $id, string $effectiveTo): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE program_schedule_entries SET effective_to = ?::date WHERE id = ?'
+        );
+
+        return $stmt->execute([$effectiveTo, $id]);
+    }
 }

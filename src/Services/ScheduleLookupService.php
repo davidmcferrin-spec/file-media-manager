@@ -22,7 +22,7 @@ final class ScheduleLookupService
             return null;
         }
 
-        $minutes = DateNormalizer::normalizeTime($timeHhmm);
+        $minutes = DateNormalizer::timeToMinutes($timeHhmm);
         if ($minutes === null) {
             return null;
         }
@@ -32,7 +32,7 @@ final class ScheduleLookupService
             return null;
         }
 
-        $rows = $this->schedule->matchAt($dateYmd, (int) $minutes, $dayBit);
+        $rows = $this->schedule->matchAt($dateYmd, $minutes, $dayBit);
         if ($rows === []) {
             return null;
         }

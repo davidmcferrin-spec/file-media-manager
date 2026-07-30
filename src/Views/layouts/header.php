@@ -308,15 +308,16 @@ body {
             Queue
           </a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/show-audit', $currentPath) . navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>"
+             href="<?php echo Auth::isAdmin() ? '/dictionary' : '/show-audit'; ?>">
+            Shows
+          </a>
+        </li>
         <?php if (Auth::isAdmin()): ?>
         <li class="nav-item">
           <a class="nav-link<?php echo navActive('/scan', $currentPath); ?>" href="/scan">
             Scanner
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>" href="/dictionary">
-            Shows
           </a>
         </li>
         <li class="nav-item">

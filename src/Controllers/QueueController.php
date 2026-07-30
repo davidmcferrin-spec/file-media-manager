@@ -19,8 +19,9 @@ $scanJobs    = new ScanJobRepository();
 $mediaTypes  = new MediaTypeRepository();
 $suggester   = new FileEditSuggester();
 
+$statusParam = $_GET['status'] ?? 'PENDING';
 $filters = [
-    'status'      => $_GET['status'] ?? 'PENDING',
+    'status'      => $statusParam,
     'confidence'  => $_GET['confidence'] ?? '',
     'scan_job_id' => isset($_GET['scan_job_id']) ? (int) $_GET['scan_job_id'] : 0,
     'show_id'     => isset($_GET['show_id']) ? (int) $_GET['show_id'] : 0,
@@ -39,6 +40,13 @@ if ($filters['confidence'] === '') {
 }
 if ($filters['search'] === '') {
     unset($filters['search']);
+}
+// Show Audit deep-links use status=ALL to find a file regardless of queue state.
+$statusFilter = strtoupper((string) $filters['status']) === 'ALL'
+    ? 'ALL'
+    : (string) $filters['status'];
+if ($statusFilter === 'ALL') {
+    unset($filters['status']);
 }
 
 $page    = max(1, (int) ($_GET['page'] ?? 1));

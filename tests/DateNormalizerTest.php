@@ -35,6 +35,10 @@ assert_eq('1445', DateNormalizer::normalizeTime('1445'), 'normalize 4 digit time
 assert_eq('1850', DateNormalizer::normalizeTime('18502010'), 'normalize 8 digit time');
 assert_eq(null, DateNormalizer::normalizeTime('9999'), 'invalid time rejected');
 
+assert_eq(20 * 60, DateNormalizer::timeToMinutes('2000'), 'HHMM to minutes evening');
+assert_eq(8 * 60 + 30, DateNormalizer::timeToMinutes('08:30'), 'HH:MM to minutes morning');
+assert_eq('2000', DateNormalizer::minutesToHhmm(20 * 60), 'minutes to HHMM');
+
 $merged = DateNormalizer::mergePathDate(null, ['cuomo', '2025', '12', 'CLEAN', 'file.ts']);
 assert_eq('20251201', $merged, 'path year/month fallback');
 

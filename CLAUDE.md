@@ -24,6 +24,9 @@ src/Controllers/        One controller per module
 src/Repositories/       All DB access — no inline SQL in controllers/views
 src/Services/           Classifier, Executor, Rollback, FFprobe, Thumbnail
 src/Views/              PHP templates only — no logic beyond display
+src/Support/            View helpers, AppVersion
+VERSION                 App semver (displayed in footer)
+CHANGELOG.md            Release notes (shown on /versions)
 scripts/migrate.php     Versioned PostgreSQL migration runner
 sql/migrations/         Versioned PostgreSQL migrations (001_, 002_, etc.)
 storage/thumbnails/     FFmpeg-generated JPGs cached by file_id
@@ -66,6 +69,13 @@ storage/logs/           Application logs
 ## Testing
 - Run php -l on all files before committing
 - Key classifier logic covered by unit tests in tests/
+
+## App versioning
+- Single source of truth: root `VERSION` (semver, currently starts at 0.1.0)
+- Release notes: root `CHANGELOG.md` (`## [x.y.z] — YYYY-MM-DD`, newest first)
+- Shown in the site footer as `vX.Y.Z` linking to `/versions`
+- On each release-worthy change set: bump `VERSION`, add a changelog section, deploy
+- Convention: patch = fixes; minor = features; major = breaking/behavior changes
 
 ## Related Project
 Architecture and PostgreSQL patterns follow `studio-calendar` (davidmcferrin-spec/studio-calendar).

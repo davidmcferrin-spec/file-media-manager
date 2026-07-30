@@ -115,6 +115,27 @@ final class DateNormalizer
         return $hhmm;
     }
 
+    /** Minutes from midnight for an HHMM (or HH:MM) time string. */
+    public static function timeToMinutes(?string $raw): ?int
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $hhmm = self::normalizeTime($raw);
+        if ($hhmm === null) {
+            return null;
+        }
+
+        return ((int) substr($hhmm, 0, 2)) * 60 + (int) substr($hhmm, 2, 2);
+    }
+
+    public static function minutesToHhmm(int $minutes): string
+    {
+        $minutes = max(0, min($minutes, 24 * 60 - 1));
+
+        return sprintf('%02d%02d', intdiv($minutes, 60), $minutes % 60);
+    }
+
     public static function isValidDate(string $yyyymmdd): bool
     {
         if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $yyyymmdd, $m) !== 1) {

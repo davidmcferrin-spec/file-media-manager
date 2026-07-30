@@ -21,33 +21,37 @@ final class ScheduleCsvImporter
     ) {
     }
 
-    /** @return array{imported: int, shows_created: int, skipped: list<string>, warnings: list<string>} */
-    public function importFile(string $path, bool $replaceExisting = true): array
+    /**
+     * @param string|null $originalName Original upload filename (extension hint for tmp paths)
+     * @return array{imported: int, shows_created: int, skipped: list<string>, warnings: list<string>}
+     */
+    public function importFile(string $path, bool $replaceExisting = true, ?string $originalName = null): array
     {
         $this->warnings = [];
         $this->skipped  = [];
 
         if (!is_readable($path)) {
-            throw new \RuntimeException('Schedule CSV not readable: ' . $path);
+            throw new \RuntimeException('Schedule file not readable: ' . $path);
         }
 
-        $handle = fopen($path, 'r');
-        if ($handle === false) {
-            throw new \RuntimeException('Cannot open schedule CSV.');
+        $rows = $this->readRows($path, $originalName);
+        if ($rows === []) {
+            throw new \RuntimeException('Empty schedule file.');
         }
 
-        $header = fgetcsv($handle);
-        if ($header === false) {
-            fclose($handle);
-            throw new \RuntimeException('Empty schedule CSV.');
+        $header = array_shift($rows);
+        if ($header === null) {
+            throw new \RuntimeException('Empty schedule file.');
         }
 
-        $columns = array_flip(array_map(static fn ($h) => strtolower(trim((string) $h)), $header));
+        $columns = array_flip(array_map(
+            static fn ($h) => strtolower(trim(ltrim((string) $h, "\xEF\xBB\xBF"))),
+            $header
+        ));
         $required = ['show_title', 'time_slot_et', 'days', 'premiere_date'];
         foreach ($required as $col) {
             if (!isset($columns[$col])) {
-                fclose($handle);
-                throw new \RuntimeException('Missing CSV column: ' . $col);
+                throw new \RuntimeException('Missing schedule column: ' . $col);
             }
         }
 
@@ -63,8 +67,8 @@ final class ScheduleCsvImporter
         $imported = 0;
         $titleToShowId = [];
 
-        while (($row = fgetcsv($handle)) !== false) {
-            if ($row === [null] || $row === false) {
+        foreach ($rows as $row) {
+            if ($row === [] || $row === [null]) {
                 continue;
             }
 
@@ -106,12 +110,12 @@ final class ScheduleCsvImporter
             }
 
             $daysMask = ScheduleTimeParser::parseDays($get('days'));
-            $effectiveFrom = $this->parseDate($get('premiere_date'));
+            $effectiveFrom = self::parseScheduleDate($get('premiere_date'));
             if ($effectiveFrom === null) {
-                $this->skipped[] = 'Invalid premiere date: ' . $title;
+                $this->skipped[] = 'Invalid premiere date: ' . $title . ' (' . $get('premiere_date') . ')';
                 continue;
             }
-            $effectiveTo = $this->parseDate($get('end_date'));
+            $effectiveTo = self::parseScheduleDate($get('end_date'));
 
             $showId = $this->resolveShowId($title, $titleToShowId, $existingAbbrevs, $showsCreated, $get);
             if ($showId === null) {
@@ -141,8 +145,6 @@ final class ScheduleCsvImporter
             }
         }
 
-        fclose($handle);
-
         return [
             'imported'       => $imported,
             'shows_created'  => $showsCreated,
@@ -151,7 +153,118 @@ final class ScheduleCsvImporter
         ];
     }
 
-    /** @param array<string, string> $titleToShowId */
+    /**
+     * Normalize schedule dates to Y-m-d.
+     * Accepts ISO (YYYY-MM-DD), US (M/D/YYYY), YYYYMMDD, and Excel 1900-system serials.
+     */
+    public static function parseScheduleDate(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) === 1) {
+            return checkdate((int) $m[2], (int) $m[3], (int) $m[1])
+                ? sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3])
+                : null;
+        }
+
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $value, $m) === 1) {
+            return checkdate((int) $m[2], (int) $m[3], (int) $m[1])
+                ? sprintf('%04d-%02d-%02d', (int) $m[1], (int) $m[2], (int) $m[3])
+                : null;
+        }
+
+        if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/', $value, $m) === 1) {
+            $month = (int) $m[1];
+            $day   = (int) $m[2];
+            $year  = (int) $m[3];
+
+            return checkdate($month, $day, $year)
+                ? sprintf('%04d-%02d-%02d', $year, $month, $day)
+                : null;
+        }
+
+        // Excel serial (optionally fractional time-of-day)
+        if (preg_match('/^\d+(\.\d+)?$/', $value) === 1) {
+            $serial = (float) $value;
+            // Reasonable broadcast-era window (~1980–2100)
+            if ($serial < 29000 || $serial > 73000) {
+                return null;
+            }
+
+            return self::excelSerialToYmd($serial);
+        }
+
+        return null;
+    }
+
+    /** Excel 1900 date system (Windows) → Y-m-d. */
+    public static function excelSerialToYmd(float $serial): ?string
+    {
+        $days = (int) floor($serial);
+        if ($days < 1) {
+            return null;
+        }
+
+        try {
+            // 1899-12-30 + N accounts for Excel's bogus 1900-02-29 leap day.
+            $dt = (new \DateTimeImmutable('1899-12-30', new \DateTimeZone('UTC')))
+                ->modify('+' . $days . ' days');
+        } catch (\Exception) {
+            return null;
+        }
+
+        return $dt->format('Y-m-d');
+    }
+
+    /** @return list<list<string>> */
+    private function readRows(string $path, ?string $originalName): array
+    {
+        if ($this->isXlsx($path, $originalName)) {
+            return SimpleXlsxReader::readRows($path);
+        }
+
+        $handle = fopen($path, 'r');
+        if ($handle === false) {
+            throw new \RuntimeException('Cannot open schedule CSV.');
+        }
+
+        $rows = [];
+        while (($row = fgetcsv($handle)) !== false) {
+            if ($row === [null]) {
+                continue;
+            }
+            $rows[] = array_map(static fn ($v) => trim((string) $v), $row);
+        }
+        fclose($handle);
+
+        return $rows;
+    }
+
+    private function isXlsx(string $path, ?string $originalName): bool
+    {
+        $name = $originalName ?? $path;
+        $ext  = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        if ($ext === 'xlsx') {
+            return true;
+        }
+        if ($ext === 'csv' || $ext === 'txt') {
+            return false;
+        }
+
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            return false;
+        }
+        $sig = fread($fh, 4);
+        fclose($fh);
+
+        return $sig === "PK\x03\x04";
+    }
+
+    /** @param array<string, int> $titleToShowId */
     /** @param list<string> $existingAbbrevs */
     private function resolveShowId(
         string $title,
@@ -191,18 +304,5 @@ final class ScheduleCsvImporter
 
             return null;
         }
-    }
-
-    private function parseDate(string $value): ?string
-    {
-        $value = trim($value);
-        if ($value === '') {
-            return null;
-        }
-        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) !== 1) {
-            return null;
-        }
-
-        return $m[1] . '-' . $m[2] . '-' . $m[3];
     }
 }

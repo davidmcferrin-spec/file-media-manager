@@ -49,14 +49,20 @@ if ($method === 'POST') {
 
     if ($uri === '/schedule/import') {
         $replace = isset($_POST['replace_existing']);
-        $path    = $projectRoot . '/example_file_trees/newsnation_schedule.csv';
+        $path    = $projectRoot . '/example_file_trees/newsnation_schedule.xlsx';
+        $originalName = null;
 
-        if (!empty($_FILES['csv_file']['tmp_name']) && is_uploaded_file($_FILES['csv_file']['tmp_name'])) {
-            $path = $_FILES['csv_file']['tmp_name'];
+        $upload = $_FILES['schedule_file'] ?? $_FILES['csv_file'] ?? null;
+        if (is_array($upload)
+            && !empty($upload['tmp_name'])
+            && is_uploaded_file($upload['tmp_name'])
+        ) {
+            $path = $upload['tmp_name'];
+            $originalName = is_string($upload['name'] ?? null) ? $upload['name'] : null;
         }
 
         try {
-            $result = (new ScheduleCsvImporter())->importFile($path, $replace);
+            $result = (new ScheduleCsvImporter())->importFile($path, $replace, $originalName);
             schedule_audit($audit, 'SCHEDULE_IMPORTED', $result);
             $msg = sprintf(
                 'Imported %d hourly schedule block(s), created %d show(s).',

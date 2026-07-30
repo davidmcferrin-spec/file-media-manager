@@ -34,7 +34,7 @@ final class ScheduleSplitSuggester
             return $empty;
         }
 
-        $startMinutes = DateNormalizer::normalizeTime($timeHhmm);
+        $startMinutes = DateNormalizer::timeToMinutes($timeHhmm);
         if ($startMinutes === null) {
             return $empty;
         }

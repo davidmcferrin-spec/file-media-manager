@@ -58,10 +58,11 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
 <!-- Status pills -->
 <div class="d-flex flex-wrap gap-2 mb-3">
   <?php
-  $statuses = ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED', 'EXECUTED'];
+  $statusFilter = $statusFilter ?? ($filters['status'] ?? 'PENDING');
+  $statuses = ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED', 'EXECUTED', 'ALL'];
   foreach ($statuses as $st):
-      $active = ($filters['status'] ?? '') === $st;
-      $cnt = $statusCounts[$st] ?? 0;
+      $active = $statusFilter === $st;
+      $cnt = $st === 'ALL' ? array_sum($statusCounts) : ($statusCounts[$st] ?? 0);
   ?>
   <a href="/queue?status=<?php echo urlencode($st); ?>"
      class="btn btn-sm <?php echo $active ? 'btn-primary' : 'btn-outline-secondary'; ?>">
@@ -74,7 +75,7 @@ $previewDurationMin = (int) round(((int) env('PREVIEW_DURATION_SECONDS', 180)) /
 <form method="get" action="/queue" class="card mb-4">
   <div class="card-body py-3">
     <div class="row g-2 align-items-end">
-      <input type="hidden" name="status" value="<?php echo View::e($filters['status'] ?? 'PENDING'); ?>">
+      <input type="hidden" name="status" value="<?php echo View::e($statusFilter ?? ($filters['status'] ?? 'PENDING')); ?>">
       <div class="col-md-2">
         <label class="form-label">Confidence</label>
         <select name="confidence" class="form-select form-select-sm">

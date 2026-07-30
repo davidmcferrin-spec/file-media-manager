@@ -65,17 +65,17 @@ $formMask = (int) ($formEntry['days_of_week'] ?? 31);
 <div class="row g-4 mb-4">
   <div class="col-lg-5">
     <div class="card">
-      <div class="card-header">Import Schedule CSV</div>
+      <div class="card-header">Import Schedule</div>
       <div class="card-body">
         <form method="post" action="/schedule/import" enctype="multipart/form-data">
           <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
           <p class="path-text mb-3" style="font-size:0.78rem">
-            Default: <code>example_file_trees/newsnation_schedule.csv</code><br>
-            Hourly blocks · skips replays &amp; overnight spans · auto-creates show abbreviations.
+            Default: <code>example_file_trees/newsnation_schedule.xlsx</code><br>
+            Accepts .xlsx or .csv · Excel serial dates converted · hourly blocks · skips replays &amp; overnight spans · auto-creates show abbreviations.
           </p>
           <div class="mb-3">
-            <label class="form-label">Optional CSV upload</label>
-            <input type="file" name="csv_file" class="form-control form-control-sm" accept=".csv,text/csv">
+            <label class="form-label">Optional file upload (.xlsx or .csv)</label>
+            <input type="file" name="schedule_file" class="form-control form-control-sm" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
           </div>
           <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" name="replace_existing" id="replace-existing" checked>

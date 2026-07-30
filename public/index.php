@@ -102,6 +102,13 @@ match (true) {
     || $uri === '/legacy-map/apply'
         => require dirname(__DIR__) . '/src/Controllers/LegacyMapController.php',
 
+    // Show audit (all logged-in users)
+    $uri === '/show-audit'
+    || $uri === '/show-audit/gap'
+    || $uri === '/show-audit/gap/delete'
+    || $uri === '/show-audit/schedule/close'
+        => require dirname(__DIR__) . '/src/Controllers/ShowAuditController.php',
+
     // Execute / Rollback (admin only)
     $uri === '/execute' || $uri === '/rollback'
         => require dirname(__DIR__) . '/src/Controllers/ExecuteController.php',
@@ -113,6 +120,10 @@ match (true) {
     // Audit log (admin only)
     $uri === '/audit'
         => require dirname(__DIR__) . '/src/Controllers/AuditController.php',
+
+    // App versions / changelog (all logged-in users)
+    $uri === '/versions'
+        => require dirname(__DIR__) . '/src/Controllers/VersionsController.php',
 
     // Settings / users (admin only)
     $uri === '/settings' || str_starts_with($uri, '/settings/')

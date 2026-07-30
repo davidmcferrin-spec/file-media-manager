@@ -1,12 +1,23 @@
-<?php declare(strict_types=1); ?>
+<?php
+
+declare(strict_types=1);
+
+use MediaManager\Support\AppVersion;
+use MediaManager\Support\View;
+
+$appVersion = AppVersion::current();
+?>
 </div><!-- /.page-wrap -->
 
 <footer class="mt-auto py-3 px-3" style="border-top:1px solid var(--border-color);margin-top:2rem!important;">
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2"
        style="max-width:1600px;margin:0 auto;font-size:0.72rem;color:var(--text-soft);">
     <span>
-      <?php echo htmlspecialchars(env('APP_NAME', 'Media Manager'), ENT_QUOTES, 'UTF-8'); ?>
+      <?php echo View::e(env('APP_NAME', 'Media Manager')); ?>
       &mdash; NewsNation
+      <a href="/versions" class="ms-2 text-decoration-none"
+         style="color:var(--accent);font-variant-numeric:tabular-nums;"
+         title="Release notes">v<?php echo View::e($appVersion); ?></a>
     </span>
     <span><?php echo date('Y'); ?></span>
   </div>
