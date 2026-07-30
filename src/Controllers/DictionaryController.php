@@ -127,6 +127,42 @@ if ($method === 'POST') {
         exit;
     }
 
+    if ($uri === '/dictionary/delete') {
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            Session::flash('error', 'Invalid show.');
+            header('Location: /dictionary');
+            exit;
+        }
+
+        $show = $showRepo->findById($id);
+        if ($show === null) {
+            Session::flash('error', 'Show not found.');
+            header('Location: /dictionary');
+            exit;
+        }
+
+        try {
+            $showRepo->delete($id);
+            dictionary_audit($audit, 'SHOW_DELETED', $id, [
+                'canonical_name' => $show['canonical_name'] ?? '',
+                'abbreviation'   => $show['abbreviation'] ?? '',
+            ]);
+            Session::flash('success', 'Show deleted.');
+        } catch (\RuntimeException $e) {
+            Session::flash('error', $e->getMessage());
+            header('Location: /dictionary?edit=' . $id);
+            exit;
+        } catch (PDOException $e) {
+            Session::flash('error', 'Could not delete show (it may still be referenced).');
+            header('Location: /dictionary?edit=' . $id);
+            exit;
+        }
+
+        header('Location: /dictionary');
+        exit;
+    }
+
     if ($uri === '/dictionary/merge') {
         $canonicalId = (int) ($_POST['canonical_id'] ?? 0);
         $absorbedRaw = $_POST['absorbed_ids'] ?? [];

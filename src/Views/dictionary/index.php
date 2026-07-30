@@ -90,7 +90,7 @@ require dirname(__DIR__) . '/shows/_nav.php';
           </div>
           <?php endif; ?>
 
-          <div class="d-flex gap-2">
+          <div class="d-flex gap-2 flex-wrap">
             <button type="submit" class="btn btn-primary btn-sm">
               <?php echo $editShow ? 'Save Changes' : 'Add Show'; ?>
             </button>
@@ -99,6 +99,14 @@ require dirname(__DIR__) . '/shows/_nav.php';
             <?php endif; ?>
           </div>
         </form>
+        <?php if ($editShow): ?>
+        <form method="post" action="/dictionary/delete" class="mt-3"
+              onsubmit="return confirm('Delete this show? Timeline blocks and gap markers for it will be removed. Catalog files that still reference it will block deletion.');">
+          <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+          <input type="hidden" name="id" value="<?php echo (int) $editShow['id']; ?>">
+          <button type="submit" class="btn btn-outline-danger btn-sm">Delete Show</button>
+        </form>
+        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -161,9 +169,15 @@ require dirname(__DIR__) . '/shows/_nav.php';
                 <span class="badge bg-secondary">Inactive</span>
                 <?php endif; ?>
               </td>
-              <td class="text-end">
+              <td class="text-end text-nowrap">
                 <a href="/dictionary?edit=<?php echo (int) $show['id']; ?>"
                    class="btn btn-outline-secondary btn-xs">Edit</a>
+                <form method="post" action="/dictionary/delete" class="d-inline"
+                      onsubmit="return confirm('Delete this show? Timeline blocks for it will be removed.');">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $show['id']; ?>">
+                  <button type="submit" class="btn btn-outline-danger btn-xs">Delete</button>
+                </form>
               </td>
             </tr>
             <?php endforeach; ?>

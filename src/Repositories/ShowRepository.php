@@ -103,6 +103,40 @@ final class ShowRepository extends BaseRepository
             || str_contains($e->getMessage(), 'duplicate key');
     }
 
+    public function countFiles(int $id): int
+    {
+        $stmt = $this->db()->prepare('SELECT COUNT(*) FROM files WHERE show_id = ?');
+        $stmt->execute([$id]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Delete a show. Schedule / gaps / conversion rules cascade via FK.
+     * Refuses when catalog files still reference the show.
+     *
+     * @throws \RuntimeException when files still reference the show
+     */
+    public function delete(int $id): bool
+    {
+        $show = $this->findById($id);
+        if ($show === null) {
+            return false;
+        }
+
+        $fileCount = $this->countFiles($id);
+        if ($fileCount > 0) {
+            throw new \RuntimeException(
+                'Cannot delete: ' . $fileCount . ' catalog file(s) still reference this show. '
+                . 'Merge into another show or clear those classifications first.'
+            );
+        }
+
+        $stmt = $this->db()->prepare('DELETE FROM shows WHERE id = ?');
+
+        return $stmt->execute([$id]);
+    }
+
     /**
      * Merge duplicate/auto-generated shows into a canonical dictionary entry.
      *
