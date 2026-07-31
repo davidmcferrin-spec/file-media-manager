@@ -157,6 +157,7 @@ final class ContinuityCheckService
      *   base_url: string,
      *   pack: string,
      *   timeout_seconds: int,
+     *   keep_alive: string,
      *   packs: list<string>
      * }
      */
@@ -171,8 +172,37 @@ final class ContinuityCheckService
             'base_url'         => $this->client->baseUrl(),
             'pack'             => $this->client->model(),
             'timeout_seconds'  => $this->client->timeoutSeconds(),
+            'keep_alive'       => $this->client->keepAlive(),
             'packs'            => $probe['packs'],
         ];
+    }
+
+    /**
+     * Front-load pack into Ollama memory before a scan/reclassify loop.
+     *
+     * @return array{ok: bool, duration_ms: int, transport_error: string}|null
+     *         null when continuity is disabled (nothing to warm)
+     */
+    public function warmEngine(): ?array
+    {
+        if (!$this->isEnabled()) {
+            return null;
+        }
+        if (!$this->engineAvailable()) {
+            return [
+                'ok'              => false,
+                'duration_ms'     => 0,
+                'transport_error' => 'engine unreachable',
+            ];
+        }
+
+        $result = $this->client->warmPack();
+        if (!$result['ok']) {
+            $this->reachable = false;
+            $this->reachableCheckedAt = microtime(true);
+        }
+
+        return $result;
     }
 
     /**

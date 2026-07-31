@@ -46,6 +46,7 @@ final class ReclassifyService
         ];
 
         $fileList = $this->files->byScanJob($scanJobId, 50000);
+        $this->continuity->warmEngine();
         foreach ($fileList as $file) {
             $fileStatus = (string) ($file['status'] ?? '');
             if (!in_array($fileStatus, ['PENDING', 'FLAGGED', 'REJECTED'], true)) {

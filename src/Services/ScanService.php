@@ -128,6 +128,17 @@ final class ScanService
             $this->scanJobs->setTotalFiles($jobId, $totalFiles);
             $this->progress('discovered', ['total' => $totalFiles]);
 
+            $warm = $this->continuity->warmEngine();
+            if ($warm !== null) {
+                $this->progress('continuity_warm', $warm);
+                if (!$warm['ok']) {
+                    error_log(
+                        '[scan] Job ' . $jobId . ': continuity pack warm failed: '
+                        . ($warm['transport_error'] !== '' ? $warm['transport_error'] : 'unknown')
+                    );
+                }
+            }
+
             $processed = 0;
             foreach ($mediaFiles as $entry) {
                 $this->abortIfCancelled($jobId);

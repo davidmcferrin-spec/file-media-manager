@@ -77,6 +77,7 @@ $queryBase = array_filter([
           —
           <?php endif; ?>
           · timeout <?php echo (int) ($status['timeout_seconds'] ?? 0); ?>s
+          · keep_alive <code><?php echo View::e((string) ($status['keep_alive'] ?? '24h')); ?></code>
         </div>
         <?php
         $packs = $status['packs'] ?? [];
@@ -109,6 +110,10 @@ $queryBase = array_filter([
         <div class="path-text mt-1">
           Effective decide timeout: <strong><?php echo (int) ($status['timeout_seconds'] ?? 0); ?>s</strong>
           (minimum 60s enforced in app)
+        </div>
+        <div class="path-text mt-1">
+          Pack keep_alive: <code><?php echo View::e((string) ($status['keep_alive'] ?? '24h')); ?></code>
+          — renews on each decide; host may also set <code>OLLAMA_KEEP_ALIVE</code>
         </div>
       </div>
     </div>

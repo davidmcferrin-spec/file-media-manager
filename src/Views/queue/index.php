@@ -654,10 +654,10 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 
 <style>
 #queue-table .queue-select-row.queue-row-selected > td {
-    background: rgba(var(--bs-primary-rgb, 13, 110, 253), 0.08);
+    background: var(--info-soft);
 }
 #queue-table .queue-select-row:not(.queue-row-selected):hover > td {
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--hover-bg);
 }
 #queue-table .queue-check-cell {
     cursor: default;

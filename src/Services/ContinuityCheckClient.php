@@ -13,6 +13,7 @@ final class ContinuityCheckClient
         private readonly string $baseUrl = 'http://127.0.0.1:11434',
         private readonly string $model = 'llama3.2:3b',
         private readonly int $timeoutSeconds = 60,
+        private readonly string $keepAlive = '24h',
     ) {
     }
 
@@ -24,10 +25,16 @@ final class ContinuityCheckClient
             $timeout = 60;
         }
 
+        $keepAlive = trim((string) env('CONTINUITY_CHECK_KEEP_ALIVE', '24h'));
+        if ($keepAlive === '') {
+            $keepAlive = '24h';
+        }
+
         return new self(
             rtrim((string) env('CONTINUITY_CHECK_URL', 'http://127.0.0.1:11434'), '/'),
             (string) env('CONTINUITY_CHECK_MODEL', 'llama3.2:3b'),
             $timeout,
+            $keepAlive,
         );
     }
 
@@ -46,9 +53,108 @@ final class ContinuityCheckClient
         return $this->timeoutSeconds;
     }
 
+    public function keepAlive(): string
+    {
+        return $this->keepAlive;
+    }
+
+    /**
+     * Value for Ollama's keep_alive field (duration string or integer seconds / -1).
+     */
+    public function keepAlivePayload(): string|int
+    {
+        $raw = trim($this->keepAlive);
+        if ($raw === '-1' || preg_match('/^\d+$/', $raw) === 1) {
+            return (int) $raw;
+        }
+
+        return $raw !== '' ? $raw : '24h';
+    }
+
     public function isReachable(): bool
     {
         return $this->probe()['reachable'];
+    }
+
+    /**
+     * Load the configured pack into memory and renew keep_alive (reduces cold-start on first file).
+     *
+     * @return array{ok: bool, duration_ms: int, transport_error: string}
+     */
+    public function warmPack(): array
+    {
+        $started = microtime(true);
+        $payload = [
+            'model'      => $this->model,
+            'prompt'     => '.',
+            'stream'     => false,
+            'keep_alive' => $this->keepAlivePayload(),
+            'options'    => [
+                'temperature' => 0,
+                'num_predict' => 1,
+            ],
+        ];
+
+        $ch = curl_init($this->baseUrl . '/api/generate');
+        if ($ch === false) {
+            return [
+                'ok'              => false,
+                'duration_ms'     => 0,
+                'transport_error' => 'curl_init failed',
+            ];
+        }
+
+        try {
+            $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        } catch (\Throwable $e) {
+            return [
+                'ok'              => false,
+                'duration_ms'     => 0,
+                'transport_error' => 'payload encode failed: ' . $e->getMessage(),
+            ];
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_CONNECTTIMEOUT => min(5, $this->timeoutSeconds),
+            CURLOPT_TIMEOUT        => $this->timeoutSeconds,
+        ]);
+
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+        $durationMs = (int) round((microtime(true) - $started) * 1000);
+
+        if ($raw === false) {
+            return [
+                'ok'              => false,
+                'duration_ms'     => $durationMs,
+                'transport_error' => $curlErr !== '' ? $curlErr : 'empty transport response',
+            ];
+        }
+
+        if ($code < 200 || $code >= 300) {
+            $hint = 'HTTP ' . $code;
+            if ($code === 404) {
+                $hint .= ' — pack not found. Run: ollama pull ' . $this->model;
+            }
+
+            return [
+                'ok'              => false,
+                'duration_ms'     => $durationMs,
+                'transport_error' => $hint,
+            ];
+        }
+
+        return [
+            'ok'              => true,
+            'duration_ms'     => $durationMs,
+            'transport_error' => '',
+        ];
     }
 
     /** @return array{reachable: bool, latency_ms: ?int, packs: list<string>} */
@@ -150,10 +256,11 @@ final class ContinuityCheckClient
         ];
 
         $payload = [
-            'model'   => $this->model,
-            'stream'  => false,
-            'format'  => 'json',
-            'options' => [
+            'model'      => $this->model,
+            'stream'     => false,
+            'format'     => 'json',
+            'keep_alive' => $this->keepAlivePayload(),
+            'options'    => [
                 'temperature' => 0,
                 'num_predict' => 512,
             ],

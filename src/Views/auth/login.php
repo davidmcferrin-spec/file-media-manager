@@ -28,24 +28,28 @@ $csrfToken = Session::csrfToken();
 <script defer src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 <style>
 :root, [data-bs-theme="dark"] {
-    --bg-body:    #060e1a;
-    --panel:      #131f34;
-    --border:     rgba(148,163,184,0.22);
-    --text-main:  #eef2f8;
-    --text-soft:  #9cadc4;
-    --accent:     #56c4f5;
-    --form-bg:    #0a1322;
-    --form-border:rgba(148,163,184,0.28);
+    --bg-body:     #0b1118;
+    --panel:       #151d29;
+    --border:      rgba(148,163,184,0.28);
+    --text-main:   #f1f5f9;
+    --text-soft:   #b6c2d1;
+    --accent:      #5ec8f5;
+    --form-bg:     #0f1621;
+    --form-border: rgba(148,163,184,0.36);
+    --placeholder: #8896a8;
+    --focus-ring:  rgba(94,200,245,0.22);
 }
 [data-bs-theme="light"] {
-    --bg-body:    #f0f6ff;
-    --panel:      #ffffff;
-    --border:     rgba(0,0,0,0.09);
-    --text-main:  #1e293b;
-    --text-soft:  #64748b;
-    --accent:     #0ea5e9;
-    --form-bg:    #ffffff;
-    --form-border:rgba(0,0,0,0.12);
+    --bg-body:     #f0f6ff;
+    --panel:       #ffffff;
+    --border:      rgba(15,23,42,0.10);
+    --text-main:   #0f172a;
+    --text-soft:   #475569;
+    --accent:      #0284c7;
+    --form-bg:     #ffffff;
+    --form-border: rgba(15,23,42,0.14);
+    --placeholder: #64748b;
+    --focus-ring:  rgba(2,132,199,0.18);
 }
 body {
     min-height: 100vh;
@@ -94,16 +98,20 @@ body {
     font-size: 0.85rem;
     border-radius: 0.5rem;
 }
+.form-control::placeholder {
+    color: var(--placeholder);
+    opacity: 1;
+}
 .form-control:focus {
     background: var(--form-bg);
     border-color: var(--accent);
     color: var(--text-main);
-    box-shadow: 0 0 0 3px rgba(86,196,245,0.15);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .btn-login {
     background: var(--accent);
     border: none;
-    color: #060e1a;
+    color: #0b1118;
     font-weight: 700;
     letter-spacing: 0.05em;
     text-transform: uppercase;

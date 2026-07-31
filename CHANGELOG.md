@@ -14,6 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.8] — 2026-07-30
+
+### Added
+
+- Continuity engine `keep_alive` baked into Ollama chat/generate calls (`CONTINUITY_CHECK_KEEP_ALIVE`, default `24h`) plus pack warm-up before Scan/Reclassify to reduce cold-starts
+
+## [0.5.7] — 2026-07-30
+
+### Changed
+
+- Dark mode contrast and readability: clearer surface hierarchy, brighter secondary text, stronger borders, and Bootstrap muted/form/alert/button overrides for a cleaner professional UI
+
 ## [0.5.6] — 2026-07-30
 
 ### Fixed
