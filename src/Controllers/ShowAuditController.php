@@ -11,6 +11,7 @@ use MediaManager\Repositories\CompletenessRepository;
 use MediaManager\Repositories\ExpectedGapRepository;
 use MediaManager\Repositories\ProgramScheduleRepository;
 use MediaManager\Repositories\ShowRepository;
+use MediaManager\Repositories\SystemRepository;
 use MediaManager\Services\CompletenessService;
 use MediaManager\Services\DateNormalizer;
 use MediaManager\Services\ScheduleTimeParser;
@@ -25,6 +26,7 @@ $gapRepo      = new ExpectedGapRepository();
 $scheduleRepo = new ProgramScheduleRepository();
 $showRepo     = new ShowRepository();
 $filesRepo    = new CompletenessRepository();
+$systemRepo   = new SystemRepository();
 $audit        = new AuditRepository();
 
 function show_audit_redirect(array $params = []): string
@@ -158,6 +160,7 @@ if ($method === 'POST') {
         }
 
         $scheduleRepo->setEffectiveTo($entryId, $effectiveTo);
+        $systemRepo->set('timeline_ready_for_scan', 'false');
         $user = Auth::user();
         $audit->record(
             Auth::id(),

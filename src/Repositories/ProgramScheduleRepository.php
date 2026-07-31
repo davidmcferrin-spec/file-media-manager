@@ -302,6 +302,71 @@ final class ProgramScheduleRepository extends BaseRepository
         )->fetchColumn();
     }
 
+    public function countActive(): int
+    {
+        return (int) $this->db()->query(
+            'SELECT COUNT(*) FROM program_schedule_entries WHERE active IS TRUE'
+        )->fetchColumn();
+    }
+
+    /**
+     * Lean projection of every active schedule row (past eras + open-ended current)
+     * for continuity engine seeding.
+     *
+     * @return list<array{
+     *   show_id: int,
+     *   show_abbr: string,
+     *   title: string,
+     *   start: string,
+     *   end: string,
+     *   days: int,
+     *   from: string,
+     *   to: ?string
+     * }>
+     */
+    public function listAllLeanActive(): array
+    {
+        $rows = $this->db()->query(
+            "SELECT pse.show_id,
+                    sh.abbreviation AS show_abbr,
+                    pse.title,
+                    to_char(pse.hour_start_et, 'HH24:MI') AS start,
+                    to_char(pse.hour_end_et, 'HH24:MI') AS end,
+                    pse.days_of_week AS days,
+                    to_char(pse.effective_from, 'YYYY-MM-DD') AS from,
+                    CASE
+                      WHEN pse.effective_to IS NULL THEN NULL
+                      ELSE to_char(pse.effective_to, 'YYYY-MM-DD')
+                    END AS to
+             FROM program_schedule_entries pse
+             JOIN shows sh ON sh.id = pse.show_id
+             WHERE pse.active IS TRUE
+             ORDER BY pse.effective_from ASC, pse.hour_start_et ASC, pse.id ASC"
+        )->fetchAll();
+
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'show_id'   => (int) $row['show_id'],
+                'show_abbr' => (string) ($row['show_abbr'] ?? ''),
+                'title'     => (string) ($row['title'] ?? ''),
+                'start'     => (string) ($row['start'] ?? ''),
+                'end'       => (string) ($row['end'] ?? ''),
+                'days'      => (int) ($row['days'] ?? 0),
+                'from'      => (string) ($row['from'] ?? ''),
+                'to'        => isset($row['to']) && $row['to'] !== null && $row['to'] !== ''
+                    ? (string) $row['to']
+                    : null,
+            ];
+        }
+
+        return $out;
+    }
+
     public function setEffectiveTo(int $id, string $effectiveTo): bool
     {
         $stmt = $this->db()->prepare(

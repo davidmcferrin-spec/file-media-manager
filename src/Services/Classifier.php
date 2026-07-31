@@ -264,16 +264,24 @@ final class Classifier
     /** @return array{id: ?int, name: ?string, abbreviation: ?string} */
     private function matchMediaType(array $segments, string $filename, array &$signals): array
     {
-        $folderType = $segments !== [] ? strtoupper($segments[count($segments) - 1]) : '';
-        $typeFromFolder = $this->resolveMediaTypeByToken($folderType);
-        if ($typeFromFolder !== null) {
-            $signals[] = 'media_type:path folder ' . $folderType;
-            return $typeFromFolder;
+        // Walk path folders from leaf toward root so …/PGM/2024/file still hits PGM.
+        for ($i = count($segments) - 1; $i >= 0; $i--) {
+            $raw = strtoupper(trim((string) $segments[$i]));
+            if ($raw === '' || preg_match('/^\d{4}$/', $raw) === 1 || preg_match('/^\d{1,2}$/', $raw) === 1) {
+                continue; // skip year/month-like segments
+            }
+            $normalized = self::normalizeMediaTypeToken($raw);
+            $typeFromFolder = $this->resolveMediaTypeByToken($normalized);
+            if ($typeFromFolder !== null) {
+                $signals[] = 'media_type:path folder ' . $raw;
+                return $typeFromFolder;
+            }
         }
 
         $haystack = strtolower($filename);
 
-        // Longest conversion alias first
+        // Longest conversion alias first (filename + full relative path)
+        $pathHaystack = strtolower(implode('/', $segments) . '/' . $filename);
         $rules = $this->conversionRules;
         usort($rules, fn ($a, $b) => strlen((string) $b['alias']) <=> strlen((string) $a['alias']));
         foreach ($rules as $rule) {
@@ -281,7 +289,7 @@ final class Classifier
                 continue;
             }
             $alias = (string) $rule['alias'];
-            if (str_contains($haystack, $alias)) {
+            if (str_contains($haystack, $alias) || str_contains($pathHaystack, $alias)) {
                 $signals[] = 'media_type:conversion ' . $alias;
                 return [
                     'id'           => (int) $rule['media_type_id'],
@@ -294,12 +302,7 @@ final class Classifier
         $tokens = ['GISO', 'ISO', 'CLEAN', 'PROGRAM', 'PGM', 'PRETAPE', 'PRE-TAPE', 'RAW', 'LIVE CLEAN'];
         foreach ($tokens as $token) {
             if (stripos($filename, $token) !== false) {
-                $normalized = match (strtoupper(str_replace('-', ' ', $token))) {
-                    'PGM'         => 'PROGRAM',
-                    'PRETAPE', 'PRE TAPE' => 'CLEAN',
-                    'LIVE CLEAN'  => 'CLEAN',
-                    default       => strtoupper(str_replace(' ', '', $token)),
-                };
+                $normalized = self::normalizeMediaTypeToken(strtoupper(str_replace('-', ' ', $token)));
                 $resolved = $this->resolveMediaTypeByToken($normalized);
                 if ($resolved !== null) {
                     $signals[] = 'media_type:filename token ' . $token;
@@ -311,18 +314,33 @@ final class Classifier
         return ['id' => null, 'name' => null, 'abbreviation' => null];
     }
 
+    public static function normalizeMediaTypeToken(string $token): string
+    {
+        $token = strtoupper(trim(str_replace(['-', '_'], ' ', $token)));
+        $token = preg_replace('/\s+/', ' ', $token) ?? $token;
+
+        return match ($token) {
+            'PGM' => 'PROGRAM',
+            'PRETAPE', 'PRE TAPE' => 'CLEAN',
+            'LIVE CLEAN' => 'CLEAN',
+            'CLN' => 'CLEAN',
+            default => strtoupper(str_replace(' ', '', $token)),
+        };
+    }
+
     /** @return array{id: int, name: string, abbreviation: string}|null */
     private function resolveMediaTypeByToken(string $token): ?array
     {
-        $token = strtoupper(trim($token));
+        $token = self::normalizeMediaTypeToken($token);
         if ($token === '') {
             return null;
         }
 
         foreach ($this->mediaTypes as $mt) {
-            $name = strtoupper((string) $mt['name']);
-            $abbr = strtoupper((string) $mt['abbreviation']);
-            if ($token === $name || $token === $abbr) {
+            $name = self::normalizeMediaTypeToken((string) $mt['name']);
+            $abbr = self::normalizeMediaTypeToken((string) $mt['abbreviation']);
+            $folder = self::normalizeMediaTypeToken((string) ($mt['folder_name'] ?? ''));
+            if ($token === $name || $token === $abbr || ($folder !== '' && $token === $folder)) {
                 return [
                     'id'           => (int) $mt['id'],
                     'name'         => (string) $mt['name'],

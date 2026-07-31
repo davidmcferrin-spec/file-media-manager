@@ -14,6 +14,10 @@ use MediaManager\Support\View;
 /** @var int $showId */
 /** @var string $search */
 /** @var array{skipped?: list<string>, warnings?: list<string>}|null $importLog */
+/** @var list<array<string, mixed>> $openEnded */
+/** @var int $openEndedTotal */
+/** @var bool $timelineReady */
+/** @var string $timelineReadyAt */
 
 $dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 $dayBits   = [1, 2, 4, 8, 16, 32, 64];
@@ -64,6 +68,77 @@ require dirname(__DIR__) . '/shows/_nav.php';
   <a href="/schedule?<?php echo http_build_query(array_filter(['show_id' => $showId > 0 ? $showId : null, 'add' => '1'])); ?>"
      class="btn btn-primary btn-sm">Add Entry</a>
   <?php endif; ?>
+</div>
+
+<div class="card mb-4" id="hygiene">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <span>Schedule hygiene (before Scan)</span>
+    <?php if ($timelineReady): ?>
+    <span class="badge bg-success">Ready for Scan<?php if ($timelineReadyAt !== ''): ?> · <?php echo View::e($timelineReadyAt); ?> ET<?php endif; ?></span>
+    <?php else: ?>
+    <span class="badge bg-warning text-dark">Not marked ready</span>
+    <?php endif; ?>
+  </div>
+  <div class="card-body">
+    <p class="path-text mb-3" style="font-size:0.78rem">
+      Open-ended rows (<code>effective_to</code> empty) mean the block is <strong>still current</strong>.
+      Close past eras that have ended; keep current shows open-ended. Continuity receives the full active Timeline (past + current).
+      Mark ready when hygiene looks good — Scan will prompt if this is skipped.
+    </p>
+    <?php if ($openEndedTotal > 0): ?>
+    <p class="mb-2" style="font-size:0.8rem">
+      <span class="badge bg-warning text-dark"><?php echo number_format($openEndedTotal); ?></span>
+      open-ended active block(s)
+    </p>
+    <div class="table-responsive mb-3">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Show</th>
+            <th>Title</th>
+            <th>Hours</th>
+            <th>From</th>
+            <th>Set end date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($openEnded as $entry): ?>
+          <tr>
+            <td><code><?php echo View::e((string) ($entry['show_abbr'] ?? '')); ?></code></td>
+            <td><?php echo View::e((string) ($entry['title'] ?? '')); ?></td>
+            <td>
+              <code><?php echo View::e(substr((string) $entry['hour_start_et'], 0, 5)); ?>–<?php echo View::e(substr((string) $entry['hour_end_et'], 0, 5)); ?></code>
+            </td>
+            <td><?php echo View::e(substr((string) $entry['effective_from'], 0, 10)); ?></td>
+            <td>
+              <form method="post" action="/schedule/close-end" class="d-flex gap-2 align-items-center">
+                <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                <input type="hidden" name="id" value="<?php echo (int) $entry['id']; ?>">
+                <input type="date" name="effective_to" class="form-control form-control-sm" required style="width:150px">
+                <button type="submit" class="btn btn-outline-primary btn-xs">Set end</button>
+                <a class="btn btn-link btn-xs" href="/schedule?edit=<?php echo (int) $entry['id']; ?>">Full edit</a>
+              </form>
+            </td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php if ($openEndedTotal > count($openEnded)): ?>
+    <p class="path-text mb-3" style="font-size:0.75rem">
+      Showing <?php echo count($openEnded); ?> of <?php echo number_format($openEndedTotal); ?>.
+    </p>
+    <?php endif; ?>
+    <?php else: ?>
+    <p class="path-text mb-3" style="font-size:0.78rem">No open-ended active schedule rows.</p>
+    <?php endif; ?>
+    <form method="post" action="/schedule/mark-ready"
+          onsubmit="return confirm('Mark Timeline ready for Scan? Open-ended current shows are OK to keep.');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <button type="submit" class="btn btn-primary btn-sm">Mark Timeline ready for Scan</button>
+      <a href="/scan" class="btn btn-outline-secondary btn-sm ms-1">Go to Scan</a>
+    </form>
+  </div>
 </div>
 
 <div class="row g-4 mb-4">

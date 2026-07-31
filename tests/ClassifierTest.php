@@ -20,10 +20,15 @@ function assert_eq(mixed $expected, mixed $actual, string $label): void
     echo "OK {$label}\n";
 }
 
+assert_eq('PROGRAM', Classifier::normalizeMediaTypeToken('PGM'), 'normalize PGM');
+assert_eq('CLEAN', Classifier::normalizeMediaTypeToken('CLN'), 'normalize CLN');
+assert_eq('PROGRAM', Classifier::normalizeMediaTypeToken('Program'), 'normalize Program');
+
 try {
     \MediaManager\Database::connection();
 } catch (\Throwable $e) {
-    echo "SKIP ClassifierTest — no database: " . $e->getMessage() . "\n";
+    echo "SKIP ClassifierTest (DB cases) — no database: " . $e->getMessage() . "\n";
+    echo "\nNormalize token tests passed.\n";
     exit(0);
 }
 
@@ -56,6 +61,14 @@ $r = $classifier->classify(
 assert_eq('Program', $r->mediaTypeAbbreviation, 'pgm maps to program');
 assert_eq('20251201', $r->fileDate, 'pgm date from iso');
 assert_eq('CUOMO/2025/12/Program', $r->proposedDir, 'pgm proposed dir');
+
+// PGM folder above year/month still wins (not only leaf segment).
+$r = $classifier->classify(
+    $mount . '/cuomo/PGM/2025/12/CUOMO_20251215_2000.ts',
+    $mount
+);
+assert_eq('Program', $r->mediaTypeAbbreviation, 'pgm mid-path folder');
+assert_eq('CUOMO/2025/12/Program', $r->proposedDir, 'pgm mid-path proposed dir');
 
 // Date/time in the filename without show/type identity → UNEVALUATED, not LOW.
 $r = $classifier->classify(

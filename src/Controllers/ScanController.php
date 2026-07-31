@@ -8,8 +8,10 @@ use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
+use MediaManager\Repositories\ProgramScheduleRepository;
 use MediaManager\Repositories\ScanJobRepository;
 use MediaManager\Repositories\SourceRepository;
+use MediaManager\Repositories\SystemRepository;
 use MediaManager\Services\FFprobeService;
 
 Auth::requireAdmin();
@@ -17,11 +19,13 @@ Auth::requireAdmin();
 $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
-$scanJobs  = new ScanJobRepository();
-$sources   = new SourceRepository();
-$files     = new FileRepository();
-$audit     = new AuditRepository();
-$ffprobe   = new FFprobeService();
+$scanJobs     = new ScanJobRepository();
+$sources      = new SourceRepository();
+$files        = new FileRepository();
+$audit        = new AuditRepository();
+$systemRepo   = new SystemRepository();
+$scheduleRepo = new ProgramScheduleRepository();
+$ffprobe      = new FFprobeService();
 
 /** @var string $projectRoot */
 $projectRoot = dirname(__DIR__, 2);
@@ -61,6 +65,21 @@ if ($method === 'POST' && $uri === '/scan/start') {
     $subpath         = trim((string) ($_POST['subpath'] ?? ''), '/');
     $extractMetadata = isset($_POST['extract_metadata']);
     $useDevList      = isset($_POST['use_dev_list']);
+    $ackTimeline     = isset($_POST['ack_timeline_not_ready']);
+
+    $timelineReady = in_array(
+        strtolower(trim((string) ($systemRepo->get('timeline_ready_for_scan') ?? ''))),
+        ['1', 'true', 'yes', 'on'],
+        true
+    );
+    if (!$timelineReady && !$ackTimeline) {
+        Session::flash(
+            'error',
+            'Timeline is not marked ready for Scan. Finish schedule hygiene on Timeline, or check “Start anyway” to acknowledge.'
+        );
+        header('Location: /scan');
+        exit;
+    }
 
     $source = $sourceId > 0 ? $sources->findById($sourceId) : null;
     if ($source === null) {
@@ -522,6 +541,14 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
 $activeSources = array_filter($sources->all(), fn ($s) => !empty($s['active']));
 $recentJobs    = $scanJobs->recent(15);
 $ffprobeOk     = $ffprobe->isAvailable();
+$timelineReady = in_array(
+    strtolower(trim((string) ($systemRepo->get('timeline_ready_for_scan') ?? ''))),
+    ['1', 'true', 'yes', 'on'],
+    true
+);
+$timelineReadyAt = trim((string) ($systemRepo->get('timeline_ready_at') ?? ''));
+$openEndedTotal  = $scheduleRepo->countOpenEnded();
+$timelineActive  = $scheduleRepo->countActive();
 
 $title = 'Scan — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';

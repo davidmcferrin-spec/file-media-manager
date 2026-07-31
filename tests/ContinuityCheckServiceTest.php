@@ -110,7 +110,12 @@ final class ContinuityCheckServiceTest extends TestCase
             1 => ['id' => 1, 'abbreviation' => 'PGM', 'name' => 'Program', 'folder_name' => 'Program'],
             2 => ['id' => 2, 'abbreviation' => 'CLN', 'name' => 'Clean', 'folder_name' => 'Clean'],
         ];
-        $idsByAbbr = ['PGM' => 1, 'CLN' => 2];
+        $idsByAbbr = [
+            'PGM'     => 1,
+            'CLN'     => 2,
+            'PROGRAM' => 1,
+            'CLEAN'   => 2,
+        ];
 
         return [$typesById, $idsByAbbr];
     }

@@ -328,7 +328,10 @@ $queryBase = array_filter([
         $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
         $transportErr = trim((string) ($row['transport_error'] ?? ''));
         $hasArtifacts = $seedPretty !== '' || $engineRaw !== '' || $transportErr !== '';
-        $timelineCount = is_array($seed) && is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0;
+        $scheduleCount = is_array($seed) && is_array($seed['schedule'] ?? null) ? count($seed['schedule']) : 0;
+        $atAirCount = is_array($seed) && is_array($seed['at_air_time'] ?? null)
+            ? count($seed['at_air_time'])
+            : (is_array($seed) && is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0);
         $exampleCount = is_array($seed) && is_array($seed['examples'] ?? null) ? count($seed['examples']) : 0;
         $showCount = is_array($seed) && is_array($seed['shows'] ?? null) ? count($seed['shows']) : 0;
         $catalogHref = $fileId > 0
@@ -445,7 +448,8 @@ $queryBase = array_filter([
               <div class="p-3" style="background:var(--hover-bg);border-top:1px solid var(--bs-border-color)">
                 <div class="d-flex flex-wrap gap-3 mb-2 path-text" style="font-size:0.75rem">
                   <span>Shows seeded: <strong><?php echo (int) $showCount; ?></strong></span>
-                  <span>Timeline rows: <strong><?php echo (int) $timelineCount; ?></strong></span>
+                  <span>Schedule rows: <strong><?php echo (int) $scheduleCount; ?></strong></span>
+                  <span>At air time: <strong><?php echo (int) $atAirCount; ?></strong></span>
                   <span>Approved examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
                   <?php if ($row['http_status'] !== null): ?>
                   <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>

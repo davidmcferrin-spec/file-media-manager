@@ -14,6 +14,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.16] — 2026-07-30
+
+### Added
+
+- Continuity engine seeds the **full active Timeline** (`schedule[]`, past + open-ended current); `to` null means still current; `at_air_time[]` highlights the proposal date/time
+- Timeline **schedule hygiene** panel (`/schedule#hygiene`) — close open-ended eras, **Mark Timeline ready for Scan**
+- Scan pre-check: banner + require ready mark or explicit “Start anyway” acknowledgment
+- Classifier matches media type from **any path folder** (leaf→root), including `PGM` → Program
+
+### Changed
+
+- Continuity Lab seed counts show full schedule rows + at-air-time matches (not only the old timeline alias)
+
 ## [0.5.15] — 2026-07-30
 
 ### Changed

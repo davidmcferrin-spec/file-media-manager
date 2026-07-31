@@ -8,6 +8,10 @@ use MediaManager\Support\View;
 /** @var list<array<string, mixed>> $activeSources */
 /** @var list<array<string, mixed>> $recentJobs */
 /** @var bool $ffprobeOk */
+/** @var bool $timelineReady */
+/** @var string $timelineReadyAt */
+/** @var int $openEndedTotal */
+/** @var int $timelineActive */
 
 $workflowStepId = 'scan';
 require dirname(__DIR__) . '/partials/workflow_step.php';
@@ -21,6 +25,26 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
     </p>
   </div>
 </div>
+
+<?php if (!$timelineReady): ?>
+<div class="alert alert-warning mb-4" style="font-size:0.84rem;">
+  Timeline is not marked ready for Scan
+  (<?php echo number_format($timelineActive); ?> active block<?php echo $timelineActive === 1 ? '' : 's'; ?><?php if ($openEndedTotal > 0): ?>,
+  <?php echo number_format($openEndedTotal); ?> open-ended<?php endif; ?>).
+  Vet schedule hygiene on
+  <a href="/schedule#hygiene">Timeline</a>
+  and click <strong>Mark Timeline ready for Scan</strong>, or acknowledge below to start anyway.
+</div>
+<?php else: ?>
+<div class="alert alert-success mb-4" style="font-size:0.84rem;">
+  Timeline marked ready for Scan<?php if ($timelineReadyAt !== ''): ?>
+  (<?php echo View::e($timelineReadyAt); ?> ET)<?php endif; ?>.
+  <?php if ($openEndedTotal > 0): ?>
+  <?php echo number_format($openEndedTotal); ?> open-ended current block(s) kept — expected for shows still airing.
+  <?php endif; ?>
+  <a href="/schedule#hygiene" class="ms-1">Review hygiene</a>
+</div>
+<?php endif; ?>
 
 <?php if (!$ffprobeOk): ?>
 <div class="alert alert-warning mb-4" style="font-size:0.84rem;">
@@ -71,6 +95,16 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
               Dev mode — scan from <code>example_file_trees</code> listing (no NAS mount)
             </label>
           </div>
+
+          <?php if (!$timelineReady): ?>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="ack_timeline_not_ready"
+                   id="ack-timeline-not-ready" required>
+            <label class="form-check-label" for="ack-timeline-not-ready">
+              Start anyway — I acknowledge Timeline hygiene is not marked ready
+            </label>
+          </div>
+          <?php endif; ?>
 
           <button type="submit" class="btn btn-primary btn-sm">Start Scan</button>
         </form>

@@ -28,6 +28,9 @@ final class ContinuityCheckService
     private ?array $mediaTypeCatalog = null;
 
     /** @var list<array<string, mixed>>|null */
+    private ?array $scheduleCatalog = null;
+
+    /** @var list<array<string, mixed>>|null */
     private ?array $exemplars = null;
 
     private readonly ContinuityCheckClient $client;
@@ -411,10 +414,7 @@ final class ContinuityCheckService
         if ($engineId === null) {
             $rawAbbr = $verdict['media_type'] ?? $verdict['media_type_abbr'] ?? null;
             if ($rawAbbr !== null && $rawAbbr !== '') {
-                $key = strtoupper(trim((string) $rawAbbr));
-                if ($key !== '' && isset($idsByAbbr[$key])) {
-                    $engineId = $idsByAbbr[$key];
-                }
+                $engineId = self::lookupMediaTypeId((string) $rawAbbr, $idsByAbbr);
             }
         }
 
@@ -424,10 +424,7 @@ final class ContinuityCheckService
             $ruleId = null;
         }
         if ($ruleId === null && $ruleAbbr !== null && $ruleAbbr !== '') {
-            $key = strtoupper(trim($ruleAbbr));
-            if (isset($idsByAbbr[$key])) {
-                $ruleId = $idsByAbbr[$key];
-            }
+            $ruleId = self::lookupMediaTypeId($ruleAbbr, $idsByAbbr);
         }
 
         $finalId = $ruleId;
@@ -474,6 +471,18 @@ final class ContinuityCheckService
             'signals'                 => $signals,
             'changed'                 => $changed,
         ];
+    }
+
+    /** @param array<string, int> $idsByAbbr */
+    private static function lookupMediaTypeId(string $raw, array $idsByAbbr): ?int
+    {
+        foreach ([strtoupper(trim($raw)), Classifier::normalizeMediaTypeToken($raw)] as $key) {
+            if ($key !== '' && isset($idsByAbbr[$key])) {
+                return $idsByAbbr[$key];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -568,24 +577,27 @@ final class ContinuityCheckService
     ): array {
         $shows = $this->catalog();
         $mediaTypes = $this->mediaTypeList();
-        $timeline = $this->timelineFor($result->fileDate, $result->fileTime);
+        $schedule = $this->scheduleCatalog();
+        $atAirTime = $this->timelineFor($result->fileDate, $result->fileTime);
         $examples = $this->approvedExemplars();
 
         $system = <<<'PROMPT'
 You are a broadcast archive continuity checker for NewsNation media files.
-Decide whether the proposed show mapping is consistent with the dictionary, air schedule, and approved examples.
+Decide whether the proposed show mapping is consistent with the dictionary, full program schedule (past and current), and approved examples.
 Also extract air date/time and media type (Clean vs Program, etc.) from the original filename/path when possible.
 Rules:
 - Choose show_id ONLY from the provided shows list, or null.
 - Choose media_type_id ONLY from the provided media_types list, or null.
-- Prefer schedule alignment when date/time are present.
-- Short or ambiguous path tokens are weak evidence — do not over-trust them.
+- schedule[] is the full active Timeline: past eras and current. schedule.to null means the show block is still current (has not ended).
+- Prefer schedule alignment when date/time are present. at_air_time[] highlights rows matching the proposal date/time when known.
+- Path folders like PGM/Program/Clean/GISO are strong media-type evidence — prefer them over weak filename tokens.
+- Short or ambiguous path tokens for show identity are weaker — do not over-trust them.
 - Never invent show abbreviations, media type abbreviations, or filenames.
 - file_date must be YYYYMMDD or null. file_time must be HHMM (24h Eastern) or null.
 - datetime_agree is true when proposed file_date/file_time look correct for the filename/path.
 - If proposal date/time are missing but filename clearly has them, fill file_date/file_time.
 - media_type_agree is true when proposed media type looks correct for the filename/path.
-- If proposal media type is missing but filename/path clearly indicates Clean, Program, GISO, etc., fill media_type_id.
+- If proposal media type is missing or conflicts with a clear path folder (e.g. PGM), set media_type_id from media_types.
 - Respond with JSON only, no prose:
 {"agree":true|false,"confidence":"HIGH"|"MEDIUM"|"LOW","show_id":null|number,"media_type_id":null|number,"media_type_agree":true|false,"file_date":null|string,"file_time":null|string,"datetime_agree":true|false,"reason":"short"}
 PROMPT;
@@ -607,7 +619,9 @@ PROMPT;
             ],
             'shows'        => $shows,
             'media_types'  => $mediaTypes,
-            'timeline'     => $timeline,
+            'schedule'     => $schedule,
+            'timeline'     => $atAirTime, // backward-compatible alias for Lab
+            'at_air_time'  => $atAirTime,
             'examples'     => $examples,
             'system'       => $system,
         ];
@@ -625,7 +639,12 @@ PROMPT;
                 ];
             }, $shows),
             'media_types' => $mediaTypes,
-            'timeline' => $timeline,
+            'schedule'    => $schedule,
+            'at_air_time' => $atAirTime,
+            'schedule_notes' => [
+                'to_null_means_current' => true,
+                'days_bitmask'          => 'Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 Sat=32 Sun=64',
+            ],
             'examples' => array_map(static function (array $ex): array {
                 return [
                     'original_filename'  => $ex['original_filename'] ?? '',
@@ -931,13 +950,36 @@ PROMPT;
         foreach ($this->mediaTypeList() as $row) {
             $id = (int) $row['id'];
             $typesById[$id] = $row;
-            $abbr = strtoupper(trim((string) $row['abbreviation']));
-            if ($abbr !== '') {
-                $idsByAbbr[$abbr] = $id;
+            foreach ([$row['abbreviation'] ?? '', $row['name'] ?? '', $row['folder_name'] ?? ''] as $label) {
+                $key = Classifier::normalizeMediaTypeToken((string) $label);
+                if ($key !== '') {
+                    $idsByAbbr[$key] = $id;
+                }
+            }
+        }
+        // Common shorthand not always stored as abbreviation.
+        foreach ($typesById as $id => $row) {
+            $canon = Classifier::normalizeMediaTypeToken((string) ($row['abbreviation'] ?? $row['name'] ?? ''));
+            if ($canon === 'PROGRAM') {
+                $idsByAbbr['PGM'] = $id;
+            }
+            if ($canon === 'CLEAN') {
+                $idsByAbbr['CLN'] = $id;
             }
         }
 
         return [$typesById, $idsByAbbr];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function scheduleCatalog(): array
+    {
+        if ($this->scheduleCatalog !== null) {
+            return $this->scheduleCatalog;
+        }
+        $this->scheduleCatalog = $this->schedule->listAllLeanActive();
+
+        return $this->scheduleCatalog;
     }
 
     /** @return list<array<string, mixed>> */
@@ -954,11 +996,14 @@ PROMPT;
         $rows = $this->schedule->matchAt($dateYmd, $minutes, $dayBit);
         $out = [];
         foreach ($rows as $row) {
+            $to = $row['effective_to'] ?? null;
             $out[] = [
                 'show_id'   => (int) $row['show_id'],
                 'show_abbr' => (string) ($row['show_abbr'] ?? ''),
                 'title'     => (string) ($row['title'] ?? ''),
                 'hour'      => substr((string) ($row['hour_start_et'] ?? ''), 0, 5),
+                'from'      => substr((string) ($row['effective_from'] ?? ''), 0, 10),
+                'to'        => $to !== null && $to !== '' ? substr((string) $to, 0, 10) : null,
             ];
         }
 

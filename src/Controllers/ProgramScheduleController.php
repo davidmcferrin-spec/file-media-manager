@@ -9,6 +9,7 @@ use MediaManager\Auth\Session;
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\ProgramScheduleRepository;
 use MediaManager\Repositories\ShowRepository;
+use MediaManager\Repositories\SystemRepository;
 use MediaManager\Services\ScheduleCsvImporter;
 
 Auth::requireAdmin();
@@ -18,6 +19,7 @@ $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
 $scheduleRepo = new ProgramScheduleRepository();
 $showRepo     = new ShowRepository();
+$systemRepo   = new SystemRepository();
 $audit        = new AuditRepository();
 
 /** @var string $projectRoot */
@@ -77,11 +79,64 @@ if ($method === 'POST') {
                 'skipped'  => $result['skipped'],
                 'warnings' => $result['warnings'],
             ]);
+            // Import invalidates prior hygiene ack — re-vet before Scan.
+            $systemRepo->set('timeline_ready_for_scan', 'false');
+            $systemRepo->set('timeline_ready_at', '');
         } catch (\Throwable $e) {
             Session::flash('error', 'Import failed: ' . $e->getMessage());
         }
 
         header('Location: /schedule');
+        exit;
+    }
+
+    if ($uri === '/schedule/close-end') {
+        $entryId = (int) ($_POST['id'] ?? 0);
+        $effectiveTo = trim((string) ($_POST['effective_to'] ?? ''));
+        $entry = $entryId > 0 ? $scheduleRepo->findById($entryId) : null;
+
+        if ($entry === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $effectiveTo)) {
+            Session::flash('error', 'Valid schedule entry and end date are required.');
+            header('Location: /schedule#hygiene');
+            exit;
+        }
+
+        $scheduleRepo->setEffectiveTo($entryId, $effectiveTo);
+        schedule_audit($audit, 'SCHEDULE_END_DATE_SET', [
+            'id'           => $entryId,
+            'effective_to' => $effectiveTo,
+            'show_id'      => (int) $entry['show_id'],
+            'source'       => 'timeline_hygiene',
+        ]);
+        $systemRepo->set('timeline_ready_for_scan', 'false');
+        Session::flash('success', 'Schedule entry end date set to ' . $effectiveTo . '.');
+        header('Location: /schedule#hygiene');
+        exit;
+    }
+
+    if ($uri === '/schedule/mark-ready') {
+        $openEnded = $scheduleRepo->countOpenEnded();
+        $active = $scheduleRepo->countActive();
+        if ($active <= 0) {
+            Session::flash('error', 'Import or add Timeline entries before marking ready for Scan.');
+            header('Location: /schedule#hygiene');
+            exit;
+        }
+        $now = (new \DateTimeImmutable('now', new \DateTimeZone('America/New_York')))->format('Y-m-d H:i:s');
+        $systemRepo->set('timeline_ready_for_scan', 'true');
+        $systemRepo->set('timeline_ready_at', $now);
+        $systemRepo->set('timeline_ready_open_ended', (string) $openEnded);
+        schedule_audit($audit, 'TIMELINE_MARKED_READY', [
+            'active_entries' => $active,
+            'open_ended'     => $openEnded,
+            'ready_at'       => $now,
+        ]);
+        Session::flash(
+            'success',
+            'Timeline marked ready for Scan'
+            . ($openEnded > 0 ? ' (note: ' . $openEnded . ' open-ended current show block(s) kept).' : '.')
+        );
+        header('Location: /schedule#hygiene');
         exit;
     }
 
@@ -106,6 +161,7 @@ if ($method === 'POST') {
                 'absorbed_ids' => $absorbedIds,
                 'counts'       => $counts,
             ]);
+            $systemRepo->set('timeline_ready_for_scan', 'false');
             Session::flash(
                 'success',
                 sprintf(
@@ -149,6 +205,7 @@ if ($method === 'POST') {
                 schedule_audit($audit, 'SCHEDULE_ENTRY_UPDATED', ['id' => $entryId, 'show_id' => $data['show_id']]);
                 Session::flash('success', 'Schedule entry updated.');
             }
+            $systemRepo->set('timeline_ready_for_scan', 'false');
         } catch (\Throwable $e) {
             Session::flash('error', 'Could not save schedule entry: ' . $e->getMessage());
         }
@@ -169,6 +226,7 @@ if ($method === 'POST') {
 
         $scheduleRepo->delete($entryId);
         schedule_audit($audit, 'SCHEDULE_ENTRY_DELETED', ['id' => $entryId, 'show_id' => (int) $entry['show_id']]);
+        $systemRepo->set('timeline_ready_for_scan', 'false');
         Session::flash('success', 'Schedule entry deleted.');
         header('Location: ' . schedule_redirect_url($_POST));
         exit;
@@ -278,6 +336,14 @@ $editEntry = $editId > 0 ? $scheduleRepo->findById($editId) : null;
 /** @var array{skipped?: list<string>, warnings?: list<string>}|null $importLog */
 $importLog = Session::getFlash('schedule_import_log');
 $showsTab  = 'schedule';
+$openEnded = $scheduleRepo->listOpenEnded(100);
+$openEndedTotal = $scheduleRepo->countOpenEnded();
+$timelineReady = in_array(
+    strtolower(trim((string) ($systemRepo->get('timeline_ready_for_scan') ?? ''))),
+    ['1', 'true', 'yes', 'on'],
+    true
+);
+$timelineReadyAt = trim((string) ($systemRepo->get('timeline_ready_at') ?? ''));
 
 $title = 'Timeline — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
