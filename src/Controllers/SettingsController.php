@@ -360,11 +360,14 @@ if ($method === 'POST') {
             header('Location: /settings/processing');
             exit;
         }
+        $continuityEnabled = isset($_POST['continuity_check_enabled']);
         $systemRepo->set('split_flag_threshold_seconds', (string) ($flagMinutes * 60));
         $systemRepo->set('split_strong_threshold_seconds', (string) ($strongMinutes * 60));
+        $systemRepo->set('continuity_check_enabled', $continuityEnabled ? 'true' : 'false');
         settings_audit($audit, 'PROCESSING_SETTINGS_UPDATED', 'system_settings', null, [
             'split_flag_threshold_seconds'   => $flagMinutes * 60,
             'split_strong_threshold_seconds' => $strongMinutes * 60,
+            'continuity_check_enabled'       => $continuityEnabled,
         ]);
         Session::flash('success', 'Processing settings saved. New scans and reclassifies will use the updated thresholds.');
         header('Location: /settings/processing');
@@ -469,6 +472,12 @@ match ($settingsTab) {
             ?? env('SPLIT_STRONG_THRESHOLD_SECONDS', 10800));
         $splitFlagMinutes   = max(1, (int) round($flagSeconds / 60));
         $splitStrongMinutes = max(1, (int) round($strongSeconds / 60));
+        $continuitySetting = $systemRepo->get('continuity_check_enabled');
+        if ($continuitySetting !== null && $continuitySetting !== '') {
+            $continuityCheckEnabled = in_array(strtolower(trim($continuitySetting)), ['1', 'true', 'yes', 'on'], true);
+        } else {
+            $continuityCheckEnabled = env('CONTINUITY_CHECK_ENABLED', false) === true;
+        }
         require dirname(__DIR__) . '/Views/settings/processing.php';
     })(),
     'danger' => (function (): void {

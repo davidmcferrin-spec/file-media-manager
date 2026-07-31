@@ -827,4 +827,30 @@ final class FileRepository extends BaseRepository
 
         return $sidecars;
     }
+
+    /**
+     * Recent human-approved mappings used to seed broadcast continuity checks.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function continuityExemplars(int $limit = 12): array
+    {
+        $limit = max(1, min(40, $limit));
+        $stmt = $this->db()->prepare(
+            "SELECT f.original_filename, f.original_path, f.proposed_dir, f.proposed_filename,
+                    f.show_id, f.file_date, f.file_time, s.abbreviation AS show_abbr
+             FROM files f
+             LEFT JOIN shows s ON s.id = f.show_id
+             WHERE f.status IN ('APPROVED', 'EXECUTED')
+               AND f.show_id IS NOT NULL
+               AND f.proposed_filename IS NOT NULL
+               AND f.proposed_filename <> ''
+             ORDER BY COALESCE(f.reviewed_at, f.executed_at, f.created_at) DESC NULLS LAST
+             LIMIT ?"
+        );
+        $stmt->execute([$limit]);
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
 }

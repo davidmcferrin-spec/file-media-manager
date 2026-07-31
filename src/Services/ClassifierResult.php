@@ -37,4 +37,35 @@ final class ClassifierResult
             'exact'    => $this->policyExactMatch,
         ], JSON_THROW_ON_ERROR);
     }
+
+    /**
+     * @param list<string> $signals
+     */
+    public function withAdjustments(
+        string $confidence,
+        array $signals,
+        ?int $showId = null,
+        ?string $showAbbreviation = null,
+        ?string $proposedDir = null,
+        ?string $proposedFilename = null,
+    ): self {
+        return new self(
+            showId: $showId ?? $this->showId,
+            showAbbreviation: $showAbbreviation ?? $this->showAbbreviation,
+            mediaTypeId: $this->mediaTypeId,
+            mediaTypeName: $this->mediaTypeName,
+            mediaTypeAbbreviation: $this->mediaTypeAbbreviation,
+            fileDate: $this->fileDate,
+            fileTime: $this->fileTime,
+            proposedDir: $proposedDir ?? $this->proposedDir,
+            proposedFilename: $proposedFilename ?? $this->proposedFilename,
+            confidence: $confidence,
+            signals: $signals,
+            needsSplit: $this->needsSplit,
+            splitNotes: $this->splitNotes,
+            policyExactMatch: $this->policyExactMatch,
+            sidecars: $this->sidecars,
+            guestName: $this->guestName,
+        );
+    }
 }

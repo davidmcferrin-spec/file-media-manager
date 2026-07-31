@@ -401,9 +401,21 @@ final class Classifier
         ?string $time,
         array $signals
     ): string {
+        $showFromSchedule = false;
+        $showFromConversion = false;
+        foreach ($signals as $signal) {
+            if (str_starts_with($signal, 'schedule:')) {
+                $showFromSchedule = true;
+            }
+            if (str_starts_with($signal, 'show:conversion')) {
+                $showFromConversion = true;
+            }
+        }
+
         $score = 0;
         if ($showMatch['id'] !== null) {
-            $score += 2;
+            // Schedule / conversion hits are weaker than abbr/alias/folder tokens.
+            $score += ($showFromSchedule || $showFromConversion) ? 1 : 2;
         }
         if ($typeMatch['id'] !== null) {
             $score += 2;
@@ -422,10 +434,8 @@ final class Classifier
             return 'MEDIUM';
         }
 
-        foreach ($signals as $signal) {
-            if (str_starts_with($signal, 'schedule:')) {
-                return 'MEDIUM';
-            }
+        if ($showFromSchedule) {
+            return 'MEDIUM';
         }
 
         return 'LOW';
@@ -451,7 +461,11 @@ final class Classifier
             return false;
         }
 
-        return preg_match('/(?:^|[\s_\/-])' . preg_quote($needle, '/') . '(?:[\s_\/-]|$)/i', $haystack) === 1
-            || str_contains($haystack, $needle);
+        if (preg_match('/(?:^|[\s_\/-])' . preg_quote($needle, '/') . '(?:[\s_\/-]|$)/i', $haystack) === 1) {
+            return true;
+        }
+
+        // Substring fallback only for longer needles — short tokens over-match.
+        return strlen($needle) >= 6 && str_contains($haystack, $needle);
     }
 }

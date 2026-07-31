@@ -251,7 +251,59 @@ sudo -u www-data php8.4 -r "
     }
 "
 
-# ── 12. Restart Apache ────────────────────────────────────────
+# ── 12. Broadcast continuity engine ───────────────────────────
+info "Installing broadcast continuity engine (local)..."
+CONTINUITY_MODEL="$(grep -E '^CONTINUITY_CHECK_MODEL=' "${ENV_FILE}" 2>/dev/null | cut -d'=' -f2- | tr -d '"' || true)"
+CONTINUITY_MODEL="${CONTINUITY_MODEL:-llama3.2:3b}"
+
+if ! command -v ollama >/dev/null 2>&1; then
+    curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+if command -v ollama >/dev/null 2>&1; then
+    systemctl enable ollama >/dev/null 2>&1 || true
+    systemctl start ollama >/dev/null 2>&1 || true
+    info "Waiting for continuity engine..."
+    for _ in $(seq 1 45); do
+        if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+        info "Loading continuity pack (${CONTINUITY_MODEL})..."
+        if ollama pull "${CONTINUITY_MODEL}"; then
+            success "Broadcast continuity engine ready."
+        else
+            warn "Continuity pack pull failed — Scan still works; enable again after network is available."
+        fi
+    else
+        warn "Continuity engine did not become ready — Scan still works without it."
+    fi
+else
+    warn "Continuity engine binary missing — Scan still works without it."
+fi
+
+# Ensure continuity env keys exist (do not overwrite admin edits)
+ensure_env_key() {
+    local key="$1"
+    local value="$2"
+    if ! grep -qE "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+        printf '\n%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"
+    fi
+}
+ensure_env_key "CONTINUITY_CHECK_ENABLED" "true"
+ensure_env_key "CONTINUITY_CHECK_URL" "http://127.0.0.1:11434"
+ensure_env_key "CONTINUITY_CHECK_MODEL" "${CONTINUITY_MODEL}"
+ensure_env_key "CONTINUITY_CHECK_TIMEOUT_SECONDS" "8"
+
+sudo -u www-data php8.4 -r "
+    require '${WEB_ROOT}/src/bootstrap.php';
+    (new MediaManager\Repositories\SystemRepository())->set('continuity_check_enabled', 'true');
+    echo 'Continuity setting enabled.' . PHP_EOL;
+" || warn "Could not persist continuity setting (non-fatal)."
+
+# ── 13. Restart Apache ────────────────────────────────────────
 info "Restarting Apache..."
 systemctl reload apache2
 success "Apache reloaded."
@@ -270,4 +322,5 @@ fi
 echo ""
 echo -e "  Edit ${CYAN}${ENV_FILE}${NC} to configure NAS mount paths"
 echo -e "  and other settings before first use."
+echo -e "  Broadcast continuity check runs quietly during Scan/Reclassify."
 echo ""

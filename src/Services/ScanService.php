@@ -22,6 +22,7 @@ final class ScanService
         private readonly FFprobeService $ffprobe = new FFprobeService(),
         private readonly AuditRepository $audit = new AuditRepository(),
         private readonly SplitQueueRepository $splitQueue = new SplitQueueRepository(),
+        private readonly ContinuityCheckService $continuity = new ContinuityCheckService(),
         private readonly ?\Closure $onProgress = null,
     ) {
     }
@@ -493,6 +494,7 @@ final class ScanService
                 $probe,
                 $entry['sidecars']
             );
+            $result = $this->continuity->refine($result, $path, basename($path));
 
             $meta = is_array($probe) ? $probe : [];
 
@@ -569,6 +571,11 @@ final class ScanService
                 (string) $job['mount_path'],
                 $probe,
                 $sidecarPaths
+            );
+            $result = $this->continuity->refine(
+                $result,
+                (string) $file['original_path'],
+                (string) ($file['original_filename'] ?? basename((string) $file['original_path']))
             );
 
             $wasSplit = !empty($file['needs_split']);

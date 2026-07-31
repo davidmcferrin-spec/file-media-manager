@@ -14,6 +14,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.0] — 2026-07-30
+
+### Added
+
+- Broadcast continuity check — quiet second pass during Scan / Rescan / Reclassify that cross-checks show mapping against the dictionary, timeline, and recently approved catalog items, and dials down overconfident hits
+- Settings → Processing toggle for broadcast continuity check
+- `setup.sh` installs the local continuity engine and loads the continuity pack
+
+### Changed
+
+- Classifier confidence weighting treats schedule/conversion show hits as weaker evidence
+- Show token matching no longer substring-matches very short aliases
+
 ## [0.4.2] — 2026-07-30
 
 ### Added

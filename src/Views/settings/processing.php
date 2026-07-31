@@ -7,6 +7,7 @@ use MediaManager\Support\View;
 
 /** @var int $splitFlagMinutes */
 /** @var int $splitStrongMinutes */
+/** @var bool $continuityCheckEnabled */
 ?>
 
 <div class="card mb-4">
@@ -33,6 +34,20 @@ use MediaManager\Support\View;
                  value="<?php echo (int) $splitStrongMinutes; ?>">
           <div class="form-text" style="color:var(--text-soft)">
             Higher confidence / stronger split signal threshold used by the classifier.
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="continuity_check_enabled" id="continuity-check"
+                   value="1" <?php echo !empty($continuityCheckEnabled) ? 'checked' : ''; ?>>
+            <label class="form-check-label" for="continuity-check">
+              Broadcast continuity check
+            </label>
+          </div>
+          <div class="form-text" style="color:var(--text-soft)">
+            Quiet second pass during Scan / Rescan / Reclassify. Cross-checks proposed show mapping against
+            the show dictionary, timeline, and recently approved catalog items, and dials down overconfident hits.
+            Requires the continuity engine installed by <code>setup.sh</code>. If the engine is offline, classification continues normally.
           </div>
         </div>
       </div>

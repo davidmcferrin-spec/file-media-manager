@@ -18,6 +18,7 @@ final class ReclassifyService
         private readonly ScanJobRepository $scanJobs = new ScanJobRepository(),
         private readonly SplitQueueRepository $splitQueue = new SplitQueueRepository(),
         private readonly Classifier $classifier = new Classifier(),
+        private readonly ContinuityCheckService $continuity = new ContinuityCheckService(),
     ) {
     }
 
@@ -73,6 +74,11 @@ final class ReclassifyService
 
             try {
                 $result = $this->classifier->classify($path, $mount, $probe, $sidecarPaths);
+                $result = $this->continuity->refine(
+                    $result,
+                    $path,
+                    (string) ($file['original_filename'] ?? basename($path))
+                );
             } catch (\Throwable) {
                 $stats['failed']++;
                 continue;
