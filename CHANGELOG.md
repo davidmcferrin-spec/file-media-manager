@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.12] — 2026-07-30
+
+### Added
+
+- Parallel continuity evals during Scan/Reclassify (`CONTINUITY_CHECK_CONCURRENCY`, default 4) via curl_multi
+- `setup.sh` configures Ollama `OLLAMA_NUM_PARALLEL=4` so the engine can serve concurrent requests
+
 ## [0.5.11] — 2026-07-30
 
 ### Added

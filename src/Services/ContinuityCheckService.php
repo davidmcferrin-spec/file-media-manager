@@ -59,108 +59,148 @@ final class ContinuityCheckService
         return env('CONTINUITY_CHECK_ENABLED', false) === true;
     }
 
+    /** Parallel continuity HTTP requests during Scan/Reclassify (1–8). */
+    public static function concurrency(): int
+    {
+        $n = (int) env('CONTINUITY_CHECK_CONCURRENCY', 4);
+
+        return max(1, min(8, $n));
+    }
+
+    /** Whether refine() would call the engine (vs early-return). */
+    public function willAskEngine(ClassifierResult $result): bool
+    {
+        if (!$this->isEnabled()) {
+            return false;
+        }
+        if ($result->policyExactMatch) {
+            return false;
+        }
+        if ($result->showId === null
+            && in_array($result->confidence, ['LOW', 'UNEVALUATED'], true)
+        ) {
+            return false;
+        }
+
+        return $this->engineAvailable();
+    }
+
     public function refine(
         ClassifierResult $result,
         string $originalPath,
         string $originalFilename,
         ?int $fileId = null
     ): ClassifierResult {
-        if (!$this->isEnabled()) {
-            return $result;
-        }
-        if ($result->policyExactMatch) {
-            return $result;
-        }
-        if ($result->showId === null
-            && in_array($result->confidence, ['LOW', 'UNEVALUATED'], true)
-        ) {
-            return $result;
-        }
-        if (!$this->engineAvailable()) {
-            return $result;
+        $batch = $this->refineBatch([[
+            'result'            => $result,
+            'original_path'     => $originalPath,
+            'original_filename' => $originalFilename,
+            'file_id'           => $fileId,
+        ]]);
+
+        return $batch[0] ?? $result;
+    }
+
+    /**
+     * Refine many classifier results with concurrent engine requests.
+     *
+     * @param list<array{
+     *   result: ClassifierResult,
+     *   original_path: string,
+     *   original_filename: string,
+     *   file_id?: ?int
+     * }> $items
+     * @return list<ClassifierResult>
+     */
+    public function refineBatch(array $items): array
+    {
+        if ($items === []) {
+            return [];
         }
 
-        $started = microtime(true);
-        $asked = $this->askEngine($result, $originalPath, $originalFilename);
-        $durationMs = (int) round((microtime(true) - $started) * 1000);
-        $verdict = $asked['verdict'];
+        $out = [];
+        /** @var list<array{index: int, result: ClassifierResult, path: string, filename: string, file_id: ?int, system: string, user: string, seed_packet: array<string, mixed>}> $pending */
+        $pending = [];
 
-        $baseLog = [
-            'file_id'                 => $fileId,
-            'original_path'           => $originalPath,
-            'original_filename'       => $originalFilename,
-            'rule_show_id'            => $result->showId,
-            'rule_show_abbr'          => $result->showAbbreviation,
-            'rule_confidence'         => $result->confidence,
-            'rule_proposed_filename'  => $result->proposedFilename,
-            'rule_file_date'          => $result->fileDate,
-            'rule_file_time'          => $result->fileTime,
-            'rule_media_type_id'      => $result->mediaTypeId,
-            'rule_media_type_abbr'    => $result->mediaTypeAbbreviation,
-            'rule_signals'            => $result->signals,
-            'seed_packet'             => $asked['seed_packet'],
-            'engine_raw'              => $asked['raw_content'],
-            'http_status'             => $asked['http_status'],
-            'transport_error'         => $asked['transport_error'],
-            'duration_ms'             => $durationMs,
-        ];
-
-        if ($verdict === null) {
-            $detail = trim((string) ($asked['transport_error'] ?? ''));
-            if ($detail === '') {
-                $detail = 'No usable response from continuity engine';
+        foreach ($items as $i => $item) {
+            $result = $item['result'];
+            $path = (string) $item['original_path'];
+            $filename = (string) $item['original_filename'];
+            $fileId = isset($item['file_id']) ? (int) $item['file_id'] : null;
+            if ($fileId !== null && $fileId <= 0) {
+                $fileId = null;
             }
-            $this->safeLog($baseLog + [
-                'final_confidence'        => $result->confidence,
-                'final_show_id'           => $result->showId,
-                'final_show_abbr'         => $result->showAbbreviation,
-                'final_proposed_filename' => $result->proposedFilename,
-                'final_file_date'         => $result->fileDate,
-                'final_file_time'         => $result->fileTime,
-                'final_media_type_id'     => $result->mediaTypeId,
-                'final_media_type_abbr'   => $result->mediaTypeAbbreviation,
-                'signal'                  => 'continuity:error',
-                'outcome'                 => 'error',
-                'engine_reason'           => $detail,
-            ]);
 
-            return $result;
+            if (!$this->willAskEngine($result)) {
+                $out[$i] = $result;
+                continue;
+            }
+
+            try {
+                $built = $this->buildEngineRequest($result, $path, $filename);
+            } catch (\Throwable $e) {
+                error_log('[continuity] build request failed: ' . $e->getMessage());
+                $out[$i] = $result;
+                continue;
+            }
+
+            $pending[] = [
+                'index'       => $i,
+                'result'      => $result,
+                'path'        => $path,
+                'filename'    => $filename,
+                'file_id'     => $fileId,
+                'system'      => $built['system'],
+                'user'        => $built['user'],
+                'seed_packet' => $built['seed_packet'],
+            ];
         }
 
-        $adjusted = $this->applyVerdict($result, $verdict, $originalFilename);
-        $merged = self::mergeVerdict($result->confidence, $verdict);
-        $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict);
-        $mt = $this->mergeMediaTypeFor($result, $verdict);
-        $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-        $outcome = match ($merged['signal']) {
-            'continuity:confirmed' => 'confirmed',
-            'continuity:conflict'  => 'conflict',
-            default                => 'review',
-        };
+        if ($pending !== []) {
+            $chunkSize = self::concurrency();
+            foreach (array_chunk($pending, $chunkSize) as $chunk) {
+                $started = microtime(true);
+                $httpRequests = array_map(static fn (array $p): array => [
+                    'system' => $p['system'],
+                    'user'   => $p['user'],
+                ], $chunk);
+                $responses = $this->client->completeJsonMany($httpRequests);
+                $batchMs = (int) round((microtime(true) - $started) * 1000);
+                $perMs = (int) max(1, (int) round($batchMs / max(1, count($chunk))));
 
-        $this->safeLog($baseLog + [
-            'engine_agree'            => $agree,
-            'engine_confidence'       => isset($verdict['confidence']) ? strtoupper((string) $verdict['confidence']) : null,
-            'engine_show_id'          => isset($verdict['show_id']) && is_numeric($verdict['show_id'])
-                ? (int) $verdict['show_id'] : null,
-            'engine_file_date'        => $dt['engine_date'],
-            'engine_file_time'        => $dt['engine_time'],
-            'engine_media_type_id'    => $mt['engine_id'],
-            'engine_media_type_abbr'  => $mt['engine_abbr'],
-            'engine_reason'           => trim((string) ($verdict['reason'] ?? '')),
-            'final_confidence'        => $adjusted->confidence,
-            'final_show_id'           => $adjusted->showId,
-            'final_show_abbr'         => $adjusted->showAbbreviation,
-            'final_proposed_filename' => $adjusted->proposedFilename,
-            'final_file_date'         => $adjusted->fileDate,
-            'final_file_time'         => $adjusted->fileTime,
-            'final_media_type_id'     => $adjusted->mediaTypeId,
-            'final_media_type_abbr'   => $adjusted->mediaTypeAbbreviation,
-            'signal'                  => $merged['signal'],
-            'outcome'                 => $outcome,
-        ]);
+                foreach ($chunk as $j => $p) {
+                    $response = $responses[$j] ?? [
+                        'verdict'          => null,
+                        'raw_content'      => '',
+                        'http_status'      => null,
+                        'transport_error'  => 'missing parallel response',
+                        'transport_failed' => true,
+                    ];
+                    if ($response['verdict'] === null && !empty($response['transport_failed'])) {
+                        $this->reachable = false;
+                        $this->reachableCheckedAt = microtime(true);
+                    }
+                    $out[$p['index']] = $this->settleAsk(
+                        $p['result'],
+                        $p['path'],
+                        $p['filename'],
+                        $p['file_id'],
+                        [
+                            'verdict'         => $response['verdict'],
+                            'seed_packet'     => $p['seed_packet'],
+                            'raw_content'     => $response['raw_content'],
+                            'http_status'     => $response['http_status'],
+                            'transport_error' => $response['transport_error'],
+                        ],
+                        $perMs
+                    );
+                }
+            }
+        }
 
-        return $adjusted;
+        ksort($out);
+
+        return array_values($out);
     }
 
     /** Attach Catalog file id to the latest continuity row for a path (after first insert). */
@@ -519,15 +559,9 @@ final class ContinuityCheckService
     }
 
     /**
-     * @return array{
-     *   verdict: ?array<string, mixed>,
-     *   seed_packet: array<string, mixed>,
-     *   raw_content: string,
-     *   http_status: ?int,
-     *   transport_error: string
-     * }
+     * @return array{system: string, user: string, seed_packet: array<string, mixed>}
      */
-    private function askEngine(
+    private function buildEngineRequest(
         ClassifierResult $result,
         string $originalPath,
         string $originalFilename
@@ -578,7 +612,6 @@ PROMPT;
             'system'       => $system,
         ];
 
-        // Leaner payload for the engine (full seed_packet still logged for Lab).
         $userPayload = [
             'original_path'     => $originalPath,
             'original_filename' => $originalFilename,
@@ -605,21 +638,108 @@ PROMPT;
             }, $examples),
         ];
 
-        $user = json_encode($userPayload, JSON_THROW_ON_ERROR);
-        $response = $this->client->completeJson($system, $user);
-        // Only mark engine offline on transport failures (timeout / HTTP), not parse issues.
-        if ($response['verdict'] === null && !empty($response['transport_failed'])) {
-            $this->reachable = false;
-            $this->reachableCheckedAt = microtime(true);
+        return [
+            'system'      => $system,
+            'user'        => json_encode($userPayload, JSON_THROW_ON_ERROR),
+            'seed_packet' => $seedPacket,
+        ];
+    }
+
+    /**
+     * @param array{
+     *   verdict: ?array<string, mixed>,
+     *   seed_packet: array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string
+     * } $asked
+     */
+    private function settleAsk(
+        ClassifierResult $result,
+        string $originalPath,
+        string $originalFilename,
+        ?int $fileId,
+        array $asked,
+        int $durationMs
+    ): ClassifierResult {
+        $verdict = $asked['verdict'];
+
+        $baseLog = [
+            'file_id'                 => $fileId,
+            'original_path'           => $originalPath,
+            'original_filename'       => $originalFilename,
+            'rule_show_id'            => $result->showId,
+            'rule_show_abbr'          => $result->showAbbreviation,
+            'rule_confidence'         => $result->confidence,
+            'rule_proposed_filename'  => $result->proposedFilename,
+            'rule_file_date'          => $result->fileDate,
+            'rule_file_time'          => $result->fileTime,
+            'rule_media_type_id'      => $result->mediaTypeId,
+            'rule_media_type_abbr'    => $result->mediaTypeAbbreviation,
+            'rule_signals'            => $result->signals,
+            'seed_packet'             => $asked['seed_packet'],
+            'engine_raw'              => $asked['raw_content'],
+            'http_status'             => $asked['http_status'],
+            'transport_error'         => $asked['transport_error'],
+            'duration_ms'             => $durationMs,
+        ];
+
+        if ($verdict === null) {
+            $detail = trim((string) ($asked['transport_error'] ?? ''));
+            if ($detail === '') {
+                $detail = 'No usable response from continuity engine';
+            }
+            $this->safeLog($baseLog + [
+                'final_confidence'        => $result->confidence,
+                'final_show_id'           => $result->showId,
+                'final_show_abbr'         => $result->showAbbreviation,
+                'final_proposed_filename' => $result->proposedFilename,
+                'final_file_date'         => $result->fileDate,
+                'final_file_time'         => $result->fileTime,
+                'final_media_type_id'     => $result->mediaTypeId,
+                'final_media_type_abbr'   => $result->mediaTypeAbbreviation,
+                'signal'                  => 'continuity:error',
+                'outcome'                 => 'error',
+                'engine_reason'           => $detail,
+            ]);
+
+            return $result;
         }
 
-        return [
-            'verdict'         => $response['verdict'],
-            'seed_packet'     => $seedPacket,
-            'raw_content'     => $response['raw_content'],
-            'http_status'     => $response['http_status'],
-            'transport_error' => $response['transport_error'],
-        ];
+        $adjusted = $this->applyVerdict($result, $verdict, $originalFilename);
+        $merged = self::mergeVerdict($result->confidence, $verdict);
+        $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict);
+        $mt = $this->mergeMediaTypeFor($result, $verdict);
+        $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $outcome = match ($merged['signal']) {
+            'continuity:confirmed' => 'confirmed',
+            'continuity:conflict'  => 'conflict',
+            default                => 'review',
+        };
+
+        $this->safeLog($baseLog + [
+            'engine_agree'            => $agree,
+            'engine_confidence'       => isset($verdict['confidence']) ? strtoupper((string) $verdict['confidence']) : null,
+            'engine_show_id'          => isset($verdict['show_id']) && is_numeric($verdict['show_id'])
+                ? (int) $verdict['show_id'] : null,
+            'engine_file_date'        => $dt['engine_date'],
+            'engine_file_time'        => $dt['engine_time'],
+            'engine_media_type_id'    => $mt['engine_id'],
+            'engine_media_type_abbr'  => $mt['engine_abbr'],
+            'engine_reason'           => trim((string) ($verdict['reason'] ?? '')),
+            'final_confidence'        => $adjusted->confidence,
+            'final_show_id'           => $adjusted->showId,
+            'final_show_abbr'         => $adjusted->showAbbreviation,
+            'final_proposed_filename' => $adjusted->proposedFilename,
+            'final_file_date'         => $adjusted->fileDate,
+            'final_file_time'         => $adjusted->fileTime,
+            'final_media_type_id'     => $adjusted->mediaTypeId,
+            'final_media_type_abbr'   => $adjusted->mediaTypeAbbreviation,
+            'signal'                  => $merged['signal'],
+            'outcome'                 => $outcome,
+        ]);
+
+        return $adjusted;
     }
 
     /**

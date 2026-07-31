@@ -48,6 +48,8 @@ use MediaManager\Support\View;
             Quiet second pass during Scan / Rescan / Reclassify. Cross-checks proposed show mapping against
             the show dictionary, timeline, and recently approved catalog items, and dials down overconfident hits.
             Requires the continuity engine installed by <code>setup.sh</code>. If the engine is offline, classification continues normally.
+            Parallelism: <code>CONTINUITY_CHECK_CONCURRENCY</code> (app) should match Ollama
+            <code>OLLAMA_NUM_PARALLEL</code> (default 4).
           </div>
         </div>
       </div>

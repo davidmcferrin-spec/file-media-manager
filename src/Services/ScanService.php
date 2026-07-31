@@ -140,16 +140,108 @@ final class ScanService
             }
 
             $processed = 0;
+            $concurrency = ContinuityCheckService::concurrency();
+            /** @var list<array<string, mixed>> $continuityPending */
+            $continuityPending = [];
+
+            $flushContinuity = function () use (
+                &$continuityPending,
+                &$queued,
+                &$reclassified,
+                &$skipped,
+                &$processed,
+                $jobId,
+                $totalFiles
+            ): void {
+                if ($continuityPending === []) {
+                    return;
+                }
+                $this->abortIfCancelled($jobId);
+                $batch = [];
+                foreach ($continuityPending as $item) {
+                    $batch[] = [
+                        'result'            => $item['result'],
+                        'original_path'     => $item['path'],
+                        'original_filename' => $item['filename'],
+                        'file_id'           => $item['file_id'] ?? null,
+                    ];
+                }
+                $refined = $this->continuity->refineBatch($batch);
+                foreach ($continuityPending as $i => $item) {
+                    $result = $refined[$i] ?? $item['result'];
+                    try {
+                        $outcome = $this->commitPrepared($item, $result);
+                    } catch (\Throwable $e) {
+                        error_log('[scan] Continuity commit failed: ' . $e->getMessage());
+                        $outcome = 'skipped';
+                    }
+                    if ($outcome === 'queued') {
+                        $queued++;
+                    } elseif ($outcome === 'reclassified') {
+                        $reclassified++;
+                    } elseif ($outcome === 'skipped') {
+                        $skipped++;
+                    }
+                    $processed++;
+                    $this->scanJobs->incrementProcessed($jobId);
+                    $this->progress('file', [
+                        'processed'   => $processed,
+                        'total'       => $totalFiles,
+                        'path'        => $item['path'],
+                        'outcome'     => $outcome,
+                        'concurrency' => ContinuityCheckService::concurrency(),
+                    ]);
+                }
+                $continuityPending = [];
+            };
+
             foreach ($mediaFiles as $entry) {
                 $this->abortIfCancelled($jobId);
 
-                $outcome = $this->processFile($job, $entry, $extract);
+                $prepared = $this->prepareFile($job, $entry, $extract);
+                if ($prepared['kind'] === 'immediate') {
+                    $duplicates++;
+                    $processed++;
+                    $this->scanJobs->incrementProcessed($jobId);
+                    $this->progress('file', [
+                        'processed' => $processed,
+                        'total'     => $totalFiles,
+                        'path'      => $entry['path'],
+                        'outcome'   => 'duplicate',
+                    ]);
+                    continue;
+                }
+                if ($prepared['kind'] === 'skipped') {
+                    $skipped++;
+                    $processed++;
+                    $this->scanJobs->incrementProcessed($jobId);
+                    $this->progress('file', [
+                        'processed' => $processed,
+                        'total'     => $totalFiles,
+                        'path'      => $entry['path'],
+                        'outcome'   => 'skipped',
+                    ]);
+                    continue;
+                }
+
+                if (!empty($prepared['needs_continuity'])) {
+                    $continuityPending[] = $prepared;
+                    if (count($continuityPending) >= $concurrency) {
+                        $flushContinuity();
+                    }
+                    continue;
+                }
+
+                try {
+                    $outcome = $this->commitPrepared($prepared, $prepared['result']);
+                } catch (\Throwable $e) {
+                    error_log('[scan] Commit failed: ' . $e->getMessage());
+                    $outcome = 'skipped';
+                }
                 if ($outcome === 'queued') {
                     $queued++;
                 } elseif ($outcome === 'reclassified') {
                     $reclassified++;
-                } elseif ($outcome === 'duplicate') {
-                    $duplicates++;
                 } elseif ($outcome === 'skipped') {
                     $skipped++;
                 }
@@ -162,6 +254,8 @@ final class ScanService
                     'outcome'   => $outcome,
                 ]);
             }
+
+            $flushContinuity();
 
             $this->progress('glue_detect', ['job_id' => $jobId]);
             $glueUpdated = (new GlueGroupService($this->files))->applyForScanJob($jobId);
@@ -471,10 +565,12 @@ final class ScanService
     }
 
     /**
+     * Classify (no continuity) and return a commit plan.
+     *
      * @param array{path: string, sidecars: list<string>} $entry
-     * @return 'queued'|'reclassified'|'skipped'|'duplicate'
+     * @return array<string, mixed>
      */
-    private function processFile(array $job, array $entry, bool $extractMetadata): string
+    private function prepareFile(array $job, array $entry, bool $extractMetadata): array
     {
         $this->abortIfCancelled((int) $job['id']);
 
@@ -482,7 +578,8 @@ final class ScanService
 
         if (!is_file($path) || !is_readable($path)) {
             error_log('[scan] Skipping unavailable file: ' . $path);
-            return 'skipped';
+
+            return ['kind' => 'skipped', 'path' => $path];
         }
 
         $existing = $this->files->findByOriginalPath($path);
@@ -491,10 +588,10 @@ final class ScanService
                 && (int) ($existing['scan_job_id'] ?? 0) === (int) $job['id']
                 && in_array((string) ($existing['status'] ?? ''), ['PENDING', 'FLAGGED', 'REJECTED'], true)
             ) {
-                return $this->reclassifyExisting($job, $existing, $entry, $extractMetadata);
+                return $this->prepareReclassify($job, $existing, $entry, $extractMetadata);
             }
 
-            return 'duplicate';
+            return ['kind' => 'duplicate', 'path' => $path];
         }
 
         try {
@@ -510,9 +607,97 @@ final class ScanService
                 $probe,
                 $entry['sidecars']
             );
-            $result = $this->continuity->refine($result, $path, basename($path));
-
             $meta = is_array($probe) ? $probe : [];
+
+            return [
+                'kind'             => 'new',
+                'path'             => $path,
+                'filename'         => basename($path),
+                'result'           => $result,
+                'needs_continuity' => $this->continuity->willAskEngine($result),
+                'job'              => $job,
+                'meta'             => $meta,
+                'filesize'         => $filesize !== false ? $filesize : null,
+                'probe'            => $probe,
+                'file_id'          => null,
+            ];
+        } catch (\Throwable $e) {
+            error_log('[scan] Skipping ' . $path . ': ' . $e->getMessage());
+
+            return ['kind' => 'skipped', 'path' => $path];
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $job
+     * @param array<string, mixed> $file
+     * @param array{path: string, sidecars: list<string>} $entry
+     * @return array<string, mixed>
+     */
+    private function prepareReclassify(array $job, array $file, array $entry, bool $extractMetadata): array
+    {
+        $id = (int) $file['id'];
+        $path = (string) $file['original_path'];
+        $sidecarPaths = $entry['sidecars'];
+        if ($sidecarPaths === []) {
+            foreach (FileRepository::parseSidecars($file['classifier_notes'] ?? null) as $sidecar) {
+                $sidecarPath = (string) ($sidecar['original_path'] ?? '');
+                if ($sidecarPath !== '') {
+                    $sidecarPaths[] = $sidecarPath;
+                }
+            }
+        }
+
+        try {
+            $probe = null;
+            if ($extractMetadata) {
+                $probe = $this->ffprobe->probe($path);
+            } elseif (!empty($file['duration_seconds']) || !empty($file['codec_video'])) {
+                $probe = [
+                    'duration'      => $file['duration_seconds'] ?? null,
+                    'creation_time' => null,
+                ];
+            }
+
+            $result = $this->classifier->classify(
+                $path,
+                (string) $job['mount_path'],
+                $probe,
+                $sidecarPaths
+            );
+
+            return [
+                'kind'             => 'reclassify',
+                'path'             => $path,
+                'filename'         => (string) ($file['original_filename'] ?? basename($path)),
+                'result'           => $result,
+                'needs_continuity' => $this->continuity->willAskEngine($result),
+                'file_id'          => $id,
+                'was_split'        => !empty($file['needs_split']),
+            ];
+        } catch (\Throwable $e) {
+            error_log('[scan] Rescan prepare failed for file #' . $id . ': ' . $e->getMessage());
+
+            return ['kind' => 'skipped', 'path' => $path];
+        }
+    }
+
+    /**
+     * Persist a prepared classify result (after optional continuity refine).
+     *
+     * @param array<string, mixed> $prepared
+     * @return 'queued'|'reclassified'|'skipped'
+     */
+    private function commitPrepared(array $prepared, ClassifierResult $result): string
+    {
+        $kind = (string) ($prepared['kind'] ?? '');
+
+        if ($kind === 'new') {
+            $path = (string) $prepared['path'];
+            $job = $prepared['job'];
+            $meta = is_array($prepared['meta'] ?? null) ? $prepared['meta'] : [];
+            $filesize = $prepared['filesize'] ?? null;
+            $probe = $prepared['probe'] ?? null;
 
             $fileId = $this->files->insert([
                 'scan_job_id'        => (int) $job['id'],
@@ -534,7 +719,7 @@ final class ScanService
                 'classifier_notes'   => $result->classifierNotesJson(),
                 'status'             => 'PENDING',
                 'duration_seconds'   => $meta['duration'] ?? null,
-                'filesize_bytes'     => $meta['filesize_bytes'] ?? ($filesize !== false ? $filesize : null),
+                'filesize_bytes'     => $meta['filesize_bytes'] ?? $filesize,
                 'container'          => $meta['container'] ?? MediaExtensions::extension($path),
                 'codec_video'        => $meta['codec_video'] ?? null,
                 'codec_audio'        => $meta['codec_audio'] ?? null,
@@ -547,56 +732,11 @@ final class ScanService
             $this->continuity->attachFileId($path, $fileId);
 
             return 'queued';
-        } catch (\Throwable $e) {
-            error_log('[scan] Skipping ' . $path . ': ' . $e->getMessage());
-            return 'skipped';
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $job
-     * @param array<string, mixed> $file
-     * @param array{path: string, sidecars: list<string>} $entry
-     * @return 'reclassified'|'skipped'
-     */
-    private function reclassifyExisting(array $job, array $file, array $entry, bool $extractMetadata): string
-    {
-        $id = (int) $file['id'];
-        $sidecarPaths = $entry['sidecars'];
-        if ($sidecarPaths === []) {
-            foreach (FileRepository::parseSidecars($file['classifier_notes'] ?? null) as $sidecar) {
-                $sidecarPath = (string) ($sidecar['original_path'] ?? '');
-                if ($sidecarPath !== '') {
-                    $sidecarPaths[] = $sidecarPath;
-                }
-            }
         }
 
-        try {
-            $probe = null;
-            if ($extractMetadata) {
-                $probe = $this->ffprobe->probe((string) $file['original_path']);
-            } elseif (!empty($file['duration_seconds']) || !empty($file['codec_video'])) {
-                $probe = [
-                    'duration'      => $file['duration_seconds'] ?? null,
-                    'creation_time' => null,
-                ];
-            }
-
-            $result = $this->classifier->classify(
-                (string) $file['original_path'],
-                (string) $job['mount_path'],
-                $probe,
-                $sidecarPaths
-            );
-            $result = $this->continuity->refine(
-                $result,
-                (string) $file['original_path'],
-                (string) ($file['original_filename'] ?? basename((string) $file['original_path'])),
-                $id
-            );
-
-            $wasSplit = !empty($file['needs_split']);
+        if ($kind === 'reclassify') {
+            $id = (int) ($prepared['file_id'] ?? 0);
+            $wasSplit = !empty($prepared['was_split']);
             $ok = $this->files->updateClassification($id, [
                 'proposed_dir'      => $result->proposedDir,
                 'proposed_filename' => $result->proposedFilename,
@@ -619,9 +759,8 @@ final class ScanService
             }
 
             return 'reclassified';
-        } catch (\Throwable $e) {
-            error_log('[scan] Rescan reclassify failed for file #' . $id . ': ' . $e->getMessage());
-            return 'skipped';
         }
+
+        return 'skipped';
     }
 }

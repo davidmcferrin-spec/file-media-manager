@@ -47,6 +47,56 @@ final class ReclassifyService
 
         $fileList = $this->files->byScanJob($scanJobId, 50000);
         $this->continuity->warmEngine();
+
+        $concurrency = ContinuityCheckService::concurrency();
+        /** @var list<array<string, mixed>> $pending */
+        $pending = [];
+
+        $flush = function () use (&$pending, &$stats): void {
+            if ($pending === []) {
+                return;
+            }
+            $batch = [];
+            foreach ($pending as $item) {
+                $batch[] = [
+                    'result'            => $item['result'],
+                    'original_path'     => $item['path'],
+                    'original_filename' => $item['filename'],
+                    'file_id'           => $item['id'],
+                ];
+            }
+            $refined = $this->continuity->refineBatch($batch);
+            foreach ($pending as $i => $item) {
+                $result = $refined[$i] ?? $item['result'];
+                $id = (int) $item['id'];
+                $wasSplit = !empty($item['was_split']);
+                $ok = $this->files->updateClassification($id, [
+                    'proposed_dir'      => $result->proposedDir,
+                    'proposed_filename' => $result->proposedFilename,
+                    'show_id'           => $result->showId,
+                    'media_type_id'     => $result->mediaTypeId,
+                    'file_date'         => $result->fileDate,
+                    'file_time'         => $result->fileTime,
+                    'confidence'        => $result->confidence,
+                    'classifier_notes'  => $result->classifierNotesJson(),
+                    'needs_split'       => $result->needsSplit,
+                    'split_notes'       => $result->splitNotes,
+                ]);
+
+                if (!$ok) {
+                    $stats['skipped']++;
+                    continue;
+                }
+
+                if ($wasSplit && !$result->needsSplit) {
+                    $this->splitQueue->deleteActiveForFile($id);
+                }
+
+                $stats['reclassified']++;
+            }
+            $pending = [];
+        };
+
         foreach ($fileList as $file) {
             $fileStatus = (string) ($file['status'] ?? '');
             if (!in_array($fileStatus, ['PENDING', 'FLAGGED', 'REJECTED'], true)) {
@@ -75,42 +125,24 @@ final class ReclassifyService
 
             try {
                 $result = $this->classifier->classify($path, $mount, $probe, $sidecarPaths);
-                $result = $this->continuity->refine(
-                    $result,
-                    $path,
-                    (string) ($file['original_filename'] ?? basename($path)),
-                    $id
-                );
             } catch (\Throwable) {
                 $stats['failed']++;
                 continue;
             }
 
-            $wasSplit = !empty($file['needs_split']);
-            $ok = $this->files->updateClassification($id, [
-                'proposed_dir'      => $result->proposedDir,
-                'proposed_filename' => $result->proposedFilename,
-                'show_id'           => $result->showId,
-                'media_type_id'     => $result->mediaTypeId,
-                'file_date'         => $result->fileDate,
-                'file_time'         => $result->fileTime,
-                'confidence'        => $result->confidence,
-                'classifier_notes'  => $result->classifierNotesJson(),
-                'needs_split'       => $result->needsSplit,
-                'split_notes'       => $result->splitNotes,
-            ]);
-
-            if (!$ok) {
-                $stats['skipped']++;
-                continue;
+            $pending[] = [
+                'id'        => $id,
+                'path'      => $path,
+                'filename'  => (string) ($file['original_filename'] ?? basename($path)),
+                'result'    => $result,
+                'was_split' => !empty($file['needs_split']),
+            ];
+            if (count($pending) >= $concurrency) {
+                $flush();
             }
-
-            if ($wasSplit && !$result->needsSplit) {
-                $this->splitQueue->deleteActiveForFile($id);
-            }
-
-            $stats['reclassified']++;
         }
+
+        $flush();
 
         (new GlueGroupService($this->files))->applyForScanJob($scanJobId);
 

@@ -245,16 +245,143 @@ final class ContinuityCheckClient
      *   transport_failed: bool
      * }
      */
+    /**
+     * @return array{
+     *   verdict: ?array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string,
+     *   transport_failed: bool
+     * }
+     */
     public function completeJson(string $systemPrompt, string $userPrompt): array
     {
-        $empty = [
-            'verdict'          => null,
-            'raw_content'      => '',
-            'http_status'      => null,
-            'transport_error'  => '',
-            'transport_failed' => true,
-        ];
+        $results = $this->completeJsonMany([
+            ['system' => $systemPrompt, 'user' => $userPrompt],
+        ]);
 
+        return $results[0] ?? $this->emptyTransport('curl_multi returned no result');
+    }
+
+    /**
+     * Run multiple chat completions concurrently (curl_multi).
+     * Order of results matches the input order.
+     *
+     * @param list<array{system: string, user: string}> $requests
+     * @return list<array{
+     *   verdict: ?array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string,
+     *   transport_failed: bool
+     * }>
+     */
+    public function completeJsonMany(array $requests): array
+    {
+        if ($requests === []) {
+            return [];
+        }
+
+        if (count($requests) === 1) {
+            return [$this->executeOne($requests[0]['system'], $requests[0]['user'])];
+        }
+
+        $mh = curl_multi_init();
+        if ($mh === false) {
+            $out = [];
+            foreach ($requests as $req) {
+                $out[] = $this->executeOne($req['system'], $req['user']);
+            }
+
+            return $out;
+        }
+
+        /** @var array<int, \CurlHandle|resource> $handles */
+        $handles = [];
+        $results = array_fill(0, count($requests), null);
+
+        foreach ($requests as $i => $req) {
+            $built = $this->buildChatHandle((string) $req['system'], (string) $req['user']);
+            if ($built['error'] !== '') {
+                $results[$i] = $this->emptyTransport($built['error']);
+                continue;
+            }
+            $ch = $built['handle'];
+            if ($ch === null) {
+                $results[$i] = $this->emptyTransport('curl_init failed');
+                continue;
+            }
+            $handles[$i] = $ch;
+            curl_multi_add_handle($mh, $ch);
+        }
+
+        if ($handles !== []) {
+            $running = 0;
+            do {
+                $status = curl_multi_exec($mh, $running);
+                if ($running > 0) {
+                    curl_multi_select($mh, 1.0);
+                }
+            } while ($running > 0 && $status === CURLM_OK);
+
+            foreach ($handles as $i => $ch) {
+                $raw = curl_multi_getcontent($ch);
+                $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curlErr = curl_error($ch);
+                $results[$i] = $this->interpretChatResponse(
+                    $raw === false || $raw === null ? false : (string) $raw,
+                    $code,
+                    $curlErr
+                );
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+            }
+        }
+
+        curl_multi_close($mh);
+
+        $out = [];
+        foreach ($results as $row) {
+            $out[] = is_array($row) ? $row : $this->emptyTransport('missing parallel result');
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array{
+     *   verdict: ?array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string,
+     *   transport_failed: bool
+     * }
+     */
+    private function executeOne(string $systemPrompt, string $userPrompt): array
+    {
+        $built = $this->buildChatHandle($systemPrompt, $userPrompt);
+        if ($built['error'] !== '' || $built['handle'] === null) {
+            return $this->emptyTransport($built['error'] !== '' ? $built['error'] : 'curl_init failed');
+        }
+
+        $ch = $built['handle'];
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+
+        return $this->interpretChatResponse(
+            $raw === false ? false : (string) $raw,
+            $code,
+            $curlErr
+        );
+    }
+
+    /**
+     * @return array{handle: (\CurlHandle|resource)|null, error: string}
+     */
+    private function buildChatHandle(string $systemPrompt, string $userPrompt): array
+    {
         $payload = [
             'model'      => $this->model,
             'stream'     => false,
@@ -270,15 +397,15 @@ final class ContinuityCheckClient
             ],
         ];
 
-        $ch = curl_init($this->baseUrl . '/api/chat');
-        if ($ch === false) {
-            return $empty + ['transport_error' => 'curl_init failed'];
-        }
-
         try {
             $body = json_encode($payload, JSON_THROW_ON_ERROR);
         } catch (\Throwable $e) {
-            return $empty + ['transport_error' => 'payload encode failed: ' . $e->getMessage()];
+            return ['handle' => null, 'error' => 'payload encode failed: ' . $e->getMessage()];
+        }
+
+        $ch = curl_init($this->baseUrl . '/api/chat');
+        if ($ch === false) {
+            return ['handle' => null, 'error' => 'curl_init failed'];
         }
 
         curl_setopt_array($ch, [
@@ -290,11 +417,20 @@ final class ContinuityCheckClient
             CURLOPT_TIMEOUT        => $this->timeoutSeconds,
         ]);
 
-        $raw = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlErr = curl_error($ch);
-        curl_close($ch);
+        return ['handle' => $ch, 'error' => ''];
+    }
 
+    /**
+     * @return array{
+     *   verdict: ?array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string,
+     *   transport_failed: bool
+     * }
+     */
+    private function interpretChatResponse(string|false $raw, int $code, string $curlErr): array
+    {
         if ($raw === false) {
             $hint = $curlErr !== '' ? $curlErr : 'empty transport response';
             if (stripos($hint, 'timed out') !== false || stripos($hint, 'timeout') !== false) {
@@ -311,7 +447,7 @@ final class ContinuityCheckClient
             ];
         }
 
-        $rawStr = (string) $raw;
+        $rawStr = $raw;
         if ($code < 200 || $code >= 300) {
             $hint = 'HTTP ' . $code;
             if ($code === 404) {
@@ -342,7 +478,6 @@ final class ContinuityCheckClient
 
         $content = $envelope['message']['content'] ?? null;
 
-        // Some engine versions already return structured JSON for format=json.
         if (is_array($content)) {
             return [
                 'verdict'          => $content,
@@ -390,6 +525,26 @@ final class ContinuityCheckClient
             'http_status'      => $code,
             'transport_error'  => '',
             'transport_failed' => false,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   verdict: null,
+     *   raw_content: string,
+     *   http_status: null,
+     *   transport_error: string,
+     *   transport_failed: true
+     * }
+     */
+    private function emptyTransport(string $error): array
+    {
+        return [
+            'verdict'          => null,
+            'raw_content'      => '',
+            'http_status'      => null,
+            'transport_error'  => $error,
+            'transport_failed' => true,
         ];
     }
 

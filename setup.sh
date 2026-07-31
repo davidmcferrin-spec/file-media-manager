@@ -296,6 +296,25 @@ ensure_env_key "CONTINUITY_CHECK_ENABLED" "true"
 ensure_env_key "CONTINUITY_CHECK_URL" "http://127.0.0.1:11434"
 ensure_env_key "CONTINUITY_CHECK_MODEL" "${CONTINUITY_MODEL}"
 ensure_env_key "CONTINUITY_CHECK_TIMEOUT_SECONDS" "60"
+ensure_env_key "CONTINUITY_CHECK_KEEP_ALIVE" "24h"
+ensure_env_key "CONTINUITY_CHECK_CONCURRENCY" "4"
+
+# Allow Ollama to process multiple continuity requests at once (match app concurrency)
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^ollama\.service'; then
+    OLLAMA_DROPIN_DIR="/etc/systemd/system/ollama.service.d"
+    OLLAMA_DROPIN="${OLLAMA_DROPIN_DIR}/parallel.conf"
+    mkdir -p "${OLLAMA_DROPIN_DIR}"
+    if [[ ! -f "${OLLAMA_DROPIN}" ]]; then
+        cat > "${OLLAMA_DROPIN}" <<'EOF'
+[Service]
+Environment="OLLAMA_NUM_PARALLEL=4"
+Environment="OLLAMA_KEEP_ALIVE=24h"
+EOF
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl restart ollama >/dev/null 2>&1 || true
+        info "Configured Ollama OLLAMA_NUM_PARALLEL=4 for concurrent continuity evals."
+    fi
+fi
 
 # Upgrade stale short timeouts from earlier installs (8s is too low for cold loads)
 if grep -qE '^CONTINUITY_CHECK_TIMEOUT_SECONDS=([0-9]+)' "${ENV_FILE}" 2>/dev/null; then
