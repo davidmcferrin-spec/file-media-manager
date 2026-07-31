@@ -193,6 +193,10 @@ final class FileRepository extends BaseRepository
         if (!empty($filters['needs_split'])) {
             $clauses[] = 'f.needs_split IS TRUE';
         }
+        if (!empty($filters['file_id'])) {
+            $clauses[] = 'f.id = ?';
+            $params[]  = (int) $filters['file_id'];
+        }
         if (!empty($filters['search'])) {
             $clauses[] = '(f.original_filename ILIKE ? OR f.original_path ILIKE ? OR f.proposed_filename ILIKE ?)';
             $term = '%' . (string) $filters['search'] . '%';
@@ -610,7 +614,7 @@ final class FileRepository extends BaseRepository
             'SELECT confidence, COUNT(*) AS cnt FROM files WHERE scan_job_id = ? GROUP BY confidence'
         );
         $stmt->execute([$scanJobId]);
-        $summary = ['HIGH' => 0, 'MEDIUM' => 0, 'LOW' => 0];
+        $summary = ['HIGH' => 0, 'MEDIUM' => 0, 'LOW' => 0, 'UNEVALUATED' => 0];
         foreach ($stmt->fetchAll() as $row) {
             $summary[(string) $row['confidence']] = (int) $row['cnt'];
         }
@@ -838,9 +842,11 @@ final class FileRepository extends BaseRepository
         $limit = max(1, min(40, $limit));
         $stmt = $this->db()->prepare(
             "SELECT f.original_filename, f.original_path, f.proposed_dir, f.proposed_filename,
-                    f.show_id, f.file_date, f.file_time, s.abbreviation AS show_abbr
+                    f.show_id, f.media_type_id, f.file_date, f.file_time,
+                    s.abbreviation AS show_abbr, mt.abbreviation AS media_type_abbr
              FROM files f
              LEFT JOIN shows s ON s.id = f.show_id
+             LEFT JOIN media_types mt ON mt.id = f.media_type_id
              WHERE f.status IN ('APPROVED', 'EXECUTED')
                AND f.show_id IS NOT NULL
                AND f.proposed_filename IS NOT NULL

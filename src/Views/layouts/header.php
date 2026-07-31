@@ -269,6 +269,11 @@ code, .path-text kbd {
     color: var(--badge-low);
     border: 1px solid rgba(251, 113, 133, 0.35);
 }
+.badge-confidence-UNEVALUATED {
+    background: rgba(148, 163, 184, 0.14);
+    color: var(--text-soft);
+    border: 1px solid rgba(148, 163, 184, 0.32);
+}
 
 /* ── Forms ──────────────────────────────────────────────────── */
 .form-label {

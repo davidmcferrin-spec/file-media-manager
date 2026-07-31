@@ -39,4 +39,79 @@ final class ContinuityCheckServiceTest extends TestCase
         $this->assertSame('MEDIUM', $merged['confidence']);
         $this->assertSame('continuity:review', $merged['signal']);
     }
+
+    public function test_agree_on_unevaluated_adopts_engine_score(): void
+    {
+        $merged = ContinuityCheckService::mergeVerdict('UNEVALUATED', [
+            'agree'      => true,
+            'confidence' => 'MEDIUM',
+            'show_id'    => 3,
+        ]);
+        $this->assertSame('MEDIUM', $merged['confidence']);
+        $this->assertSame('continuity:confirmed', $merged['signal']);
+    }
+
+    public function test_merge_datetime_fills_gaps(): void
+    {
+        $dt = ContinuityCheckService::mergeDateTime(null, null, [
+            'file_date'      => '2024-07-15',
+            'file_time'      => '1900',
+            'datetime_agree' => true,
+        ]);
+        $this->assertSame('20240715', $dt['file_date']);
+        $this->assertSame('1900', $dt['file_time']);
+        $this->assertTrue($dt['changed']);
+        $this->assertContains('continuity:date filled', $dt['signals']);
+    }
+
+    public function test_merge_datetime_keeps_rule_on_conflict(): void
+    {
+        $dt = ContinuityCheckService::mergeDateTime('20240101', '0800', [
+            'file_date'      => '20240715',
+            'file_time'      => '1900',
+            'datetime_agree' => false,
+        ]);
+        $this->assertSame('20240101', $dt['file_date']);
+        $this->assertSame('0800', $dt['file_time']);
+        $this->assertFalse($dt['changed']);
+        $this->assertContains('continuity:date conflict', $dt['signals']);
+    }
+
+    public function test_merge_media_type_fills_gap(): void
+    {
+        [$typesById, $idsByAbbr] = $this->mediaTypeFixtures();
+        $mt = ContinuityCheckService::mergeMediaType(null, null, [
+            'media_type_id'    => 2,
+            'media_type_agree' => true,
+        ], $typesById, $idsByAbbr);
+        $this->assertSame(2, $mt['media_type_id']);
+        $this->assertSame('CLN', $mt['media_type_abbreviation']);
+        $this->assertTrue($mt['changed']);
+        $this->assertContains('continuity:media type filled', $mt['signals']);
+    }
+
+    public function test_merge_media_type_keeps_rule_on_conflict(): void
+    {
+        [$typesById, $idsByAbbr] = $this->mediaTypeFixtures();
+        $mt = ContinuityCheckService::mergeMediaType(1, 'PGM', [
+            'media_type'       => 'CLN',
+            'media_type_agree' => false,
+        ], $typesById, $idsByAbbr);
+        $this->assertSame(1, $mt['media_type_id']);
+        $this->assertSame('PGM', $mt['media_type_abbreviation']);
+        $this->assertFalse($mt['changed']);
+        $this->assertContains('continuity:media type conflict', $mt['signals']);
+    }
+
+    /** @return array{0: array<int, array{id: int, abbreviation: string, name: string, folder_name: string}>, 1: array<string, int>} */
+    private function mediaTypeFixtures(): array
+    {
+        $typesById = [
+            1 => ['id' => 1, 'abbreviation' => 'PGM', 'name' => 'Program', 'folder_name' => 'Program'],
+            2 => ['id' => 2, 'abbreviation' => 'CLN', 'name' => 'Clean', 'folder_name' => 'Clean'],
+        ];
+        $idsByAbbr = ['PGM' => 1, 'CLN' => 2];
+
+        return [$typesById, $idsByAbbr];
+    }
 }

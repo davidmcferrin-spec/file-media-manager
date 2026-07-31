@@ -6,7 +6,7 @@ use MediaManager\Support\View;
 use MediaManager\Auth\Auth;
 
 // Build confidence map
-$confMap = ['LOW' => 0, 'MEDIUM' => 0, 'HIGH' => 0];
+$confMap = ['UNEVALUATED' => 0, 'LOW' => 0, 'MEDIUM' => 0, 'HIGH' => 0];
 foreach ($confidenceStats as $row) {
     $confMap[$row['confidence']] = (int) $row['cnt'];
 }
@@ -122,12 +122,17 @@ $totalPending = (int) ($queueStats['pending'] ?? 0);
         <?php if ($totalPending === 0): ?>
           <p class="text-secondary mb-0" style="font-size:0.82rem;">No pending files.</p>
         <?php else: ?>
-          <?php foreach (['LOW' => '#f87171', 'MEDIUM' => '#facc15', 'HIGH' => '#22c55e'] as $conf => $color): ?>
-          <?php $cnt = $confMap[$conf]; $pct = $totalPending > 0 ? round($cnt / $totalPending * 100) : 0; ?>
+          <?php foreach ([
+              'UNEVALUATED' => '#94a3b8',
+              'LOW'         => '#f87171',
+              'MEDIUM'      => '#facc15',
+              'HIGH'        => '#22c55e',
+          ] as $conf => $color): ?>
+          <?php $cnt = $confMap[$conf] ?? 0; $pct = $totalPending > 0 ? round($cnt / $totalPending * 100) : 0; ?>
           <div class="mb-3">
             <div class="d-flex justify-content-between mb-1" style="font-size:0.78rem;">
               <span style="color:<?php echo $color; ?>;font-weight:600;">
-                <?php echo $conf; ?>
+                <?php echo $conf === 'UNEVALUATED' ? 'Unevaluated' : $conf; ?>
               </span>
               <span style="color:var(--text-soft)">
                 <?php echo number_format($cnt); ?> &nbsp;(<?php echo $pct; ?>%)
@@ -138,8 +143,8 @@ $totalPending = (int) ($queueStats['pending'] ?? 0);
             </div>
           </div>
           <?php endforeach; ?>
-          <a href="/queue?confidence=LOW" class="btn btn-sm btn-outline-danger mt-1" style="font-size:0.76rem;">
-            Review LOW confidence →
+          <a href="/queue?confidence=UNEVALUATED" class="btn btn-sm btn-outline-secondary mt-1" style="font-size:0.76rem;">
+            Review unevaluated →
           </a>
         <?php endif; ?>
       </div>

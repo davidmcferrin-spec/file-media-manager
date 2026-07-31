@@ -199,6 +199,8 @@ $queryBase = array_filter([
           <th>Outcome</th>
           <th>Rule → Final</th>
           <th>Show</th>
+          <th>Type</th>
+          <th>Date / Time</th>
           <th>Reason / signals</th>
           <th>File</th>
           <th>ms</th>
@@ -208,7 +210,7 @@ $queryBase = array_filter([
       <tbody>
         <?php if ($entries === []): ?>
         <tr>
-          <td colspan="8" class="text-center py-4 path-text">
+          <td colspan="10" class="text-center py-4 path-text">
             No continuity decisions logged yet. Run a Scan or Reclassify with continuity enabled.
           </td>
         </tr>
@@ -216,6 +218,7 @@ $queryBase = array_filter([
         <?php foreach ($entries as $row): ?>
         <?php
         $rowId = (int) ($row['id'] ?? 0);
+        $fileId = (int) ($row['file_id'] ?? 0);
         $outcome = (string) ($row['outcome'] ?? '');
         $badge = match ($outcome) {
             'confirmed' => 'bg-success',
@@ -244,6 +247,20 @@ $queryBase = array_filter([
         } else {
             $seed = null;
         }
+        $seedProposal = is_array($seed) && is_array($seed['proposal'] ?? null) ? $seed['proposal'] : [];
+        // Fallback date/time from seed for rows logged before dedicated columns.
+        $ruleDate = trim((string) ($row['rule_file_date'] ?? ($seedProposal['file_date'] ?? '')));
+        $ruleTime = trim((string) ($row['rule_file_time'] ?? ($seedProposal['file_time'] ?? '')));
+        $finalDate = trim((string) ($row['final_file_date'] ?? $ruleDate));
+        $finalTime = trim((string) ($row['final_file_time'] ?? $ruleTime));
+        $engineDate = trim((string) ($row['engine_file_date'] ?? ''));
+        $engineTime = trim((string) ($row['engine_file_time'] ?? ''));
+        $dateChanged = $ruleDate !== '' && $finalDate !== '' && $ruleDate !== $finalDate;
+        $timeChanged = $ruleTime !== '' && $finalTime !== '' && $ruleTime !== $finalTime;
+        $ruleType = trim((string) ($row['rule_media_type_abbr'] ?? ($seedProposal['media_type'] ?? '')));
+        $finalType = trim((string) ($row['final_media_type_abbr'] ?? $ruleType));
+        $engineType = trim((string) ($row['engine_media_type_abbr'] ?? ''));
+        $typeChanged = $ruleType !== '' && $finalType !== '' && strcasecmp($ruleType, $finalType) !== 0;
         $seedPretty = '';
         if (is_array($seed)) {
             $seedPretty = (string) json_encode($seed, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -251,9 +268,12 @@ $queryBase = array_filter([
         $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
         $transportErr = trim((string) ($row['transport_error'] ?? ''));
         $hasArtifacts = $seedPretty !== '' || $engineRaw !== '' || $transportErr !== '';
-        $timelineCount = is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0;
-        $exampleCount = is_array($seed['examples'] ?? null) ? count($seed['examples']) : 0;
-        $showCount = is_array($seed['shows'] ?? null) ? count($seed['shows']) : 0;
+        $timelineCount = is_array($seed) && is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0;
+        $exampleCount = is_array($seed) && is_array($seed['examples'] ?? null) ? count($seed['examples']) : 0;
+        $showCount = is_array($seed) && is_array($seed['shows'] ?? null) ? count($seed['shows']) : 0;
+        $catalogHref = $fileId > 0
+            ? '/queue?status=ALL&file_id=' . $fileId
+            : '/queue?status=ALL&q=' . rawurlencode((string) ($row['original_filename'] ?? ''));
         ?>
         <tr>
           <td class="path-text text-nowrap">
@@ -284,6 +304,38 @@ $queryBase = array_filter([
             <code><?php echo View::e($finalShow !== '' ? $finalShow : ($ruleShow !== '' ? $ruleShow : '—')); ?></code>
             <?php endif; ?>
           </td>
+          <td class="text-nowrap">
+            <?php if ($finalType !== '' || $ruleType !== ''): ?>
+              <?php if ($typeChanged): ?>
+              <code><?php echo View::e($ruleType); ?></code>
+              →
+              <code><?php echo View::e($finalType); ?></code>
+              <?php else: ?>
+              <code><?php echo View::e($finalType !== '' ? $finalType : $ruleType); ?></code>
+              <?php endif; ?>
+              <?php if ($engineType !== ''): ?>
+              <div class="path-text" style="font-size:0.68rem">eng <?php echo View::e($engineType); ?></div>
+              <?php endif; ?>
+            <?php else: ?>
+            —
+            <?php endif; ?>
+          </td>
+          <td class="text-nowrap path-text">
+            <?php if ($finalDate !== '' || $finalTime !== ''): ?>
+              <?php if ($dateChanged || $timeChanged): ?>
+              <code><?php echo View::e(trim($ruleDate . ' ' . $ruleTime)); ?></code>
+              →
+              <code><?php echo View::e(trim($finalDate . ' ' . $finalTime)); ?></code>
+              <?php else: ?>
+              <code><?php echo View::e(trim($finalDate . ' ' . $finalTime)); ?></code>
+              <?php endif; ?>
+              <?php if ($engineDate !== '' || $engineTime !== ''): ?>
+              <div style="font-size:0.68rem">eng <?php echo View::e(trim($engineDate . ' ' . $engineTime)); ?></div>
+              <?php endif; ?>
+            <?php else: ?>
+            —
+            <?php endif; ?>
+          </td>
           <td style="max-width:280px">
             <?php if (trim((string) ($row['engine_reason'] ?? '')) !== ''): ?>
             <div><?php echo View::e((string) $row['engine_reason']); ?></div>
@@ -299,7 +351,14 @@ $queryBase = array_filter([
             <?php endif; ?>
           </td>
           <td class="path-text" style="max-width:260px;word-break:break-all">
-            <?php echo View::e((string) ($row['original_filename'] ?: $row['original_path'])); ?>
+            <a href="<?php echo View::e($catalogHref); ?>">
+              <?php echo View::e((string) ($row['original_filename'] ?: $row['original_path'])); ?>
+            </a>
+            <?php if ($fileId > 0): ?>
+            <div class="mt-1" style="font-size:0.68rem">
+              <a href="<?php echo View::e($catalogHref); ?>">Catalog #<?php echo $fileId; ?></a>
+            </div>
+            <?php endif; ?>
             <?php if (!empty($row['final_proposed_filename']) || !empty($row['rule_proposed_filename'])): ?>
             <div class="mt-1">
               → <?php echo View::e((string) ($row['final_proposed_filename'] ?? $row['rule_proposed_filename'])); ?>
@@ -321,7 +380,7 @@ $queryBase = array_filter([
         </tr>
         <?php if ($hasArtifacts): ?>
         <tr class="collapse-row">
-          <td colspan="8" class="p-0 border-0">
+          <td colspan="9" class="p-0 border-0">
             <div class="collapse" id="art-<?php echo $rowId; ?>">
               <div class="p-3" style="background:var(--hover-bg);border-top:1px solid var(--bs-border-color)">
                 <div class="d-flex flex-wrap gap-3 mb-2 path-text" style="font-size:0.75rem">

@@ -84,9 +84,9 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
         <label class="form-label">Confidence</label>
         <select name="confidence" class="form-select form-select-sm">
           <option value="">All</option>
-          <?php foreach (['LOW', 'MEDIUM', 'HIGH'] as $c): ?>
+          <?php foreach (['UNEVALUATED', 'LOW', 'MEDIUM', 'HIGH'] as $c): ?>
           <option value="<?php echo $c; ?>" <?php echo ($filters['confidence'] ?? '') === $c ? 'selected' : ''; ?>>
-            <?php echo $c; ?>
+            <?php echo $c === 'UNEVALUATED' ? 'Unevaluated' : $c; ?>
           </option>
           <?php endforeach; ?>
         </select>
@@ -313,12 +313,20 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
             <?php endif; ?>
           </td>
           <td class="text-nowrap" style="font-size:0.78rem">
-            <span class="badge badge-confidence-<?php echo View::e($item['confidence']); ?>">
-              <?php echo View::e($item['confidence']); ?>
+            <?php
+            $confLabel = (string) ($item['confidence'] ?? 'UNEVALUATED');
+            $confDisplay = $confLabel === 'UNEVALUATED' ? 'Unevaluated' : $confLabel;
+            $parsedDt = View::formatParsedDateTime($item['file_date'] ?? null, $item['file_time'] ?? null);
+            ?>
+            <span class="badge badge-confidence-<?php echo View::e($confLabel); ?>">
+              <?php echo View::e($confDisplay); ?>
             </span>
             <div class="path-text mt-1">
               <?php echo View::e($item['show_abbr'] ?? '—'); ?>
               · <?php echo View::e($item['media_type_name'] ?? '—'); ?>
+            </div>
+            <div class="path-text" title="Parsed air date/time (ET)">
+              <?php echo $parsedDt !== '' ? View::e($parsedDt) : '—'; ?>
             </div>
             <div class="path-text"><?php echo View::duration($item['duration_seconds'] ?? null); ?></div>
             <div class="path-text" style="font-size:0.72rem" title="Scan-time FFprobe summary">

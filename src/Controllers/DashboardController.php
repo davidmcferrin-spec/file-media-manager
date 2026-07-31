@@ -32,7 +32,13 @@ $confidenceStats = $pdo->query("
     FROM files
     WHERE status = 'PENDING'
     GROUP BY confidence
-    ORDER BY CASE confidence WHEN 'LOW' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'HIGH' THEN 3 END
+    ORDER BY CASE confidence
+        WHEN 'UNEVALUATED' THEN 1
+        WHEN 'LOW' THEN 2
+        WHEN 'MEDIUM' THEN 3
+        WHEN 'HIGH' THEN 4
+        ELSE 5
+    END
 ")->fetchAll();
 
 // ── Recent scan jobs ─────────────────────────────────────────

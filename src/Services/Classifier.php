@@ -438,6 +438,11 @@ final class Classifier
             return 'MEDIUM';
         }
 
+        // No usable signals yet — not the same as a weak/low-confidence guess.
+        if ($score <= 0) {
+            return 'UNEVALUATED';
+        }
+
         return 'LOW';
     }
 

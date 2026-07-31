@@ -14,6 +14,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.10] — 2026-07-30
+
+### Added
+
+- Continuity engine can fill/validate **media type** (Clean / Program / etc.) from filename/path — fills gaps, keeps rule on conflict, rebuilds proposed path when type changes
+- Continuity Lab Type column + export fields for rule/engine/final media type
+
+## [0.5.9] — 2026-07-30
+
+### Added
+
+- Catalog Meta column shows parsed air date/time (`YYYY-MM-DD HH:MM`)
+- **Unevaluated** confidence level (default / zero-signal classifier score) with filter, badges, and dashboard breakdown
+- Continuity engine can fill/validate air **date/time** from filename (fills gaps; keeps rule values on conflict)
+- Continuity Lab shows parsed date/time and links each row to Catalog (`/queue?file_id=…`)
+
 ## [0.5.8] — 2026-07-30
 
 ### Added

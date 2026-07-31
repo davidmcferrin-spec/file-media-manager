@@ -78,7 +78,8 @@ final class ReclassifyService
                 $result = $this->continuity->refine(
                     $result,
                     $path,
-                    (string) ($file['original_filename'] ?? basename($path))
+                    (string) ($file['original_filename'] ?? basename($path)),
+                    $id
                 );
             } catch (\Throwable) {
                 $stats['failed']++;

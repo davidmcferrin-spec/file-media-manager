@@ -22,21 +22,35 @@ final class ContinuityCheckLogRepository extends BaseRepository
 
         $stmt = $this->db()->prepare(
             'INSERT INTO continuity_check_log (
-                original_path, original_filename,
+                file_id, original_path, original_filename,
                 rule_show_id, rule_show_abbr, rule_confidence, rule_proposed_filename, rule_signals,
+                rule_file_date, rule_file_time,
+                rule_media_type_id, rule_media_type_abbr,
                 engine_agree, engine_confidence, engine_show_id, engine_reason,
+                engine_file_date, engine_file_time,
+                engine_media_type_id, engine_media_type_abbr,
                 final_confidence, final_show_id, final_show_abbr, final_proposed_filename,
+                final_file_date, final_file_time,
+                final_media_type_id, final_media_type_abbr,
                 signal, outcome, duration_ms,
                 seed_packet, engine_raw, http_status, transport_error
              ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?::jsonb,
+                ?, ?, ?,
+                ?, ?, ?, ?, ?::jsonb,
+                ?, ?,
+                ?, ?,
                 ?, ?, ?, ?,
+                ?, ?,
+                ?, ?,
                 ?, ?, ?, ?,
+                ?, ?,
+                ?, ?,
                 ?, ?, ?,
                 ?::jsonb, ?, ?, ?
              ) RETURNING id'
         );
         $stmt->execute([
+            $row['file_id'] ?? null,
             (string) ($row['original_path'] ?? ''),
             (string) ($row['original_filename'] ?? ''),
             $row['rule_show_id'] ?? null,
@@ -44,16 +58,28 @@ final class ContinuityCheckLogRepository extends BaseRepository
             (string) ($row['rule_confidence'] ?? 'LOW'),
             $row['rule_proposed_filename'] ?? null,
             json_encode(array_values($signals), JSON_THROW_ON_ERROR),
+            $row['rule_file_date'] ?? null,
+            $row['rule_file_time'] ?? null,
+            $row['rule_media_type_id'] ?? null,
+            $row['rule_media_type_abbr'] ?? null,
             array_key_exists('engine_agree', $row) && $row['engine_agree'] !== null
                 ? $this->pgBool((bool) $row['engine_agree'])
                 : null,
             $row['engine_confidence'] ?? null,
             $row['engine_show_id'] ?? null,
             (string) ($row['engine_reason'] ?? ''),
+            $row['engine_file_date'] ?? null,
+            $row['engine_file_time'] ?? null,
+            $row['engine_media_type_id'] ?? null,
+            $row['engine_media_type_abbr'] ?? null,
             (string) ($row['final_confidence'] ?? 'LOW'),
             $row['final_show_id'] ?? null,
             $row['final_show_abbr'] ?? null,
             $row['final_proposed_filename'] ?? null,
+            $row['final_file_date'] ?? null,
+            $row['final_file_time'] ?? null,
+            $row['final_media_type_id'] ?? null,
+            $row['final_media_type_abbr'] ?? null,
             (string) ($row['signal'] ?? ''),
             (string) ($row['outcome'] ?? 'error'),
             (int) ($row['duration_ms'] ?? 0),
@@ -64,6 +90,21 @@ final class ContinuityCheckLogRepository extends BaseRepository
         ]);
 
         return (int) $stmt->fetchColumn();
+    }
+
+    public function attachFileIdByPath(string $originalPath, int $fileId): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE continuity_check_log SET file_id = ?
+             WHERE id = (
+               SELECT id FROM continuity_check_log
+               WHERE original_path = ? AND file_id IS NULL
+               ORDER BY created_at DESC, id DESC
+               LIMIT 1
+             )'
+        );
+
+        return $stmt->execute([$fileId, $originalPath]);
     }
 
     /**
@@ -94,9 +135,14 @@ final class ContinuityCheckLogRepository extends BaseRepository
     {
         [$where, $params] = $this->whereClause($filters);
         $sql = 'SELECT
-                    id, created_at, outcome, duration_ms,
+                    id, created_at, outcome, duration_ms, file_id,
                     rule_confidence, final_confidence,
                     rule_show_id, rule_show_abbr, final_show_id, final_show_abbr,
+                    rule_file_date, rule_file_time, engine_file_date, engine_file_time,
+                    final_file_date, final_file_time,
+                    rule_media_type_id, rule_media_type_abbr,
+                    engine_media_type_id, engine_media_type_abbr,
+                    final_media_type_id, final_media_type_abbr,
                     engine_agree, engine_confidence, engine_show_id, engine_reason,
                     signal, original_path, original_filename,
                     rule_proposed_filename, final_proposed_filename, rule_signals,

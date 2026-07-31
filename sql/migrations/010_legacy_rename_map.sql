@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_legacy_rename_map_source
 
 ALTER TABLE files
     ADD COLUMN IF NOT EXISTS classifier_confidence TEXT NULL
-        CHECK (classifier_confidence IS NULL OR classifier_confidence IN ('HIGH', 'MEDIUM', 'LOW')),
+        CHECK (classifier_confidence IS NULL OR classifier_confidence IN ('HIGH', 'MEDIUM', 'LOW', 'UNEVALUATED')),
     ADD COLUMN IF NOT EXISTS classifier_proposed_dir TEXT NULL,
     ADD COLUMN IF NOT EXISTS classifier_proposed_filename TEXT NULL,
     ADD COLUMN IF NOT EXISTS alt_proposed_dir TEXT NULL,

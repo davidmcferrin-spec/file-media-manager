@@ -25,6 +25,7 @@ $filters = [
     'confidence'  => $_GET['confidence'] ?? '',
     'scan_job_id' => isset($_GET['scan_job_id']) ? (int) $_GET['scan_job_id'] : 0,
     'show_id'     => isset($_GET['show_id']) ? (int) $_GET['show_id'] : 0,
+    'file_id'     => isset($_GET['file_id']) ? (int) $_GET['file_id'] : 0,
     'needs_split' => isset($_GET['needs_split']),
     'search'      => trim($_GET['q'] ?? ''),
 ];
@@ -34,6 +35,13 @@ if ($filters['scan_job_id'] <= 0) {
 }
 if ($filters['show_id'] <= 0) {
     unset($filters['show_id']);
+}
+if ($filters['file_id'] <= 0) {
+    unset($filters['file_id']);
+} else {
+    // Deep-link from Continuity Lab — show the file regardless of status tab.
+    $filters['status'] = 'ALL';
+    $statusParam = 'ALL';
 }
 if ($filters['confidence'] === '') {
     unset($filters['confidence']);

@@ -509,7 +509,7 @@ final class ScanService
 
             $meta = is_array($probe) ? $probe : [];
 
-            $this->files->insert([
+            $fileId = $this->files->insert([
                 'scan_job_id'        => (int) $job['id'],
                 'source_id'          => (int) $job['source_id'],
                 'original_path'      => $path,
@@ -539,6 +539,7 @@ final class ScanService
                 'needs_split'        => $result->needsSplit,
                 'split_notes'        => $result->splitNotes,
             ]);
+            $this->continuity->attachFileId($path, $fileId);
 
             return 'queued';
         } catch (\Throwable $e) {
@@ -586,7 +587,8 @@ final class ScanService
             $result = $this->continuity->refine(
                 $result,
                 (string) $file['original_path'],
-                (string) ($file['original_filename'] ?? basename((string) $file['original_path']))
+                (string) ($file['original_filename'] ?? basename((string) $file['original_path'])),
+                $id
             );
 
             $wasSplit = !empty($file['needs_split']);

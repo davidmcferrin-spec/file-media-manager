@@ -135,11 +135,19 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
       </div>
     </div>
   </div>
-  <div class="col-md-2">
+  <div class="col-md-1">
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Low</div>
-        <div class="stat-value" style="color:#f87171"><?php echo $confidence['LOW']; ?></div>
+        <div class="stat-value" style="color:#f87171;font-size:1.4rem"><?php echo $confidence['LOW']; ?></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-1">
+    <div class="card stat-card h-100">
+      <div class="card-body py-3 px-3">
+        <div class="stat-label">Uneval</div>
+        <div class="stat-value" style="color:var(--text-soft);font-size:1.4rem"><?php echo $confidence['UNEVALUATED'] ?? 0; ?></div>
       </div>
     </div>
   </div>
@@ -218,9 +226,17 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
             <?php endif; ?>
           </td>
           <td>
-            <span class="badge badge-confidence-<?php echo View::e($file['confidence']); ?>">
-              <?php echo View::e($file['confidence']); ?>
+            <?php
+            $fc = (string) ($file['confidence'] ?? 'UNEVALUATED');
+            $fcLabel = $fc === 'UNEVALUATED' ? 'Unevaluated' : $fc;
+            $parsedDt = View::formatParsedDateTime($file['file_date'] ?? null, $file['file_time'] ?? null);
+            ?>
+            <span class="badge badge-confidence-<?php echo View::e($fc); ?>">
+              <?php echo View::e($fcLabel); ?>
             </span>
+            <?php if ($parsedDt !== ''): ?>
+            <div class="path-text mt-1" style="font-size:0.72rem"><?php echo View::e($parsedDt); ?></div>
+            <?php endif; ?>
           </td>
         </tr>
         <?php endforeach; ?>

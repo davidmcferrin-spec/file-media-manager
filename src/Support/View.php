@@ -109,12 +109,37 @@ class View
     public static function confidenceBadge(string $confidence): string
     {
         $map = [
-            'HIGH'   => ['success', 'HIGH'],
-            'MEDIUM' => ['warning', 'MED'],
-            'LOW'    => ['danger',  'LOW'],
+            'HIGH'         => ['success',   'HIGH'],
+            'MEDIUM'       => ['warning',   'MED'],
+            'LOW'          => ['danger',    'LOW'],
+            'UNEVALUATED'  => ['secondary', 'UNEVAL'],
         ];
         [$cls, $label] = $map[$confidence] ?? ['secondary', $confidence];
         return '<span class="badge bg-' . $cls . '">' . $label . '</span>';
+    }
+
+    /**
+     * Human-readable parsed air date/time (YYYYMMDD + HHMM → YYYY-MM-DD HH:MM).
+     */
+    public static function formatParsedDateTime(mixed $dateYmd, mixed $timeHhmm): string
+    {
+        $date = is_string($dateYmd) ? trim($dateYmd) : '';
+        $time = is_string($timeHhmm) ? trim($timeHhmm) : '';
+        $parts = [];
+
+        if (preg_match('/^\d{8}$/', $date) === 1) {
+            $parts[] = substr($date, 0, 4) . '-' . substr($date, 4, 2) . '-' . substr($date, 6, 2);
+        } elseif ($date !== '') {
+            $parts[] = $date;
+        }
+
+        if (preg_match('/^\d{4}$/', $time) === 1) {
+            $parts[] = substr($time, 0, 2) . ':' . substr($time, 2, 2);
+        } elseif ($time !== '') {
+            $parts[] = $time;
+        }
+
+        return $parts !== [] ? implode(' ', $parts) : '';
     }
 
     /**

@@ -105,8 +105,8 @@ CREATE TABLE IF NOT EXISTS files (
     media_type_id       INTEGER     NULL REFERENCES media_types(id),
     file_date           TEXT        NULL,
     file_time           TEXT        NULL,
-    confidence          TEXT        NOT NULL DEFAULT 'LOW'
-                        CHECK (confidence IN ('HIGH','MEDIUM','LOW')),
+    confidence          TEXT        NOT NULL DEFAULT 'UNEVALUATED'
+                        CHECK (confidence IN ('HIGH','MEDIUM','LOW','UNEVALUATED')),
     classifier_notes    TEXT        NOT NULL DEFAULT '',
     status              TEXT        NOT NULL DEFAULT 'PENDING'
                         CHECK (status IN (
