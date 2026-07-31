@@ -26,13 +26,20 @@ class Auth
         if ($ldapRepo->isEnabled()) {
             $ldapUser = (new LdapService())->authenticate($email, $password);
             if ($ldapUser !== null) {
-                $user = (new UserRepository())->upsertLdapUser(
+                $resolved = (new UserRepository())->resolveLdapLogin(
                     $ldapUser['email'],
                     $ldapUser['name'],
                     $ldapUser['role']
                 );
-                self::loginSession($user);
-                return $user;
+                if (($resolved['status'] ?? '') === 'ok' && !empty($resolved['user'])) {
+                    self::loginSession($resolved['user']);
+                    return $resolved['user'];
+                }
+                if (($resolved['status'] ?? '') === 'inactive') {
+                    self::recordAttempt($ip);
+                    return null;
+                }
+                // status local: same email as a local account — try password auth below.
             }
         }
 

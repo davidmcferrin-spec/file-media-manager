@@ -304,17 +304,35 @@ if ($method === 'POST') {
         $displayName = trim($_POST['display_name'] ?? '');
         $role        = $_POST['role'] ?? 'editor';
         $password    = $_POST['password'] ?? '';
+        $authSource  = ($_POST['auth_source'] ?? 'local') === 'ldap' ? 'ldap' : 'local';
 
-        if ($email === '' || $displayName === '' || strlen($password) < 8) {
-            Session::flash('error', 'Email, name, and password (8+ chars) are required.');
+        if ($email === '' || $displayName === '') {
+            Session::flash('error', 'Email and display name are required.');
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Session::flash('error', 'Enter a valid email (must match the AD mail attribute for LDAP users).');
         } elseif (!in_array($role, ['admin', 'editor'], true)) {
             Session::flash('error', 'Invalid role.');
         } elseif ($userRepo->findByEmail($email) !== null) {
             Session::flash('error', 'A user with that email already exists.');
+        } elseif ($authSource === 'local' && strlen($password) < 8) {
+            Session::flash('error', 'Local users need a password (8+ characters).');
         } else {
-            $id = $userRepo->createLocal($email, $password, $displayName, $role);
-            settings_audit($audit, 'USER_CREATED', 'user', $id, ['email' => $email, 'role' => $role]);
-            Session::flash('success', 'User created.');
+            if ($authSource === 'ldap') {
+                $id = $userRepo->createLdap($email, $displayName, $role);
+            } else {
+                $id = $userRepo->createLocal($email, $password, $displayName, $role);
+            }
+            settings_audit($audit, 'USER_CREATED', 'user', $id, [
+                'email'       => $email,
+                'role'        => $role,
+                'auth_source' => $authSource,
+            ]);
+            Session::flash(
+                'success',
+                $authSource === 'ldap'
+                    ? 'LDAP user created. They sign in with Active Directory; role stays as set here.'
+                    : 'Local user created.'
+            );
         }
         header('Location: /settings/users');
         exit;

@@ -14,6 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.6.0] — 2026-07-31
+
+### Added
+
+- **XPMon-style LDAP users**: create a user with Auth = LDAP, pick admin/editor role; they authenticate via Active Directory (no app password)
+- Settings → Users auth-type selector (Local vs LDAP); LDAP accounts keep the admin-assigned role across logins
+
+### Changed
+
+- LDAP login no longer overwrites a pre-created user’s role from AD group mappings (groups still apply only on first auto-provision)
+- Inactive LDAP users are rejected at login; local accounts with the same email are not converted to LDAP on AD bind
+
 ## [0.5.16] — 2026-07-30
 
 ### Added

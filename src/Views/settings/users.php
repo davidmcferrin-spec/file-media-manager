@@ -12,13 +12,26 @@ use MediaManager\Support\View;
 ?>
 
 <div class="card mb-4">
-  <div class="card-header">Create Local User</div>
+  <div class="card-header">Create User</div>
   <div class="card-body">
-    <form method="post" action="/settings/users/create" class="row g-3">
+    <p class="mb-3" style="color:var(--text-soft);font-size:0.82rem;">
+      <strong>Local</strong> users store a password here.
+      <strong>LDAP</strong> users authenticate against Active Directory (enable under Settings → LDAP).
+      Use the AD <code>mail</code> address so login can match the account; pick their app role here.
+    </p>
+    <form method="post" action="/settings/users/create" class="row g-3" id="create-user-form">
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
-      <div class="col-md-4">
+      <div class="col-md-2">
+        <label class="form-label">Auth</label>
+        <select name="auth_source" id="create-auth-source" class="form-select">
+          <option value="local">Local</option>
+          <option value="ldap">LDAP</option>
+        </select>
+      </div>
+      <div class="col-md-3">
         <label class="form-label">Email</label>
-        <input type="email" name="email" class="form-control" required>
+        <input type="email" name="email" class="form-control" required
+               placeholder="user@nexstar.tv">
       </div>
       <div class="col-md-3">
         <label class="form-label">Display Name</label>
@@ -31,9 +44,9 @@ use MediaManager\Support\View;
           <option value="admin">Admin</option>
         </select>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-2" id="create-password-wrap">
         <label class="form-label">Password</label>
-        <input type="password" name="password" class="form-control" required minlength="8">
+        <input type="password" name="password" id="create-password" class="form-control" minlength="8">
       </div>
       <div class="col-12">
         <button type="submit" class="btn btn-primary btn-sm">Create User</button>
@@ -90,7 +103,11 @@ use MediaManager\Support\View;
         </div>
         <div class="modal-body">
           <p class="path-text mb-3"><?php echo View::e($editUser['email']); ?>
-            · <?php echo View::e($editUser['auth_source'] ?? 'local'); ?></p>
+            · <?php echo View::e($editUser['auth_source'] ?? 'local'); ?>
+            <?php if (($editUser['auth_source'] ?? 'local') === 'ldap'): ?>
+            <br><span style="color:var(--text-soft)">Password is managed in Active Directory. Role changes here stick on next login.</span>
+            <?php endif; ?>
+          </p>
           <div class="mb-3">
             <label class="form-label">Display Name</label>
             <input type="text" name="display_name" class="form-control" required
@@ -129,3 +146,20 @@ use MediaManager\Support\View;
   </div>
 </div>
 <?php endif; ?>
+
+<script>
+(function () {
+  var source = document.getElementById('create-auth-source');
+  var wrap = document.getElementById('create-password-wrap');
+  var password = document.getElementById('create-password');
+  if (!source || !wrap || !password) return;
+  function sync() {
+    var ldap = source.value === 'ldap';
+    wrap.style.display = ldap ? 'none' : '';
+    password.required = !ldap;
+    if (ldap) password.value = '';
+  }
+  source.addEventListener('change', sync);
+  sync();
+})();
+</script>

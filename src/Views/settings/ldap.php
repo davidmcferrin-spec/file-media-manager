@@ -15,7 +15,9 @@ use MediaManager\Support\View;
       <div class="card-header">LDAP Connection</div>
       <div class="card-body">
         <p class="mb-3" style="color:var(--text-soft);font-size:0.82rem;">
-          When enabled, users authenticate against Active Directory. Local admin accounts remain available as fallback.
+          When enabled, LDAP users authenticate against Active Directory.
+          Prefer pre-creating them under <a href="/settings/users">Users</a> with Auth = LDAP and an app role.
+          Local accounts remain available as password fallback.
         </p>
 
         <form method="post" action="/settings/ldap">
@@ -72,7 +74,9 @@ use MediaManager\Support\View;
       <div class="card-header">Group → Role Mappings</div>
       <div class="card-body">
         <p class="mb-3" style="color:var(--text-soft);font-size:0.82rem;">
-          LDAP group CN or partial match assigns app role on first login. Unmapped users get <strong>editor</strong>.
+          Used only when someone signs in via LDAP and is <strong>not</strong> already in Users.
+          Group CN or partial match sets their first-login role; unmapped users get <strong>editor</strong>.
+          Pre-created LDAP users keep the role you assigned in Users.
         </p>
 
         <?php if ($groupRoles !== []): ?>
