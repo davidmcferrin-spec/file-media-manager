@@ -107,6 +107,15 @@ final class ContinuityCheckLogRepository extends BaseRepository
         return $stmt->execute([$fileId, $originalPath]);
     }
 
+    /** Wipe all continuity lab rows. Returns how many were present before truncate. */
+    public function clearAll(): int
+    {
+        $before = (int) $this->db()->query('SELECT COUNT(*) FROM continuity_check_log')->fetchColumn();
+        $this->db()->exec('TRUNCATE TABLE continuity_check_log RESTART IDENTITY');
+
+        return $before;
+    }
+
     /**
      * @param array{outcome?: string, q?: string} $filters
      * @return list<array<string, mixed>>
@@ -235,6 +244,19 @@ final class ContinuityCheckLogRepository extends BaseRepository
         $val = $stmt->fetchColumn();
 
         return $val !== false && $val !== null ? (float) $val : null;
+    }
+
+    /** Decides logged in the last N minutes (any outcome). */
+    public function countSinceMinutes(int $minutes): int
+    {
+        $minutes = max(1, min(180, $minutes));
+        $stmt = $this->db()->prepare(
+            'SELECT COUNT(*) FROM continuity_check_log
+             WHERE created_at >= now() - make_interval(mins => ?)'
+        );
+        $stmt->execute([$minutes]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**

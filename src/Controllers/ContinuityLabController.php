@@ -6,8 +6,11 @@ namespace MediaManager\Controllers;
 
 use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
+use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\ContinuityCheckLogRepository;
+use MediaManager\Repositories\ScanJobRepository;
 use MediaManager\Services\ContinuityCheckService;
+use MediaManager\Services\ContinuityEtaEstimator;
 use MediaManager\Services\ContinuityLabExportService;
 
 Auth::requireAdmin();
@@ -68,6 +71,50 @@ if ($method === 'POST' && $uri === '/continuity-lab/test') {
     exit;
 }
 
+if ($method === 'POST' && $uri === '/continuity-lab/clear') {
+    $csrf = $_POST['_csrf'] ?? '';
+    if (!Session::validateCsrf($csrf)) {
+        Session::flash('error', 'Invalid request.');
+        header('Location: /continuity-lab');
+        exit;
+    }
+
+    $confirm = trim((string) ($_POST['confirm'] ?? ''));
+    if ($confirm !== 'CLEAR') {
+        Session::flash('error', 'Type CLEAR to confirm wiping the continuity log.');
+        header('Location: /continuity-lab');
+        exit;
+    }
+
+    try {
+        $logRepo = new ContinuityCheckLogRepository();
+        $cleared = $logRepo->clearAll();
+        $user = Auth::user();
+        (new AuditRepository())->record(
+            Auth::id(),
+            $user['email'] ?? '',
+            $_SERVER['REMOTE_ADDR'] ?? '',
+            'CONTINUITY_LOG_CLEARED',
+            'continuity_check_log',
+            null,
+            null,
+            null,
+            ['rows_cleared' => $cleared]
+        );
+        Session::flash(
+            'success',
+            $cleared === 0
+                ? 'Continuity log was already empty.'
+                : 'Cleared ' . number_format($cleared) . ' continuity log row(s).'
+        );
+    } catch (\Throwable $e) {
+        Session::flash('error', 'Could not clear continuity log: ' . $e->getMessage());
+    }
+
+    header('Location: /continuity-lab');
+    exit;
+}
+
 if ($uri !== '/continuity-lab') {
     http_response_code(404);
     exit;
@@ -87,6 +134,12 @@ $status     = $continuity->status();
 $logRepo    = new ContinuityCheckLogRepository();
 $summary    = $logRepo->summary();
 $avgMs      = $logRepo->avgDurationMs();
+$runningJob = (new ScanJobRepository())->findRunning();
+$eta        = ContinuityEtaEstimator::estimate(
+    $runningJob,
+    $avgMs,
+    $logRepo->countSinceMinutes(5)
+);
 $total      = $logRepo->count($filters);
 $entries    = $logRepo->list($filters, $perPage, $offset);
 $totalPages = max(1, (int) ceil($total / $perPage));

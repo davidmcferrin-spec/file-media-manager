@@ -10,6 +10,7 @@ use MediaManager\Support\View;
 /** @var list<array<string, mixed>> $entries */
 /** @var array{outcome?: string, q?: string} $filters */
 /** @var float|null $avgMs */
+/** @var array<string, mixed> $eta */
 /** @var int $total */
 /** @var int $page */
 /** @var int $totalPages */
@@ -42,6 +43,10 @@ $queryBase = array_filter([
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
       <button type="submit" class="btn btn-outline-info btn-sm">Test engine</button>
     </form>
+    <button type="button" class="btn btn-outline-danger btn-sm"
+            data-bs-toggle="modal" data-bs-target="#clear-continuity-log-modal">
+      Clear log
+    </button>
     <?php if ($live): ?>
     <a href="/continuity-lab?<?php echo View::e(http_build_query(array_diff_key($queryBase, ['live' => 1]))); ?>"
        class="btn btn-outline-secondary btn-sm">Pause live</a>
@@ -120,8 +125,63 @@ $queryBase = array_filter([
   </div>
   <div class="col-md-8">
     <div class="card h-100">
-      <div class="card-header">Progress</div>
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span>Progress</span>
+        <span class="path-text" style="font-size:0.75rem;font-weight:400">
+          Parallel ×<?php echo (int) ($eta['parallel'] ?? 1); ?>
+          <?php if (!empty($eta['active']) && ($eta['method'] ?? '') === 'observed'): ?>
+          · rate from last 5 min
+          <?php elseif (!empty($eta['active']) && ($eta['method'] ?? '') === 'modeled'): ?>
+          · modeled (avg ÷ parallel)
+          <?php endif; ?>
+        </span>
+      </div>
       <div class="card-body">
+        <?php if (!empty($eta['active'])): ?>
+        <div class="mb-3 pb-3" style="border-bottom:1px solid var(--border-color)">
+          <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-1">
+            <div>
+              <span class="h4 mb-0"><?php echo View::e((string) ($eta['eta_label'] ?? '—')); ?></span>
+              <span class="path-text ms-2" style="font-size:0.78rem">ETA to scan completion</span>
+            </div>
+            <div class="path-text" style="font-size:0.78rem">
+              <?php if (!empty($eta['job_id'])): ?>
+              <a href="/scan/<?php echo (int) $eta['job_id']; ?>">Scan #<?php echo (int) $eta['job_id']; ?></a>
+              <?php endif; ?>
+              <?php if (($eta['source_name'] ?? '') !== ''): ?>
+              · <?php echo View::e((string) $eta['source_name']); ?>
+              <?php endif; ?>
+            </div>
+          </div>
+          <div class="progress mb-1" style="height:8px" role="progressbar"
+               aria-valuenow="<?php echo (int) round((float) ($eta['pct'] ?? 0)); ?>"
+               aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar" style="width:<?php echo View::e((string) ($eta['pct'] ?? 0)); ?>%"></div>
+          </div>
+          <div class="path-text" style="font-size:0.78rem">
+            <?php echo number_format((int) ($eta['processed'] ?? 0)); ?>
+            /
+            <?php echo number_format((int) ($eta['total'] ?? 0)); ?>
+            files
+            <?php if ((int) ($eta['remaining'] ?? 0) > 0): ?>
+            · <?php echo number_format((int) $eta['remaining']); ?> left
+            <?php endif; ?>
+            <?php if (!empty($eta['rate_per_sec'])): ?>
+            · ~<?php echo View::e(number_format((float) $eta['rate_per_sec'], 2)); ?>/s
+            <?php endif; ?>
+          </div>
+        </div>
+        <?php else: ?>
+        <div class="path-text mb-3 pb-3" style="font-size:0.8rem;border-bottom:1px solid var(--border-color)">
+          No active scan — ETA appears when a Scan / Rescan is <code>RUNNING</code>.
+          Parallelism: ×<?php echo (int) ($eta['parallel'] ?? 1); ?>
+          (<code>CONTINUITY_CHECK_CONCURRENCY</code><?php
+          $engineP = (int) env('OLLAMA_NUM_PARALLEL', 0);
+          if ($engineP > 0): ?>
+          ∩ <code>OLLAMA_NUM_PARALLEL</code>=<?php echo $engineP; ?>
+          <?php endif; ?>)
+        </div>
+        <?php endif; ?>
         <div class="row g-2 text-center" style="font-size:0.82rem">
           <div class="col">
             <div class="h5 mb-0"><?php echo (int) ($summary['last_hour'] ?? 0); ?></div>
@@ -446,6 +506,32 @@ $queryBase = array_filter([
   </ul>
 </nav>
 <?php endif; ?>
+
+<div class="modal fade" id="clear-continuity-log-modal" tabindex="-1" aria-labelledby="clear-continuity-log-label" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="post" action="/continuity-lab/clear" class="modal-content">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="clear-continuity-log-label">Clear continuity log</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="font-size:0.85rem">
+        <p class="mb-2">
+          Permanently deletes all Continuity Lab rows
+          (<?php echo number_format((int) ($summary['total'] ?? 0)); ?> currently).
+          Catalog files and scan jobs are not affected.
+        </p>
+        <label class="form-label" for="clear-confirm">Type <code>CLEAR</code> to confirm</label>
+        <input type="text" name="confirm" id="clear-confirm" class="form-control form-control-sm"
+               autocomplete="off" required>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-danger btn-sm">Clear log</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <?php if ($live): ?>
 <script>

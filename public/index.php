@@ -137,6 +137,7 @@ match (true) {
     // Continuity lab (admin only, unlinked)
     $uri === '/continuity-lab'
     || $uri === '/continuity-lab/test'
+    || $uri === '/continuity-lab/clear'
     || $uri === '/continuity-lab/export'
         => require dirname(__DIR__) . '/src/Controllers/ContinuityLabController.php',
 

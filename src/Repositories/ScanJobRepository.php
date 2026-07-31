@@ -255,6 +255,21 @@ final class ScanJobRepository extends BaseRepository
         return is_array($row) ? $row : null;
     }
 
+    /** Active scan worker (if any), with source name for Lab ETA. */
+    public function findRunning(): ?array
+    {
+        $row = $this->db()->query(
+            "SELECT sj.*, s.name AS source_name
+             FROM scan_jobs sj
+             LEFT JOIN sources s ON s.id = sj.source_id
+             WHERE sj.status = 'RUNNING'
+             ORDER BY sj.started_at DESC NULLS LAST, sj.id DESC
+             LIMIT 1"
+        )->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
     /**
      * Request stop for a pending or running job. Pending jobs are cancelled immediately.
      */
