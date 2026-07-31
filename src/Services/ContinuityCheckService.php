@@ -75,26 +75,35 @@ final class ContinuityCheckService
         }
 
         $started = microtime(true);
-        $verdict = $this->askEngine($result, $originalPath, $originalFilename);
+        $asked = $this->askEngine($result, $originalPath, $originalFilename);
         $durationMs = (int) round((microtime(true) - $started) * 1000);
+        $verdict = $asked['verdict'];
 
         if ($verdict === null) {
+            $detail = trim((string) ($asked['transport_error'] ?? ''));
+            if ($detail === '') {
+                $detail = 'No usable response from continuity engine';
+            }
             $this->safeLog([
-                'original_path'          => $originalPath,
-                'original_filename'      => $originalFilename,
-                'rule_show_id'           => $result->showId,
-                'rule_show_abbr'         => $result->showAbbreviation,
-                'rule_confidence'        => $result->confidence,
-                'rule_proposed_filename' => $result->proposedFilename,
-                'rule_signals'           => $result->signals,
-                'final_confidence'       => $result->confidence,
-                'final_show_id'          => $result->showId,
-                'final_show_abbr'        => $result->showAbbreviation,
-                'final_proposed_filename'=> $result->proposedFilename,
-                'signal'                 => 'continuity:error',
-                'outcome'                => 'error',
-                'duration_ms'            => $durationMs,
-                'engine_reason'          => 'No usable response from continuity engine',
+                'original_path'           => $originalPath,
+                'original_filename'       => $originalFilename,
+                'rule_show_id'            => $result->showId,
+                'rule_show_abbr'          => $result->showAbbreviation,
+                'rule_confidence'         => $result->confidence,
+                'rule_proposed_filename'  => $result->proposedFilename,
+                'rule_signals'            => $result->signals,
+                'final_confidence'        => $result->confidence,
+                'final_show_id'           => $result->showId,
+                'final_show_abbr'         => $result->showAbbreviation,
+                'final_proposed_filename' => $result->proposedFilename,
+                'signal'                  => 'continuity:error',
+                'outcome'                 => 'error',
+                'duration_ms'             => $durationMs,
+                'engine_reason'           => $detail,
+                'seed_packet'             => $asked['seed_packet'],
+                'engine_raw'              => $asked['raw_content'],
+                'http_status'             => $asked['http_status'],
+                'transport_error'         => $asked['transport_error'],
             ]);
 
             return $result;
@@ -129,6 +138,10 @@ final class ContinuityCheckService
             'signal'                  => $merged['signal'],
             'outcome'                 => $outcome,
             'duration_ms'             => $durationMs,
+            'seed_packet'             => $asked['seed_packet'],
+            'engine_raw'              => $asked['raw_content'],
+            'http_status'             => $asked['http_status'],
+            'transport_error'         => $asked['transport_error'],
         ]);
 
         return $adjusted;
@@ -143,7 +156,8 @@ final class ContinuityCheckService
      *   latency_ms: ?int,
      *   base_url: string,
      *   pack: string,
-     *   timeout_seconds: int
+     *   timeout_seconds: int,
+     *   packs: list<string>
      * }
      */
     public function status(): array
@@ -157,7 +171,25 @@ final class ContinuityCheckService
             'base_url'         => $this->client->baseUrl(),
             'pack'             => $this->client->model(),
             'timeout_seconds'  => $this->client->timeoutSeconds(),
+            'packs'            => $probe['packs'],
         ];
+    }
+
+    /**
+     * @return array{
+     *   ok: bool,
+     *   duration_ms: int,
+     *   verdict: ?array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string,
+     *   pack_loaded: bool,
+     *   packs: list<string>
+     * }
+     */
+    public function selfTest(): array
+    {
+        return $this->client->selfTest();
     }
 
     /** @param array<string, mixed> $row */
@@ -242,13 +274,19 @@ final class ContinuityCheckService
     }
 
     /**
-     * @return array<string, mixed>|null
+     * @return array{
+     *   verdict: ?array<string, mixed>,
+     *   seed_packet: array<string, mixed>,
+     *   raw_content: string,
+     *   http_status: ?int,
+     *   transport_error: string
+     * }
      */
     private function askEngine(
         ClassifierResult $result,
         string $originalPath,
         string $originalFilename
-    ): ?array {
+    ): array {
         $shows = $this->catalog();
         $timeline = $this->timelineFor($result->fileDate, $result->fileTime);
         $examples = $this->approvedExemplars();
@@ -265,7 +303,7 @@ Rules:
 {"agree":true|false,"confidence":"HIGH"|"MEDIUM"|"LOW","show_id":null|number,"reason":"short"}
 PROMPT;
 
-        $user = json_encode([
+        $seedPacket = [
             'original_path'     => $originalPath,
             'original_filename' => $originalFilename,
             'proposal'          => [
@@ -282,15 +320,49 @@ PROMPT;
             'shows'     => $shows,
             'timeline'  => $timeline,
             'examples'  => $examples,
-        ], JSON_THROW_ON_ERROR);
+            'system'    => $system,
+        ];
 
-        $decoded = $this->client->completeJson($system, $user);
-        if ($decoded === null) {
+        // Leaner payload for the engine (full seed_packet still logged for Lab).
+        $userPayload = [
+            'original_path'     => $originalPath,
+            'original_filename' => $originalFilename,
+            'proposal'          => $seedPacket['proposal'],
+            'shows'             => array_map(static function (array $s): array {
+                return [
+                    'id'             => $s['id'],
+                    'abbreviation'   => $s['abbreviation'],
+                    'canonical_name' => $s['canonical_name'],
+                    'aliases'        => array_slice($s['aliases'] ?? [], 0, 8),
+                ];
+            }, $shows),
+            'timeline' => $timeline,
+            'examples' => array_map(static function (array $ex): array {
+                return [
+                    'original_filename'  => $ex['original_filename'] ?? '',
+                    'proposed_filename'  => $ex['proposed_filename'] ?? '',
+                    'show_abbr'          => $ex['show_abbr'] ?? '',
+                    'file_date'          => $ex['file_date'] ?? null,
+                    'file_time'          => $ex['file_time'] ?? null,
+                ];
+            }, $examples),
+        ];
+
+        $user = json_encode($userPayload, JSON_THROW_ON_ERROR);
+        $response = $this->client->completeJson($system, $user);
+        // Only mark engine offline on transport failures (timeout / HTTP), not parse issues.
+        if ($response['verdict'] === null && !empty($response['transport_failed'])) {
             $this->reachable = false;
             $this->reachableCheckedAt = microtime(true);
         }
 
-        return $decoded;
+        return [
+            'verdict'         => $response['verdict'],
+            'seed_packet'     => $seedPacket,
+            'raw_content'     => $response['raw_content'],
+            'http_status'     => $response['http_status'],
+            'transport_error' => $response['transport_error'],
+        ];
     }
 
     /**

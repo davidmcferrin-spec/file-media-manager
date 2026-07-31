@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use MediaManager\Auth\Session;
 use MediaManager\Support\View;
 
 /** @var array<string, mixed> $status */
@@ -30,7 +31,11 @@ $queryBase = array_filter([
       Not linked in the main nav.
     </p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 flex-wrap">
+    <form method="post" action="/continuity-lab/test" class="d-inline">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <button type="submit" class="btn btn-outline-info btn-sm">Test engine</button>
+    </form>
     <?php if ($live): ?>
     <a href="/continuity-lab?<?php echo View::e(http_build_query(array_diff_key($queryBase, ['live' => 1]))); ?>"
        class="btn btn-outline-secondary btn-sm">Pause live</a>
@@ -67,6 +72,40 @@ $queryBase = array_filter([
           <?php endif; ?>
           · timeout <?php echo (int) ($status['timeout_seconds'] ?? 0); ?>s
         </div>
+        <?php
+        $packs = $status['packs'] ?? [];
+        if (!is_array($packs)) {
+            $packs = [];
+        }
+        $configured = (string) ($status['pack'] ?? '');
+        $packOk = $packs === [] ? null : (
+            in_array($configured, $packs, true)
+            || (bool) array_filter($packs, static fn ($p) => is_string($p) && (
+                str_starts_with(strtolower($p), strtolower($configured))
+                || str_starts_with(strtolower($configured), strtolower($p))
+            ))
+        );
+        ?>
+        <div class="path-text mt-2">
+          Loaded packs:
+          <?php if ($packs === []): ?>
+          <em>none</em>
+          <?php else: ?>
+          <code><?php echo View::e(implode(', ', array_map('strval', $packs))); ?></code>
+          <?php endif; ?>
+        </div>
+        <?php if ($packOk === false): ?>
+        <div class="text-warning mt-2" style="font-size:0.78rem">
+          Configured pack is not loaded. On the host run:
+          <code>ollama pull <?php echo View::e($configured); ?></code>
+        </div>
+        <?php endif; ?>
+        <?php if ((int) ($status['timeout_seconds'] ?? 0) < 30): ?>
+        <div class="text-warning mt-2" style="font-size:0.78rem">
+          Timeout is under 30s — cold starts often fail. Set
+          <code>CONTINUITY_CHECK_TIMEOUT_SECONDS=60</code> in <code>.env</code>.
+        </div>
+        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -154,18 +193,20 @@ $queryBase = array_filter([
           <th>Reason / signals</th>
           <th>File</th>
           <th>ms</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
         <?php if ($entries === []): ?>
         <tr>
-          <td colspan="7" class="text-center py-4 path-text">
+          <td colspan="8" class="text-center py-4 path-text">
             No continuity decisions logged yet. Run a Scan or Reclassify with continuity enabled.
           </td>
         </tr>
         <?php else: ?>
         <?php foreach ($entries as $row): ?>
         <?php
+        $rowId = (int) ($row['id'] ?? 0);
         $outcome = (string) ($row['outcome'] ?? '');
         $badge = match ($outcome) {
             'confirmed' => 'bg-success',
@@ -186,6 +227,24 @@ $queryBase = array_filter([
         if (!is_array($signals)) {
             $signals = [];
         }
+        $seedRaw = $row['seed_packet'] ?? null;
+        if (is_string($seedRaw) && $seedRaw !== '') {
+            $seed = json_decode($seedRaw, true);
+        } elseif (is_array($seedRaw)) {
+            $seed = $seedRaw;
+        } else {
+            $seed = null;
+        }
+        $seedPretty = '';
+        if (is_array($seed)) {
+            $seedPretty = (string) json_encode($seed, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        }
+        $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
+        $transportErr = trim((string) ($row['transport_error'] ?? ''));
+        $hasArtifacts = $seedPretty !== '' || $engineRaw !== '' || $transportErr !== '';
+        $timelineCount = is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0;
+        $exampleCount = is_array($seed['examples'] ?? null) ? count($seed['examples']) : 0;
+        $showCount = is_array($seed['shows'] ?? null) ? count($seed['shows']) : 0;
         ?>
         <tr>
           <td class="path-text text-nowrap">
@@ -239,7 +298,60 @@ $queryBase = array_filter([
             <?php endif; ?>
           </td>
           <td class="path-text"><?php echo (int) ($row['duration_ms'] ?? 0); ?></td>
+          <td>
+            <?php if ($hasArtifacts): ?>
+            <button type="button" class="btn btn-outline-secondary btn-xs"
+                    data-bs-toggle="collapse" data-bs-target="#art-<?php echo $rowId; ?>"
+                    aria-expanded="false">
+              Artifacts
+            </button>
+            <?php else: ?>
+            <span class="path-text">—</span>
+            <?php endif; ?>
+          </td>
         </tr>
+        <?php if ($hasArtifacts): ?>
+        <tr class="collapse-row">
+          <td colspan="8" class="p-0 border-0">
+            <div class="collapse" id="art-<?php echo $rowId; ?>">
+              <div class="p-3" style="background:var(--hover-bg);border-top:1px solid var(--bs-border-color)">
+                <div class="d-flex flex-wrap gap-3 mb-2 path-text" style="font-size:0.75rem">
+                  <span>Shows seeded: <strong><?php echo (int) $showCount; ?></strong></span>
+                  <span>Timeline rows: <strong><?php echo (int) $timelineCount; ?></strong></span>
+                  <span>Approved examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
+                  <?php if ($row['http_status'] !== null): ?>
+                  <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
+                  <?php endif; ?>
+                </div>
+                <?php if ($transportErr !== ''): ?>
+                <div class="mb-2">
+                  <div class="form-label mb-1">Transport</div>
+                  <pre class="mb-0 p-2 rounded" style="font-size:0.72rem;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($transportErr); ?></pre>
+                </div>
+                <?php endif; ?>
+                <div class="row g-3">
+                  <div class="col-lg-7">
+                    <div class="form-label mb-1">Seed packet (what continuity saw)</div>
+                    <?php if ($seedPretty !== ''): ?>
+                    <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:360px;overflow:auto;white-space:pre;background:rgba(0,0,0,0.25)"><?php echo View::e($seedPretty); ?></pre>
+                    <?php else: ?>
+                    <div class="path-text">No seed packet stored for this row (logged before artifacts).</div>
+                    <?php endif; ?>
+                  </div>
+                  <div class="col-lg-5">
+                    <div class="form-label mb-1">Engine reply (raw)</div>
+                    <?php if ($engineRaw !== ''): ?>
+                    <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:360px;overflow:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($engineRaw); ?></pre>
+                    <?php else: ?>
+                    <div class="path-text">No raw reply captured.</div>
+                    <?php endif; ?>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        <?php endif; ?>
         <?php endforeach; ?>
         <?php endif; ?>
       </tbody>

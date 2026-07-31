@@ -14,18 +14,26 @@ final class ContinuityCheckLogRepository extends BaseRepository
             $signals = [];
         }
 
+        $seed = $row['seed_packet'] ?? null;
+        $seedJson = null;
+        if (is_array($seed)) {
+            $seedJson = json_encode($seed, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+        }
+
         $stmt = $this->db()->prepare(
             'INSERT INTO continuity_check_log (
                 original_path, original_filename,
                 rule_show_id, rule_show_abbr, rule_confidence, rule_proposed_filename, rule_signals,
                 engine_agree, engine_confidence, engine_show_id, engine_reason,
                 final_confidence, final_show_id, final_show_abbr, final_proposed_filename,
-                signal, outcome, duration_ms
+                signal, outcome, duration_ms,
+                seed_packet, engine_raw, http_status, transport_error
              ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?::jsonb,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?
+                ?, ?, ?,
+                ?::jsonb, ?, ?, ?
              ) RETURNING id'
         );
         $stmt->execute([
@@ -49,6 +57,10 @@ final class ContinuityCheckLogRepository extends BaseRepository
             (string) ($row['signal'] ?? ''),
             (string) ($row['outcome'] ?? 'error'),
             (int) ($row['duration_ms'] ?? 0),
+            $seedJson,
+            mb_substr((string) ($row['engine_raw'] ?? ''), 0, 8000),
+            $row['http_status'] ?? null,
+            mb_substr((string) ($row['transport_error'] ?? ''), 0, 1000),
         ]);
 
         return (int) $stmt->fetchColumn();

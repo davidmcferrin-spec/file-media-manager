@@ -295,7 +295,7 @@ ensure_env_key() {
 ensure_env_key "CONTINUITY_CHECK_ENABLED" "true"
 ensure_env_key "CONTINUITY_CHECK_URL" "http://127.0.0.1:11434"
 ensure_env_key "CONTINUITY_CHECK_MODEL" "${CONTINUITY_MODEL}"
-ensure_env_key "CONTINUITY_CHECK_TIMEOUT_SECONDS" "8"
+ensure_env_key "CONTINUITY_CHECK_TIMEOUT_SECONDS" "60"
 
 sudo -u www-data php8.4 -r "
     require '${WEB_ROOT}/src/bootstrap.php';

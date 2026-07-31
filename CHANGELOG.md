@@ -14,6 +14,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.3] — 2026-07-30
+
+### Fixed
+
+- Continuity engine “No usable response” hardening: default timeout 60s, clearer transport errors, tolerate structured/fenced JSON replies, leaner engine payload
+- Continuity Lab **Test engine** button + loaded pack list / mismatch warning
+
+## [0.5.2] — 2026-07-30
+
+### Added
+
+- Continuity Lab expandable **Artifacts** per decision: seed packet (shows / timeline / approved examples / proposal), raw engine reply, HTTP/transport detail
+
 ## [0.5.1] — 2026-07-30
 
 ### Added
