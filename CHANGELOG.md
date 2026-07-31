@@ -14,6 +14,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.1] — 2026-07-30
+
+### Added
+
+- Private Continuity Lab at `/continuity-lab` (admin only, not in nav) — engine status, decision log, reasons, confidence before/after, live refresh
+
 ## [0.5.0] — 2026-07-30
 
 ### Added

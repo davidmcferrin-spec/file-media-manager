@@ -22,6 +22,7 @@ final class DatabaseWipeService
         'conversion_rules',
         'scan_ignore_paths',
         'shows',
+        'continuity_check_log',
         'audit_log',
         'auth_attempts',
     ];

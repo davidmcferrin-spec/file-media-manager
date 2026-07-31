@@ -25,12 +25,34 @@ final class ContinuityCheckClient
         );
     }
 
+    public function baseUrl(): string
+    {
+        return $this->baseUrl;
+    }
+
+    public function model(): string
+    {
+        return $this->model;
+    }
+
+    public function timeoutSeconds(): int
+    {
+        return $this->timeoutSeconds;
+    }
+
     public function isReachable(): bool
+    {
+        return $this->probe()['reachable'];
+    }
+
+    /** @return array{reachable: bool, latency_ms: ?int} */
+    public function probe(): array
     {
         $ch = curl_init($this->baseUrl . '/api/tags');
         if ($ch === false) {
-            return false;
+            return ['reachable' => false, 'latency_ms' => null];
         }
+        $started = microtime(true);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 2,
@@ -40,8 +62,12 @@ final class ContinuityCheckClient
         $body = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+        $ok = $body !== false && $code >= 200 && $code < 300;
 
-        return $body !== false && $code >= 200 && $code < 300;
+        return [
+            'reachable'  => $ok,
+            'latency_ms' => $ok ? (int) round((microtime(true) - $started) * 1000) : null,
+        ];
     }
 
     /**

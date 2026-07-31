@@ -128,6 +128,10 @@ match (true) {
     $uri === '/audit'
         => require dirname(__DIR__) . '/src/Controllers/AuditController.php',
 
+    // Continuity lab (admin only, unlinked)
+    $uri === '/continuity-lab'
+        => require dirname(__DIR__) . '/src/Controllers/ContinuityLabController.php',
+
     // App versions / changelog (all logged-in users)
     $uri === '/versions'
         => require dirname(__DIR__) . '/src/Controllers/VersionsController.php',

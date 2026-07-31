@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MediaManager\Services;
 
+use MediaManager\Repositories\ContinuityCheckLogRepository;
 use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\MediaTypeRepository;
 use MediaManager\Repositories\ProgramScheduleRepository;
@@ -35,6 +36,7 @@ final class ContinuityCheckService
         private readonly ProgramScheduleRepository $schedule = new ProgramScheduleRepository(),
         private readonly FileRepository $files = new FileRepository(),
         private readonly SystemRepository $system = new SystemRepository(),
+        private readonly ContinuityCheckLogRepository $log = new ContinuityCheckLogRepository(),
     ) {
         $this->client = $client ?? ContinuityCheckClient::fromEnv();
     }
@@ -72,12 +74,100 @@ final class ContinuityCheckService
             return $result;
         }
 
+        $started = microtime(true);
         $verdict = $this->askEngine($result, $originalPath, $originalFilename);
+        $durationMs = (int) round((microtime(true) - $started) * 1000);
+
         if ($verdict === null) {
+            $this->safeLog([
+                'original_path'          => $originalPath,
+                'original_filename'      => $originalFilename,
+                'rule_show_id'           => $result->showId,
+                'rule_show_abbr'         => $result->showAbbreviation,
+                'rule_confidence'        => $result->confidence,
+                'rule_proposed_filename' => $result->proposedFilename,
+                'rule_signals'           => $result->signals,
+                'final_confidence'       => $result->confidence,
+                'final_show_id'          => $result->showId,
+                'final_show_abbr'        => $result->showAbbreviation,
+                'final_proposed_filename'=> $result->proposedFilename,
+                'signal'                 => 'continuity:error',
+                'outcome'                => 'error',
+                'duration_ms'            => $durationMs,
+                'engine_reason'          => 'No usable response from continuity engine',
+            ]);
+
             return $result;
         }
 
-        return $this->applyVerdict($result, $verdict, $originalFilename);
+        $adjusted = $this->applyVerdict($result, $verdict, $originalFilename);
+        $merged = self::mergeVerdict($result->confidence, $verdict);
+        $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $outcome = match ($merged['signal']) {
+            'continuity:confirmed' => 'confirmed',
+            'continuity:conflict'  => 'conflict',
+            default                => 'review',
+        };
+
+        $this->safeLog([
+            'original_path'           => $originalPath,
+            'original_filename'       => $originalFilename,
+            'rule_show_id'            => $result->showId,
+            'rule_show_abbr'          => $result->showAbbreviation,
+            'rule_confidence'         => $result->confidence,
+            'rule_proposed_filename'  => $result->proposedFilename,
+            'rule_signals'            => $result->signals,
+            'engine_agree'            => $agree,
+            'engine_confidence'       => isset($verdict['confidence']) ? strtoupper((string) $verdict['confidence']) : null,
+            'engine_show_id'          => isset($verdict['show_id']) && is_numeric($verdict['show_id'])
+                ? (int) $verdict['show_id'] : null,
+            'engine_reason'           => trim((string) ($verdict['reason'] ?? '')),
+            'final_confidence'        => $adjusted->confidence,
+            'final_show_id'           => $adjusted->showId,
+            'final_show_abbr'         => $adjusted->showAbbreviation,
+            'final_proposed_filename' => $adjusted->proposedFilename,
+            'signal'                  => $merged['signal'],
+            'outcome'                 => $outcome,
+            'duration_ms'             => $durationMs,
+        ]);
+
+        return $adjusted;
+    }
+
+    /**
+     * Status snapshot for the private continuity lab page.
+     *
+     * @return array{
+     *   enabled: bool,
+     *   reachable: bool,
+     *   latency_ms: ?int,
+     *   base_url: string,
+     *   pack: string,
+     *   timeout_seconds: int
+     * }
+     */
+    public function status(): array
+    {
+        $probe = $this->client->probe();
+
+        return [
+            'enabled'          => $this->isEnabled(),
+            'reachable'        => $probe['reachable'],
+            'latency_ms'       => $probe['latency_ms'],
+            'base_url'         => $this->client->baseUrl(),
+            'pack'             => $this->client->model(),
+            'timeout_seconds'  => $this->client->timeoutSeconds(),
+        ];
+    }
+
+    /** @param array<string, mixed> $row */
+    private function safeLog(array $row): void
+    {
+        try {
+            $this->log->insert($row);
+        } catch (\Throwable $e) {
+            error_log('[continuity] log write failed: ' . $e->getMessage());
+        }
     }
 
     /**
