@@ -193,7 +193,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
 <?php endif; ?>
 
 <div class="card">
-  <div class="card-header">Sample Results (first 50)</div>
+  <div class="card-header">Sample Results (latest 50)</div>
   <div class="table-responsive">
     <table class="table table-hover mb-0">
       <thead>

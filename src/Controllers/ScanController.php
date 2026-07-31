@@ -499,7 +499,7 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
         exit;
     }
 
-    $jobFiles      = $files->byScanJob($jobId, 50);
+    $jobFiles      = $files->byScanJob($jobId, 50, 0, true);
     $totalQueued   = $files->countByScanJob($jobId);
     $confidence    = $files->confidenceSummary($jobId);
     $protectedCount = $files->countProtectedByScanJob($jobId);

@@ -14,11 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.15] — 2026-07-30
+
+### Changed
+
+- Scan job detail sample list shows the **latest** 50 queued files (newest first) instead of the first 50
+
 ## [0.5.14] — 2026-07-30
 
 ### Added
 
 - Continuity Lab **ETA** while a scan is running — uses observed decide rate when available, else avg decide ÷ parallel slots (`CONTINUITY_CHECK_CONCURRENCY` ∩ optional `OLLAMA_NUM_PARALLEL`)
+
 
 ## [0.5.13] — 2026-07-30
 

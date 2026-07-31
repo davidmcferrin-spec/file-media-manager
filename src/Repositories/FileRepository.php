@@ -751,18 +751,21 @@ final class FileRepository extends BaseRepository
         return is_array($rows) ? $rows : [];
     }
 
-    /** @return list<array<string, mixed>> */
-    public function byScanJob(int $scanJobId, int $limit = 100, int $offset = 0): array
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function byScanJob(int $scanJobId, int $limit = 100, int $offset = 0, bool $newestFirst = false): array
     {
+        $order = $newestFirst ? 'DESC' : 'ASC';
         $stmt = $this->db()->prepare(
-            'SELECT f.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name,
+            "SELECT f.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name,
                     mt.name AS media_type_name, mt.abbreviation AS media_type_abbr
              FROM files f
              LEFT JOIN shows sh ON sh.id = f.show_id
              LEFT JOIN media_types mt ON mt.id = f.media_type_id
              WHERE f.scan_job_id = ?
-             ORDER BY f.id ASC
-             LIMIT ? OFFSET ?'
+             ORDER BY f.id {$order}
+             LIMIT ? OFFSET ?"
         );
         $stmt->bindValue(1, $scanJobId, \PDO::PARAM_INT);
         $stmt->bindValue(2, $limit, \PDO::PARAM_INT);
