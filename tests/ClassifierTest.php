@@ -57,4 +57,14 @@ assert_eq('Program', $r->mediaTypeAbbreviation, 'pgm maps to program');
 assert_eq('20251201', $r->fileDate, 'pgm date from iso');
 assert_eq('CUOMO/2025/12/Program', $r->proposedDir, 'pgm proposed dir');
 
+// Date/time in the filename without show/type identity → UNEVALUATED, not LOW.
+$r = $classifier->classify(
+    $mount . '/misc_unmatched/clip_20221004_1850.ts',
+    $mount
+);
+assert_eq(null, $r->showId, 'unmatched show id');
+assert_eq(null, $r->mediaTypeId, 'unmatched media type id');
+assert_eq('20221004', $r->fileDate, 'unmatched still parses date');
+assert_eq('UNEVALUATED', $r->confidence, 'date-only defaults to unevaluated');
+
 echo "\nAll Classifier tests passed.\n";

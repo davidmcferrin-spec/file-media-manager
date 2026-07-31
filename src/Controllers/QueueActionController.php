@@ -11,6 +11,7 @@ use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\MediaTypeRepository;
 use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SplitQueueRepository;
+use MediaManager\Services\GlueGroupService;
 use MediaManager\Services\ProposalPathBuilder;
 use PDOException;
 
@@ -63,7 +64,9 @@ function parse_ids(): array
 function redirect_queue(): void
 {
     $return = $_POST['return'] ?? '/queue';
-    if (!is_string($return) || !str_starts_with($return, '/queue')) {
+    if (!is_string($return)
+        || (!str_starts_with($return, '/queue') && !str_starts_with($return, '/glue'))
+    ) {
         $return = '/queue';
     }
     header('Location: ' . $return);
@@ -592,6 +595,40 @@ if ($uri === '/queue/add-split') {
     }
 
     Session::flash('success', $count . ' file(s) added to split queue.');
+    redirect_queue();
+}
+
+// ── Mark selected files as a glue group ───────────────────────
+if ($uri === '/queue/mark-glue') {
+    $ids = parse_ids();
+    $result = (new GlueGroupService($files))->markManualGroup($ids);
+    if (!$result['ok']) {
+        Session::flash('error', $result['message']);
+        redirect_queue();
+    }
+
+    $audit->record($userId, $user['email'] ?? '', $ip, 'FILE_GLUE_MARKED', 'file', $ids[0] ?? 0, null, null, [
+        'file_ids' => $ids,
+        'count'    => $result['count'],
+    ]);
+    Session::flash('success', $result['message']);
+    redirect_queue();
+}
+
+// ── Clear glue flag(s) ────────────────────────────────────────
+if ($uri === '/queue/clear-glue') {
+    $ids = parse_ids();
+    $count = (new GlueGroupService($files))->clearGlue($ids);
+    if ($count === 0) {
+        Session::flash('error', 'No eligible glue flags to clear.');
+        redirect_queue();
+    }
+
+    $audit->record($userId, $user['email'] ?? '', $ip, 'FILE_GLUE_CLEARED', 'file', $ids[0] ?? 0, null, null, [
+        'file_ids' => $ids,
+        'count'    => $count,
+    ]);
+    Session::flash('success', $count . ' file(s) cleared from glue.');
     redirect_queue();
 }
 

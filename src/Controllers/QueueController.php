@@ -26,8 +26,10 @@ $filters = [
     'scan_job_id' => isset($_GET['scan_job_id']) ? (int) $_GET['scan_job_id'] : 0,
     'show_id'     => isset($_GET['show_id']) ? (int) $_GET['show_id'] : 0,
     'file_id'     => isset($_GET['file_id']) ? (int) $_GET['file_id'] : 0,
-    'needs_split' => isset($_GET['needs_split']),
-    'search'      => trim($_GET['q'] ?? ''),
+    'needs_split'    => isset($_GET['needs_split']),
+    'needs_glue'     => isset($_GET['needs_glue']),
+    'glue_group_key' => trim((string) ($_GET['glue_group'] ?? '')),
+    'search'         => trim($_GET['q'] ?? ''),
 ];
 
 if ($filters['scan_job_id'] <= 0) {
@@ -48,6 +50,14 @@ if ($filters['confidence'] === '') {
 }
 if ($filters['search'] === '') {
     unset($filters['search']);
+}
+if ($filters['glue_group_key'] === '') {
+    unset($filters['glue_group_key']);
+} else {
+    // Group deep-link — show members regardless of status tab.
+    $filters['status'] = 'ALL';
+    $statusParam = 'ALL';
+    $filters['needs_glue'] = true;
 }
 // Show Audit deep-links use status=ALL to find a file regardless of queue state.
 $statusFilter = strtoupper((string) $filters['status']) === 'ALL'

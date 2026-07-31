@@ -112,6 +112,8 @@ final class ReclassifyService
             $stats['reclassified']++;
         }
 
+        (new GlueGroupService($this->files))->applyForScanJob($scanJobId);
+
         return $stats;
     }
 }

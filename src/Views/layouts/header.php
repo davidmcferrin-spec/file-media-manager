@@ -526,6 +526,9 @@ code, .path-text kbd {
           <a class="nav-link<?php echo navActive('/queue', $currentPath); ?>" href="/queue">Catalog</a>
         </li>
         <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/glue', $currentPath); ?>" href="/glue">Glue</a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link<?php echo navActive('/show-audit', $currentPath); ?>" href="/show-audit">Gaps</a>
         </li>
         <?php if (Auth::isAdmin()): ?>

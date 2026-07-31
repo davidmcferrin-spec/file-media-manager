@@ -23,6 +23,8 @@ $returnQuery = http_build_query(array_filter([
     'scan_job_id' => $filters['scan_job_id'] ?? '',
     'show_id'     => $filters['show_id'] ?? '',
     'needs_split' => !empty($filters['needs_split']) ? '1' : '',
+    'needs_glue'  => !empty($filters['needs_glue']) ? '1' : '',
+    'glue_group'  => $filters['glue_group_key'] ?? '',
     'q'           => $filters['search'] ?? '',
     'per_page'    => $perPage !== 50 ? (string) $perPage : '',
     'page'        => $page > 1 ? (string) $page : '',
@@ -34,6 +36,8 @@ $paginationQuery = [
     'scan_job_id' => $filters['scan_job_id'] ?? '',
     'show_id'     => $filters['show_id'] ?? '',
     'needs_split' => !empty($filters['needs_split']) ? '1' : '',
+    'needs_glue'  => !empty($filters['needs_glue']) ? '1' : '',
+    'glue_group'  => $filters['glue_group_key'] ?? '',
     'q'           => $filters['search'] ?? '',
     'per_page'    => $perPage !== 50 ? (string) $perPage : '',
 ];
@@ -131,10 +135,15 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
         </select>
       </div>
       <div class="col-md-1">
-        <div class="form-check mb-2">
+        <div class="form-check mb-1">
           <input class="form-check-input" type="checkbox" name="needs_split" id="needs-split"
                  <?php echo !empty($filters['needs_split']) ? 'checked' : ''; ?>>
           <label class="form-check-label" for="needs-split" style="font-size:0.78rem">Split</label>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" name="needs_glue" id="needs-glue"
+                 <?php echo !empty($filters['needs_glue']) ? 'checked' : ''; ?>>
+          <label class="form-check-label" for="needs-glue" style="font-size:0.78rem">Glue</label>
         </div>
       </div>
       <div class="col-md-2">
@@ -144,32 +153,54 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
   </div>
 </form>
 
-<?php if (Auth::isEditor() && in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)): ?>
+<?php
+$queueStatus = (string) ($filters['status'] ?? '');
+$queueBatchable = Auth::isEditor() && (
+    in_array($queueStatus, ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)
+    || !empty($filters['needs_glue'])
+);
+?>
+<?php if ($queueBatchable): ?>
 <form method="post" action="/queue/batch" id="batch-form">
   <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
   <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
   <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-    <?php if (($filters['status'] ?? '') === 'PENDING'): ?>
+    <?php if ($queueStatus === 'PENDING'): ?>
     <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-edit-open"
             data-bs-toggle="modal" data-bs-target="#bulk-edit-modal">Edit Selected</button>
     <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">Approve Selected</button>
     <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
     <button type="submit" name="action" value="flag" class="btn btn-outline-warning btn-sm">Flag Selected</button>
+    <button type="submit" formaction="/queue/mark-glue" class="btn btn-outline-primary btn-sm"
+            onclick="return confirm('Mark selected files as one glue group (multipart concat)?');">Mark as Glue Group</button>
     <?php if (Auth::isAdmin()): ?>
     <button type="submit" formaction="/queue/add-split" class="btn btn-outline-info btn-sm">Add to Split Queue</button>
     <?php endif; ?>
-    <?php elseif (($filters['status'] ?? '') === 'FLAGGED'): ?>
+    <?php elseif ($queueStatus === 'FLAGGED'): ?>
     <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-edit-open"
             data-bs-toggle="modal" data-bs-target="#bulk-edit-modal">Edit Selected</button>
     <button type="submit" name="action" value="reject" class="btn btn-outline-secondary btn-sm">Reject Selected</button>
+    <button type="submit" formaction="/queue/mark-glue" class="btn btn-outline-primary btn-sm"
+            onclick="return confirm('Mark selected files as one glue group (multipart concat)?');">Mark as Glue Group</button>
+    <?php elseif (!empty($filters['needs_glue']) && !in_array($queueStatus, ['PENDING', 'FLAGGED', 'APPROVED'], true)): ?>
+    <button type="submit" formaction="/queue/mark-glue" class="btn btn-outline-primary btn-sm"
+            onclick="return confirm('Mark selected files as one glue group (multipart concat)?');">Mark as Glue Group</button>
+    <button type="submit" formaction="/queue/clear-glue" class="btn btn-outline-warning btn-sm"
+            onclick="return confirm('Clear glue flags on selected files?');">Clear Glue</button>
     <?php endif; ?>
-    <?php if (($filters['status'] ?? '') === 'APPROVED'): ?>
+    <?php if ($queueStatus === 'APPROVED'): ?>
+    <button type="submit" formaction="/queue/mark-glue" class="btn btn-outline-primary btn-sm"
+            onclick="return confirm('Mark selected files as one glue group (multipart concat)?');">Mark as Glue Group</button>
     <button type="submit" name="action" value="unapprove" class="btn btn-outline-warning btn-sm"
             onclick="return confirm('Return selected approved files to pending?');">Unapprove Selected</button>
     <?php endif; ?>
-    <?php if (in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)): ?>
+    <?php if (in_array($queueStatus, ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)): ?>
     <button type="submit" formaction="/queue/remove" class="btn btn-outline-danger btn-sm"
             onclick="return confirm('Permanently remove selected files from the queue? This does not delete files on disk.');">Remove Selected</button>
+    <?php endif; ?>
+    <?php if (!empty($filters['needs_glue']) && in_array($queueStatus, ['PENDING', 'FLAGGED', 'APPROVED'], true)): ?>
+    <button type="submit" formaction="/queue/clear-glue" class="btn btn-outline-warning btn-sm"
+            onclick="return confirm('Clear glue flags on selected files?');">Clear Glue</button>
     <?php endif; ?>
     <span id="selection-count" class="path-text ms-1" style="font-size:0.78rem"></span>
     <button type="button" id="clear-selection" class="btn btn-link btn-sm p-0 path-text d-none"
@@ -198,6 +229,7 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
           $showChecks = Auth::isEditor() && (
               in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)
               || !empty($filters['needs_split'])
+              || !empty($filters['needs_glue'])
           );
           ?>
           <?php if ($showChecks): ?>
@@ -217,6 +249,7 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
         $showChecks = Auth::isEditor() && (
             in_array(($filters['status'] ?? ''), ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'], true)
             || !empty($filters['needs_split'])
+            || !empty($filters['needs_glue'])
         );
         $colspan = $showChecks ? 6 : 5;
         if ($queueItems === []):
@@ -255,6 +288,21 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
             <div class="path-text"><?php echo View::e(dirname(\MediaManager\Repositories\FileRepository::displayPath($item))); ?></div>
             <?php if (!empty($item['needs_split'])): ?>
             <span class="badge bg-warning text-dark mt-1" style="font-size:0.68rem">Needs split</span>
+            <?php endif; ?>
+            <?php if (!empty($item['needs_glue'])): ?>
+            <span class="badge bg-primary mt-1" style="font-size:0.68rem"
+                  title="<?php echo View::e((string) ($item['glue_notes'] ?? 'Multipart glue group')); ?>">
+              Needs glue
+              <?php if ($item['glue_part_index'] !== null && $item['glue_part_index'] !== ''): ?>
+              · <?php echo View::e((string) $item['glue_part_index']); ?>
+              <?php endif; ?>
+            </span>
+            <?php if (!empty($item['glue_group_key'])): ?>
+            <div class="mt-1">
+              <a href="/queue?status=ALL&amp;glue_group=<?php echo View::e(rawurlencode((string) $item['glue_group_key'])); ?>"
+                 class="path-text" style="font-size:0.68rem">View group</a>
+            </div>
+            <?php endif; ?>
             <?php endif; ?>
           </td>
           <td>
@@ -379,6 +427,16 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
               <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
               <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
               <button type="submit" class="btn btn-outline-warning btn-xs">Clear split</button>
+            </form>
+            <?php endif; ?>
+            <?php if (Auth::isEditor() && !empty($item['needs_glue'])
+                && in_array($item['status'], ['PENDING', 'FLAGGED', 'APPROVED', 'REJECTED'], true)): ?>
+            <form method="post" action="/queue/clear-glue" class="d-inline"
+                  onsubmit="return confirm('Clear glue flag for this file?');">
+              <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+              <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+              <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
+              <button type="submit" class="btn btn-outline-warning btn-xs">Clear glue</button>
             </form>
             <?php endif; ?>
             <?php if (Auth::isAdmin() && !empty($item['needs_split'])

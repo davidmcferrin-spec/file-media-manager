@@ -39,6 +39,7 @@ final class FileRepository extends BaseRepository
                 file_date, file_time, confidence, classifier_notes, status,
                 duration_seconds, filesize_bytes, container, codec_video, codec_audio,
                 resolution, framerate, metadata_extracted, needs_split, split_notes,
+                needs_glue, glue_group_key, glue_part_index, glue_notes,
                 classifier_confidence, classifier_proposed_dir, classifier_proposed_filename,
                 proposed_source
              ) VALUES (
@@ -47,6 +48,7 @@ final class FileRepository extends BaseRepository
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
                 ?, ?, ?, ?
              )
              RETURNING id'
@@ -77,6 +79,10 @@ final class FileRepository extends BaseRepository
             $this->pgBool((bool) ($data['metadata_extracted'] ?? false)),
             $this->pgBool((bool) ($data['needs_split'] ?? false)),
             $data['split_notes'] ?? '',
+            $this->pgBool((bool) ($data['needs_glue'] ?? false)),
+            $data['glue_group_key'] ?? null,
+            $data['glue_part_index'] ?? null,
+            $data['glue_notes'] ?? '',
             $data['classifier_confidence'] ?? $data['confidence'],
             $data['classifier_proposed_dir'] ?? $data['proposed_dir'],
             $data['classifier_proposed_filename'] ?? $data['proposed_filename'],
@@ -113,6 +119,10 @@ final class FileRepository extends BaseRepository
     {
         [$where, $params] = $this->queueWhereClause($filters);
 
+        $orderBy = !empty($filters['needs_glue'])
+            ? 'f.glue_group_key ASC NULLS LAST, f.glue_part_index ASC NULLS LAST, f.original_filename ASC'
+            : 'f.confidence ASC, f.created_at DESC, f.id DESC';
+
         $sql = 'SELECT f.*, sh.abbreviation AS show_abbr, mt.name AS media_type_name,
                        s.name AS source_name
                 FROM files f
@@ -120,7 +130,7 @@ final class FileRepository extends BaseRepository
                 LEFT JOIN media_types mt ON mt.id = f.media_type_id
                 LEFT JOIN sources s ON s.id = f.source_id
                 WHERE ' . $where . '
-                ORDER BY f.confidence ASC, f.created_at DESC, f.id DESC
+                ORDER BY ' . $orderBy . '
                 LIMIT ? OFFSET ?';
 
         $params[] = $limit;
@@ -192,6 +202,13 @@ final class FileRepository extends BaseRepository
         }
         if (!empty($filters['needs_split'])) {
             $clauses[] = 'f.needs_split IS TRUE';
+        }
+        if (!empty($filters['needs_glue'])) {
+            $clauses[] = 'f.needs_glue IS TRUE';
+        }
+        if (!empty($filters['glue_group_key'])) {
+            $clauses[] = 'f.glue_group_key = ?';
+            $params[]  = (string) $filters['glue_group_key'];
         }
         if (!empty($filters['file_id'])) {
             $clauses[] = 'f.id = ?';
@@ -292,8 +309,8 @@ final class FileRepository extends BaseRepository
             $data['media_type_id'] ?? null,
             $data['file_date'] ?? null,
             $data['file_time'] ?? null,
-            $data['confidence'] ?? 'LOW',
-            $data['confidence'] ?? 'LOW',
+            $data['confidence'] ?? 'UNEVALUATED',
+            $data['confidence'] ?? 'UNEVALUATED',
             $data['proposed_dir'] ?? null,
             $data['proposed_filename'] ?? null,
             $data['classifier_notes'] ?? '{}',
@@ -382,6 +399,163 @@ final class FileRepository extends BaseRepository
         );
 
         return $stmt->execute([$this->pgBool($needsSplit), trim($splitNotes), $id]);
+    }
+
+    public function updateGlueFlag(
+        int $id,
+        bool $needsGlue,
+        ?string $glueGroupKey = null,
+        ?int $gluePartIndex = null,
+        string $glueNotes = ''
+    ): bool {
+        if (!$needsGlue) {
+            $stmt = $this->db()->prepare(
+                'UPDATE files SET
+                    needs_glue = FALSE,
+                    glue_group_key = NULL,
+                    glue_part_index = NULL,
+                    glue_notes = \'\'
+                 WHERE id = ?'
+            );
+
+            return $stmt->execute([$id]);
+        }
+
+        $stmt = $this->db()->prepare(
+            'UPDATE files SET
+                needs_glue = TRUE,
+                glue_group_key = ?,
+                glue_part_index = ?,
+                glue_notes = ?
+             WHERE id = ?'
+        );
+
+        return $stmt->execute([
+            $glueGroupKey,
+            $gluePartIndex,
+            trim($glueNotes),
+            $id,
+        ]);
+    }
+
+    /** @return list<string> */
+    public function distinctOriginalDirsForScanJob(int $scanJobId): array
+    {
+        $stmt = $this->db()->prepare(
+            'SELECT DISTINCT original_dir FROM files
+             WHERE scan_job_id = ?
+               AND original_dir IS NOT NULL
+               AND original_dir <> \'\''
+        );
+        $stmt->execute([$scanJobId]);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+        $dirs = [];
+        foreach ($rows as $row) {
+            $dir = str_replace('\\', '/', (string) ($row['original_dir'] ?? ''));
+            if ($dir !== '') {
+                $dirs[] = $dir;
+            }
+        }
+
+        return array_values(array_unique($dirs));
+    }
+
+    /**
+     * @param list<string> $dirs
+     * @return list<array{id: int, original_path: string, glue_group_key: ?string}>
+     */
+    public function listByOriginalDirs(array $dirs): array
+    {
+        $dirs = array_values(array_unique(array_filter(array_map(
+            static fn (string $d): string => str_replace('\\', '/', $d),
+            $dirs
+        ), static fn (string $d): bool => $d !== '')));
+        if ($dirs === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($dirs), '?'));
+        $stmt = $this->db()->prepare(
+            "SELECT id, original_path, glue_group_key
+             FROM files
+             WHERE original_dir IN ({$placeholders})
+               AND status NOT IN ('ROLLED_BACK')"
+        );
+        $stmt->execute($dirs);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'id'             => (int) $row['id'],
+                'original_path'  => (string) $row['original_path'],
+                'glue_group_key' => isset($row['glue_group_key']) ? (string) $row['glue_group_key'] : null,
+            ];
+        }
+
+        return $out;
+    }
+
+    public function countNeedsGlue(): int
+    {
+        return (int) $this->db()->query(
+            'SELECT COUNT(*) FROM files WHERE needs_glue IS TRUE'
+        )->fetchColumn();
+    }
+
+    /**
+     * Grouped glue candidates for the Glue page.
+     *
+     * @return list<array{glue_group_key: string, part_count: int, files: list<array<string, mixed>>}>
+     */
+    public function listGlueGroups(int $limit = 200): array
+    {
+        $limit = max(1, min(1000, $limit));
+        $stmt = $this->db()->prepare(
+            "SELECT f.id, f.original_path, f.original_filename, f.original_dir,
+                    f.status, f.confidence, f.proposed_filename, f.proposed_dir,
+                    f.glue_group_key, f.glue_part_index, f.glue_notes,
+                    f.duration_seconds, f.filesize_bytes,
+                    sh.abbreviation AS show_abbr, mt.name AS media_type_name
+             FROM files f
+             LEFT JOIN shows sh ON sh.id = f.show_id
+             LEFT JOIN media_types mt ON mt.id = f.media_type_id
+             WHERE f.needs_glue IS TRUE
+               AND f.glue_group_key IS NOT NULL
+             ORDER BY f.glue_group_key ASC, f.glue_part_index ASC NULLS LAST, f.original_filename ASC
+             LIMIT ?"
+        );
+        $stmt->execute([$limit]);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        /** @var array<string, array{glue_group_key: string, part_count: int, files: list<array<string, mixed>>}> $groups */
+        $groups = [];
+        foreach ($rows as $row) {
+            $key = (string) ($row['glue_group_key'] ?? '');
+            if ($key === '') {
+                continue;
+            }
+            if (!isset($groups[$key])) {
+                $groups[$key] = [
+                    'glue_group_key' => $key,
+                    'part_count'     => 0,
+                    'files'          => [],
+                ];
+            }
+            $groups[$key]['files'][] = $row;
+            $groups[$key]['part_count']++;
+        }
+
+        return array_values($groups);
     }
 
     public function markExecuted(int $id, string $executedPath, int $userId): bool

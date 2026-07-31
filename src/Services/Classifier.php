@@ -412,6 +412,13 @@ final class Classifier
             }
         }
 
+        // Date/time alone is not a classification — stay unevaluated until
+        // show or media type is matched (otherwise nearly every scanned file
+        // lands on LOW via FFprobe / filename dates).
+        if ($showMatch['id'] === null && $typeMatch['id'] === null) {
+            return 'UNEVALUATED';
+        }
+
         $score = 0;
         if ($showMatch['id'] !== null) {
             // Schedule / conversion hits are weaker than abbr/alias/folder tokens.
@@ -438,7 +445,7 @@ final class Classifier
             return 'MEDIUM';
         }
 
-        // No usable signals yet — not the same as a weak/low-confidence guess.
+        // No usable identity signals yet — not the same as a weak guess.
         if ($score <= 0) {
             return 'UNEVALUATED';
         }

@@ -71,7 +71,9 @@ final class ContinuityCheckService
         if ($result->policyExactMatch) {
             return $result;
         }
-        if ($result->showId === null && $result->confidence === 'LOW') {
+        if ($result->showId === null
+            && in_array($result->confidence, ['LOW', 'UNEVALUATED'], true)
+        ) {
             return $result;
         }
         if (!$this->engineAvailable()) {

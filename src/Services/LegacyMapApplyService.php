@@ -101,7 +101,7 @@ final class LegacyMapApplyService
     private function ensureClassifierSnapshotData(array $file): array
     {
         if (empty($file['classifier_confidence'])) {
-            $file['classifier_confidence'] = $file['confidence'] ?? 'LOW';
+            $file['classifier_confidence'] = $file['confidence'] ?? 'UNEVALUATED';
             $file['classifier_proposed_dir'] = $file['proposed_dir'] ?? null;
             $file['classifier_proposed_filename'] = $file['proposed_filename'] ?? null;
         }

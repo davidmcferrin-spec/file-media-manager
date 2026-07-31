@@ -163,6 +163,9 @@ final class ScanService
                 ]);
             }
 
+            $this->progress('glue_detect', ['job_id' => $jobId]);
+            $glueUpdated = (new GlueGroupService($this->files))->applyForScanJob($jobId);
+
             $this->scanJobs->markCompleted($jobId);
 
             $this->audit->record(
@@ -180,6 +183,7 @@ final class ScanService
                     'reclassified' => $reclassified,
                     'duplicates'   => $duplicates,
                     'skipped'      => $skipped,
+                    'glue_updated' => $glueUpdated,
                     'subpath'      => $subpath,
                     'rescan'       => $this->rescanMode,
                 ]
@@ -192,6 +196,7 @@ final class ScanService
                 'reclassified' => $reclassified,
                 'duplicates'   => $duplicates,
                 'skipped'      => $skipped,
+                'glue_updated' => $glueUpdated,
             ]);
 
             error_log(sprintf(

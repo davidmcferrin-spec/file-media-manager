@@ -23,7 +23,7 @@ final class ProposalReconciler
     {
         $classifierDir  = (string) ($file['classifier_proposed_dir'] ?? $file['proposed_dir'] ?? '');
         $classifierFile = (string) ($file['classifier_proposed_filename'] ?? $file['proposed_filename'] ?? '');
-        $classifierConf = (string) ($file['classifier_confidence'] ?? $file['confidence'] ?? 'LOW');
+        $classifierConf = (string) ($file['classifier_confidence'] ?? $file['confidence'] ?? 'UNEVALUATED');
 
         $base = [
             'classifier_confidence'          => $classifierConf,

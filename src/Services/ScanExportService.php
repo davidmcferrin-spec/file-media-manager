@@ -68,6 +68,9 @@ final class ScanExportService
             'alt_proposed_filename',
             'duration_seconds',
             'needs_split',
+            'needs_glue',
+            'glue_group_key',
+            'glue_part_index',
             'source_name',
         ];
     }
@@ -80,6 +83,7 @@ final class ScanExportService
     private function mapRow(array $file, array $job): array
     {
         $needsSplit = !empty($file['needs_split']);
+        $needsGlue = !empty($file['needs_glue']);
 
         return [
             (int) ($file['scan_job_id'] ?? $job['id'] ?? 0),
@@ -105,6 +109,11 @@ final class ScanExportService
                 ? (float) $file['duration_seconds']
                 : '',
             $needsSplit ? 'yes' : 'no',
+            $needsGlue ? 'yes' : 'no',
+            (string) ($file['glue_group_key'] ?? ''),
+            $file['glue_part_index'] !== null && $file['glue_part_index'] !== ''
+                ? (int) $file['glue_part_index']
+                : '',
             (string) ($job['source_name'] ?? ''),
         ];
     }

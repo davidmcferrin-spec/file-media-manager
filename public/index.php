@@ -81,6 +81,8 @@ match (true) {
     || $uri === '/queue/add-split'
     || $uri === '/queue/adopt-proposal'
     || $uri === '/queue/clear-split'
+    || $uri === '/queue/mark-glue'
+    || $uri === '/queue/clear-glue'
         => require dirname(__DIR__) . '/src/Controllers/QueueActionController.php',
 
     // Scan: apply legacy map / reclassify (before general scan routes)
@@ -123,6 +125,10 @@ match (true) {
     // Split queue (admin only)
     $uri === '/split' || str_starts_with($uri, '/split/')
         => require dirname(__DIR__) . '/src/Controllers/SplitController.php',
+
+    // Glue groups (multipart concat candidates)
+    $uri === '/glue'
+        => require dirname(__DIR__) . '/src/Controllers/GlueController.php',
 
     // Audit log (admin only)
     $uri === '/audit'

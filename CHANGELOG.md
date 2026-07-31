@@ -14,6 +14,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.11] — 2026-07-30
+
+### Added
+
+- **Glue groups** for multipart media (`Name.ext` + `Name_1.ext` + `Name_2.ext` …): auto-detect on Scan/Reclassify, Catalog badge/filter, manual mark/clear, Glue page
+- Scan export columns for glue group key and part index
+
+## [0.5.11] — 2026-07-30
+
+### Fixed
+
+- Scan confidence defaults to **UNEVALUATED** when no show or media type is matched (date/time alone no longer scores as LOW)
+
 ## [0.5.10] — 2026-07-30
 
 ### Added
