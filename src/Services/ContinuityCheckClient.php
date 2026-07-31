@@ -18,10 +18,16 @@ final class ContinuityCheckClient
 
     public static function fromEnv(): self
     {
+        // Cold pack loads routinely exceed short timeouts; never run below 60s.
+        $timeout = (int) env('CONTINUITY_CHECK_TIMEOUT_SECONDS', 60);
+        if ($timeout < 60) {
+            $timeout = 60;
+        }
+
         return new self(
             rtrim((string) env('CONTINUITY_CHECK_URL', 'http://127.0.0.1:11434'), '/'),
             (string) env('CONTINUITY_CHECK_MODEL', 'llama3.2:3b'),
-            max(5, (int) env('CONTINUITY_CHECK_TIMEOUT_SECONDS', 60)),
+            $timeout,
         );
     }
 

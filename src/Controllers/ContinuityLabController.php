@@ -8,11 +8,32 @@ use MediaManager\Auth\Auth;
 use MediaManager\Auth\Session;
 use MediaManager\Repositories\ContinuityCheckLogRepository;
 use MediaManager\Services\ContinuityCheckService;
+use MediaManager\Services\ContinuityLabExportService;
 
 Auth::requireAdmin();
 
 $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
+if ($method === 'GET' && $uri === '/continuity-lab/export') {
+    $filters = [
+        'outcome' => trim((string) ($_GET['outcome'] ?? '')),
+        'q'       => trim((string) ($_GET['q'] ?? '')),
+    ];
+    try {
+        $export = (new ContinuityLabExportService())->export($filters);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $export['filename'] . '"');
+        header('Content-Length: ' . (string) strlen($export['bytes']));
+        header('Cache-Control: no-store');
+        echo $export['bytes'];
+        exit;
+    } catch (\Throwable $e) {
+        Session::flash('error', 'Export failed: ' . $e->getMessage());
+        header('Location: /continuity-lab');
+        exit;
+    }
+}
 
 if ($method === 'POST' && $uri === '/continuity-lab/test') {
     $csrf = $_POST['_csrf'] ?? '';

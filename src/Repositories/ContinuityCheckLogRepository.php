@@ -84,6 +84,55 @@ final class ContinuityCheckLogRepository extends BaseRepository
         return is_array($rows) ? $rows : [];
     }
 
+    /**
+     * Lean projection for large XLSX dumps (truncated artifacts + seed counts in SQL).
+     *
+     * @param array{outcome?: string, q?: string} $filters
+     * @return list<array<string, mixed>>
+     */
+    public function listForExport(array $filters, int $limit = 60000, int $offset = 0): array
+    {
+        [$where, $params] = $this->whereClause($filters);
+        $sql = 'SELECT
+                    id, created_at, outcome, duration_ms,
+                    rule_confidence, final_confidence,
+                    rule_show_id, rule_show_abbr, final_show_id, final_show_abbr,
+                    engine_agree, engine_confidence, engine_show_id, engine_reason,
+                    signal, original_path, original_filename,
+                    rule_proposed_filename, final_proposed_filename, rule_signals,
+                    http_status, transport_error,
+                    LEFT(COALESCE(engine_raw, \'\'), 2000) AS engine_raw,
+                    LEFT(COALESCE(seed_packet::text, \'\'), 4000) AS seed_packet_json,
+                    CASE
+                      WHEN seed_packet IS NULL THEN 0
+                      WHEN jsonb_typeof(seed_packet->\'shows\') = \'array\'
+                        THEN jsonb_array_length(seed_packet->\'shows\')
+                      ELSE 0
+                    END AS seed_shows_count,
+                    CASE
+                      WHEN seed_packet IS NULL THEN 0
+                      WHEN jsonb_typeof(seed_packet->\'timeline\') = \'array\'
+                        THEN jsonb_array_length(seed_packet->\'timeline\')
+                      ELSE 0
+                    END AS seed_timeline_count,
+                    CASE
+                      WHEN seed_packet IS NULL THEN 0
+                      WHEN jsonb_typeof(seed_packet->\'examples\') = \'array\'
+                        THEN jsonb_array_length(seed_packet->\'examples\')
+                      ELSE 0
+                    END AS seed_examples_count
+                FROM continuity_check_log'
+            . $where
+            . ' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?';
+        $params[] = max(1, min(100000, $limit));
+        $params[] = max(0, $offset);
+        $stmt = $this->db()->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
     /** @param array{outcome?: string, q?: string} $filters */
     public function count(array $filters = []): int
     {

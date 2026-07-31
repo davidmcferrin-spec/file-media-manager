@@ -14,6 +14,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.5.6] — 2026-07-30
+
+### Fixed
+
+- Continuity decide timeout floor raised to **60s** even when `.env` still has the old 8s value (cold pack loads were timing out)
+
+## [0.5.5] — 2026-07-30
+
+### Changed
+
+- Continuity Lab export supports up to **60,000** rows (chunked lean SQL projection for memory)
+
+## [0.5.4] — 2026-07-30
+
+### Added
+
+- Continuity Lab **Export XLSX** — dump filtered decision log (outcomes, reasons, seed summary, raw reply) for offline review
+
 ## [0.5.3] — 2026-07-30
 
 ### Fixed

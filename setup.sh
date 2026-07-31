@@ -297,6 +297,15 @@ ensure_env_key "CONTINUITY_CHECK_URL" "http://127.0.0.1:11434"
 ensure_env_key "CONTINUITY_CHECK_MODEL" "${CONTINUITY_MODEL}"
 ensure_env_key "CONTINUITY_CHECK_TIMEOUT_SECONDS" "60"
 
+# Upgrade stale short timeouts from earlier installs (8s is too low for cold loads)
+if grep -qE '^CONTINUITY_CHECK_TIMEOUT_SECONDS=([0-9]+)' "${ENV_FILE}" 2>/dev/null; then
+    cur_timeout="$(grep -E '^CONTINUITY_CHECK_TIMEOUT_SECONDS=' "${ENV_FILE}" | head -1 | cut -d'=' -f2- | tr -d '"' | tr -d "'")"
+    if [[ "${cur_timeout}" =~ ^[0-9]+$ ]] && (( cur_timeout < 60 )); then
+        sed -i -E 's/^CONTINUITY_CHECK_TIMEOUT_SECONDS=.*/CONTINUITY_CHECK_TIMEOUT_SECONDS=60/' "${ENV_FILE}"
+        info "Raised CONTINUITY_CHECK_TIMEOUT_SECONDS from ${cur_timeout} to 60."
+    fi
+fi
+
 sudo -u www-data php8.4 -r "
     require '${WEB_ROOT}/src/bootstrap.php';
     (new MediaManager\Repositories\SystemRepository())->set('continuity_check_enabled', 'true');

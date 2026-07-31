@@ -32,6 +32,12 @@ $queryBase = array_filter([
     </p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    <a href="/continuity-lab/export?<?php echo View::e(http_build_query(array_filter([
+           'outcome' => $filters['outcome'] ?? '',
+           'q'       => $filters['q'] ?? '',
+         ], static fn ($v) => $v !== '' && $v !== null))); ?>"
+       class="btn btn-outline-secondary btn-sm"
+       title="Exports up to 60,000 newest matching rows">Export XLSX</a>
     <form method="post" action="/continuity-lab/test" class="d-inline">
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
       <button type="submit" class="btn btn-outline-info btn-sm">Test engine</button>
@@ -100,12 +106,10 @@ $queryBase = array_filter([
           <code>ollama pull <?php echo View::e($configured); ?></code>
         </div>
         <?php endif; ?>
-        <?php if ((int) ($status['timeout_seconds'] ?? 0) < 30): ?>
-        <div class="text-warning mt-2" style="font-size:0.78rem">
-          Timeout is under 30s — cold starts often fail. Set
-          <code>CONTINUITY_CHECK_TIMEOUT_SECONDS=60</code> in <code>.env</code>.
+        <div class="path-text mt-1">
+          Effective decide timeout: <strong><?php echo (int) ($status['timeout_seconds'] ?? 0); ?>s</strong>
+          (minimum 60s enforced in app)
         </div>
-        <?php endif; ?>
       </div>
     </div>
   </div>
