@@ -6,10 +6,12 @@ namespace MediaManager\Services;
 
 final class ScheduleSplitSuggester
 {
-    public const SPLIT_THRESHOLD_SECONDS = 4500; // 75 minutes
+    /** Fallback when Settings / env are unavailable (2 hours). */
+    public const DEFAULT_FLAG_THRESHOLD_SECONDS = 7200;
 
     public function __construct(
         private readonly ScheduleLookupService $lookup = new ScheduleLookupService(),
+        private readonly int $flagThresholdSeconds = self::DEFAULT_FLAG_THRESHOLD_SECONDS,
     ) {
     }
 
@@ -44,7 +46,6 @@ final class ScheduleSplitSuggester
 
         $segments = [];
         $cursor = (int) (floor($startMinutes / 60) * 60);
-        $offset = 0.0;
 
         while ($cursor < $endMinutes) {
             $segEndMin = min($cursor + 60, $endMinutes);
@@ -66,10 +67,10 @@ final class ScheduleSplitSuggester
             }
 
             $cursor += 60;
-            $offset += 3600;
         }
 
-        $needsSplit = count($segments) > 1 || $durationSeconds >= self::SPLIT_THRESHOLD_SECONDS;
+        $threshold = max(1, $this->flagThresholdSeconds);
+        $needsSplit = count($segments) > 1 || $durationSeconds >= $threshold;
 
         if (!$needsSplit || $segments === []) {
             return $empty;

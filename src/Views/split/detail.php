@@ -53,7 +53,8 @@ $formatAirTime = static function (string $hhmm): string {
     return $m[1] . ':' . $m[2];
 };
 
-$segmentColors = ['#5ec8f5', '#a78bfa', '#34d399', '#fbbf24', '#fb7185', '#38bdf8', '#c084fc', '#4ade80'];
+/* Timeline / swatch palette — saturated enough for white labels in both themes */
+$segmentColors = ['#0284c7', '#7c3aed', '#059669', '#b45309', '#be123c', '#0369a1', '#6d28d9', '#15803d'];
 $codecLabel = trim(
     strtoupper((string) ($item['container'] ?? ''))
     . ' / '
@@ -64,29 +65,126 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
 ?>
 
 <style>
-.sw-top {
+/* Split workbench — theme-aware contrast, clean lines */
+.sw-top,
+.sw-actions-bar {
   position: sticky;
-  top: 0;
   z-index: 20;
-  margin: -0.25rem -0.25rem 1.25rem;
-  padding: 0.85rem 1rem;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  backdrop-filter: blur(8px);
-  box-shadow: var(--surface-shadow);
+  background: var(--panel-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
 }
-.sw-meta { color: var(--text-soft); font-size: 0.78rem; }
+.sw-top {
+  top: 0;
+  margin: -0.25rem -0.25rem 1.25rem;
+  padding: 0.9rem 1rem;
+}
+.sw-actions-bar {
+  bottom: 0;
+  z-index: 15;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+}
+.sw-title {
+  color: var(--text-main);
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+.sw-meta {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.sw-meta strong,
+.sw-kicker strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.sw-kicker {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin-top: 0.35rem;
+}
+.sw-filename {
+  color: var(--text-main);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.sw-path {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+.sw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text-main);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.sw-chip-muted {
+  color: var(--text-soft);
+  background: var(--hover-bg);
+}
+.sw-chip-ok {
+  color: var(--badge-high);
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--badge-high) 35%, var(--border-color));
+}
+.sw-chip-info {
+  color: var(--accent);
+  background: var(--info-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-color));
+}
+.sw-chip-warn {
+  color: #c2410c;
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, #c2410c 30%, var(--border-color));
+}
+[data-bs-theme="dark"] .sw-chip-warn {
+  color: #fdba74;
+}
+.sw-chip-danger {
+  color: var(--badge-low);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--badge-low) 35%, var(--border-color));
+}
+.sw-queue-pos {
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.82rem;
+  min-width: 4.5rem;
+  text-align: center;
+}
+.sw-card .card-header {
+  color: var(--text-main);
+  font-weight: 600;
+  border-bottom-color: var(--border-color);
+}
+.sw-card .card-header .sw-meta {
+  font-weight: 400;
+}
 .sw-stage {
   position: relative;
   min-height: 280px;
-  background: #05080d;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
+  background: #0a0f16;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+[data-bs-theme="light"] .sw-stage {
+  background: #111827;
 }
 .sw-stage img,
 .sw-stage video {
@@ -97,10 +195,12 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   display: block;
 }
 .sw-stage-empty {
-  color: var(--text-soft);
+  color: #cbd5e1;
   text-align: center;
   padding: 1.5rem;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
+  max-width: 22rem;
+  line-height: 1.5;
 }
 .sw-stage-loading {
   position: absolute;
@@ -108,59 +208,76 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(5, 8, 13, 0.55);
-  color: var(--text-main);
+  background: rgba(10, 15, 22, 0.72);
+  color: #f8fafc;
   font-size: 0.85rem;
+  font-weight: 600;
   z-index: 2;
 }
 .sw-stage-loading.show { display: flex; }
 .sw-transport {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.45rem;
   align-items: center;
-  margin-top: 0.75rem;
+  margin-top: 0.85rem;
 }
 .sw-playhead-tc {
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  color: var(--accent);
-  min-width: 7.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.28rem 0.55rem;
+  min-width: 7.75rem;
+  text-align: center;
+}
+.sw-play-status {
+  color: var(--text-soft);
+  font-size: 0.78rem;
 }
 .sw-timeline {
   position: relative;
-  height: 42px;
+  height: 44px;
   border-radius: 8px;
   background: var(--form-bg);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-strong);
   overflow: hidden;
   cursor: pointer;
   user-select: none;
 }
+.sw-timeline:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
 .sw-timeline-seg {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
-  border-radius: 5px;
-  opacity: 0.88;
+  top: 5px;
+  bottom: 5px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.68rem;
-  font-weight: 600;
-  color: #0b1118;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   white-space: nowrap;
-  padding: 0 4px;
+  padding: 0 5px;
   pointer-events: none;
+  border: 1px solid rgba(15, 23, 42, 0.22);
+}
+[data-bs-theme="dark"] .sw-timeline-seg {
+  border-color: rgba(255, 255, 255, 0.18);
 }
 .sw-timeline-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
-  background: #fff;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--panel-strong) 80%, transparent);
   pointer-events: none;
   z-index: 3;
 }
@@ -168,73 +285,128 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   display: flex;
   justify-content: space-between;
   color: var(--text-soft);
-  font-size: 0.7rem;
-  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  margin-top: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+.sw-help {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-color);
 }
 .sw-seg-card {
   border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--panel);
-  margin-bottom: 0.75rem;
+  border-radius: 8px;
+  background: var(--panel-strong);
+  margin-bottom: 0.7rem;
   overflow: hidden;
   cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.sw-seg-card:hover {
+  border-color: var(--border-strong);
 }
 .sw-seg-card.active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .sw-seg-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.55rem 0.75rem;
+  padding: 0.55rem 0.8rem;
   background: var(--card-header-bg);
   border-bottom: 1px solid var(--border-color);
+  color: var(--text-main);
 }
 .sw-seg-swatch {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: 2px;
   flex: 0 0 auto;
+  border: 1px solid rgba(15, 23, 42, 0.25);
 }
-.sw-seg-body { padding: 0.75rem; }
+[data-bs-theme="dark"] .sw-seg-swatch {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.sw-seg-body { padding: 0.8rem; }
+.sw-seg-body .form-label {
+  color: var(--text-main);
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.sw-seg-body .form-control,
+.sw-seg-body .form-select {
+  color: var(--text-main);
+  background: var(--form-bg);
+  border-color: var(--form-border);
+}
+.sw-seg-body .form-control:focus,
+.sw-seg-body .form-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 0.18rem var(--focus-ring);
+}
 .sw-air {
   font-variant-numeric: tabular-nums;
-  font-size: 0.82rem;
-  color: var(--accent);
+  font-size: 0.8rem;
+  color: var(--text-soft);
+}
+.sw-air strong {
+  color: var(--text-main);
+  font-weight: 600;
 }
 .sw-export-callout {
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border-color));
-  background: var(--info-soft);
-  border-radius: 10px;
-  padding: 0.75rem 0.9rem;
-  margin-bottom: 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  background: var(--panel-strong);
+  border-radius: 8px;
+  padding: 0.8rem 0.95rem;
+  margin-bottom: 0.9rem;
   font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-main);
 }
-.sw-export-callout strong { color: var(--text-main); }
+.sw-export-callout strong {
+  color: var(--text-main);
+}
+.sw-export-callout em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--accent);
+}
 .sw-export-range {
   font-variant-numeric: tabular-nums;
   font-size: 0.78rem;
   color: var(--text-soft);
-  margin-top: 0.35rem;
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--border-color);
+  line-height: 1.45;
 }
-.sw-export-range strong { color: var(--text-main); font-weight: 600; }
+.sw-export-range strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
 .sw-seg-list {
   max-height: min(70vh, 820px);
   overflow: auto;
-  padding-right: 0.15rem;
+  padding-right: 0.2rem;
 }
-.sw-actions-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 15;
-  margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  background: color-mix(in srgb, var(--panel) 94%, transparent);
+.sw-section-head {
+  color: var(--text-main);
+  font-weight: 600;
+}
+.sw-notes-alert {
   border: 1px solid var(--border-color);
-  border-radius: 10px;
-  backdrop-filter: blur(8px);
+  background: var(--panel);
+  color: var(--text-main);
+  border-radius: 8px;
+  font-size: 0.82rem;
 }
 </style>
 
@@ -242,34 +414,34 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div class="min-w-0">
       <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
-        <h1 class="h5 mb-0" style="letter-spacing:0.03em;">Split Workbench</h1>
-        <span class="badge text-bg-secondary">#<?php echo $jobId; ?></span>
+        <h1 class="h5 mb-0 sw-title">Split Workbench</h1>
+        <span class="sw-chip sw-chip-muted">#<?php echo $jobId; ?></span>
         <?php echo View::statusBadge((string) $item['status']); ?>
         <?php if ($playMode === 'fast'): ?>
-        <span class="badge" style="background:rgba(34,197,94,0.2);color:var(--badge-high)">Fast path</span>
+        <span class="sw-chip sw-chip-ok">Fast path</span>
         <?php elseif ($playMode === 'proxy'): ?>
-        <span class="badge" style="background:rgba(94,200,245,0.18);color:var(--accent)">Proxy path</span>
+        <span class="sw-chip sw-chip-info">Proxy path</span>
         <?php else: ?>
-        <span class="badge text-bg-danger">Unsupported</span>
+        <span class="sw-chip sw-chip-danger">Unsupported</span>
         <?php endif; ?>
         <?php if ($hasSrt): ?>
-        <span class="badge" style="background:rgba(34,197,94,0.2);color:var(--badge-high)">CC SRT</span>
+        <span class="sw-chip sw-chip-ok">CC SRT</span>
         <?php elseif ($hasCaptions): ?>
-        <span class="badge" style="background:rgba(251,146,60,0.2);color:#fb923c">CC</span>
+        <span class="sw-chip sw-chip-warn">CC</span>
         <?php endif; ?>
       </div>
-      <div class="path-filename text-truncate" title="<?php echo View::e($item['original_filename'] ?? ''); ?>">
+      <div class="sw-filename text-truncate" title="<?php echo View::e($item['original_filename'] ?? ''); ?>">
         <?php echo View::e($item['original_filename'] ?? ''); ?>
       </div>
-      <div class="path-text text-truncate" title="<?php echo View::e($item['original_path'] ?? ''); ?>">
+      <div class="sw-path text-truncate" title="<?php echo View::e($item['original_path'] ?? ''); ?>">
         <?php echo View::e($item['original_path'] ?? ''); ?>
       </div>
       <?php echo View::assetIdBlock($item); ?>
-      <div class="sw-meta mt-1">
-        Duration <strong class="text-body"><?php echo View::duration($item['duration_seconds'] ?? null); ?></strong>
+      <div class="sw-kicker">
+        Duration <strong><?php echo View::duration($item['duration_seconds'] ?? null); ?></strong>
         · <?php echo View::e($codecLabel !== ' / ' ? $codecLabel : 'No codec meta'); ?>
         · File clock
-        <strong class="text-body">
+        <strong>
           <?php
           $clockDate = preg_replace('/\D/', '', (string) ($fileDate ?? '')) ?? '';
           $clockTime = preg_replace('/\D/', '', (string) ($fileTime ?? '')) ?? '';
@@ -291,10 +463,10 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
       <?php else: ?>
       <button type="button" class="btn btn-outline-secondary btn-sm" disabled>← Back</button>
       <?php endif; ?>
-      <span class="sw-meta px-1 text-nowrap">
+      <span class="sw-queue-pos text-nowrap">
         <?php echo (int) $position; ?> / <?php echo (int) $total; ?>
         <?php if ($statusFilter !== ''): ?>
-          <span class="ms-1">(<?php echo View::e($statusFilter); ?>)</span>
+          <span class="sw-meta d-block" style="font-weight:400"><?php echo View::e($statusFilter); ?></span>
         <?php endif; ?>
       </span>
       <?php if ($nextId !== null): ?>
@@ -308,7 +480,7 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
 </div>
 
 <?php if (!empty($item['split_notes'])): ?>
-<div class="alert alert-secondary py-2 px-3 mb-3" style="font-size:0.82rem">
+<div class="sw-notes-alert py-2 px-3 mb-3">
   <?php echo View::e($item['split_notes']); ?>
 </div>
 <?php endif; ?>
@@ -329,7 +501,7 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
 
   <div class="row g-4">
     <div class="col-xl-5">
-      <div class="card mb-3">
+      <div class="card sw-card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
           <span>Preview / Timeline</span>
           <span class="sw-meta"><?php echo View::e($mediaInfo['label'] ?? ''); ?> · <?php echo (int) $segPlaySeconds; ?>s play window</span>
@@ -350,7 +522,7 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
             <button type="button" class="btn btn-outline-secondary btn-sm" id="sw-set-in" title="Set mark in (I)">Set In</button>
             <button type="button" class="btn btn-outline-secondary btn-sm" id="sw-set-out" title="Set mark out (O)">Set Out</button>
             <span class="sw-playhead-tc" id="sw-playhead-tc">00:00:00.000</span>
-            <span class="sw-meta" id="sw-play-status"></span>
+            <span class="sw-play-status" id="sw-play-status"></span>
           </div>
 
           <div class="sw-timeline mt-3" id="sw-timeline" aria-label="Segment timeline" title="Click to scrub">
@@ -386,14 +558,14 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
             <span><?php echo View::duration($duration > 0 ? $duration / 2 : null); ?></span>
             <span><?php echo View::duration($duration > 0 ? $duration : null); ?></span>
           </div>
-          <div class="sw-meta mt-2">
+          <div class="sw-help">
             Scrub = frame peek · Play = <?php echo $playMode === 'fast' ? 'stream-copy segment when possible' : 'H.264 proxy segment'; ?>.
             Keys: I / O marks · Space play/pause · ← → queue
           </div>
         </div>
       </div>
 
-      <div class="card mb-3">
+      <div class="card sw-card mb-3">
         <div class="card-body">
           <div class="row g-3">
             <div class="col-md-8">
@@ -409,16 +581,16 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
                 </option>
                 <?php endforeach; ?>
               </select>
-              <div class="form-text" style="color:var(--text-soft)">
+              <div class="form-text">
                 Mark DONE when show marks look right. Export will add ±<?php echo (int) $exportHandleMin; ?> min handles later.
               </div>
             </div>
           </div>
           <?php if (!empty($item['proposed_filename'])): ?>
           <hr style="border-color:var(--border-color)">
-          <div class="path-text">Source file proposed target (not per-segment yet)</div>
-          <div class="path-filename proposed"><?php echo View::e($item['proposed_filename']); ?></div>
-          <div class="path-text proposed"><?php echo View::e($item['proposed_dir']); ?></div>
+          <div class="sw-meta">Source file proposed target (not per-segment yet)</div>
+          <div class="sw-filename proposed" style="color:var(--accent)"><?php echo View::e($item['proposed_filename']); ?></div>
+          <div class="sw-path proposed" style="color:var(--accent)"><?php echo View::e($item['proposed_dir']); ?></div>
           <?php endif; ?>
         </div>
       </div>
@@ -427,7 +599,7 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
     <div class="col-xl-7">
       <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
         <div>
-          <strong>Segments</strong>
+          <span class="sw-section-head">Segments</span>
           <span class="sw-meta ms-2">Mark the show only · Active card receives Set In / Set Out</span>
         </div>
         <button type="button" class="btn btn-outline-secondary btn-sm" id="add-segment">Add Segment</button>
@@ -540,12 +712,15 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
         Save &amp; Next →
       </button>
     </div>
-    <small class="path-text">
+    <small class="sw-meta">
       Created by <?php echo View::e($item['created_by_email'] ?? ''); ?>
     </small>
   </div>
 </form>
 
+<?php
+$hasAudio = trim((string) ($item['codec_audio'] ?? '')) !== '';
+?>
 <div class="d-flex flex-wrap gap-2 mt-3 mb-2">
   <form method="post" action="/split/suggest-captions"
         onsubmit="return confirm('Replace segment rows with caption-based suggestions (≥5 min silence gaps near hour boundaries)? Unsaved edits will be lost.');">
@@ -556,14 +731,27 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
       Suggest from captions
     </button>
   </form>
+  <form method="post" action="/split/suggest-audio"
+        onsubmit="return confirm('Replace segment rows with audio-based suggestions (long quiet gaps / schedule hours)? First run scans the whole file with FFmpeg and may take several minutes. Unsaved edits will be lost.');">
+    <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+    <input type="hidden" name="id" value="<?php echo $jobId; ?>">
+    <input type="hidden" name="status_filter" value="<?php echo View::e($statusFilter); ?>">
+    <button type="submit" class="btn btn-outline-info btn-sm" <?php echo $hasAudio ? '' : 'disabled'; ?>>
+      Suggest from audio
+    </button>
+  </form>
   <form method="post" action="/split/delete"
         onsubmit="return confirm('Remove this split job from the queue?');">
     <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
     <input type="hidden" name="id" value="<?php echo $jobId; ?>">
     <button type="submit" class="btn btn-outline-danger btn-sm">Delete Split Job</button>
   </form>
-  <?php if (!$hasSrt): ?>
+  <?php if (!$hasSrt && $hasAudio): ?>
+  <span class="sw-meta align-self-center">No SRT — use audio suggest, or extract captions from Catalog first.</span>
+  <?php elseif (!$hasSrt): ?>
   <span class="sw-meta align-self-center">Extract SRT from Catalog to enable caption suggest.</span>
+  <?php elseif (!$hasAudio): ?>
+  <span class="sw-meta align-self-center">No audio stream detected on this file.</span>
   <?php endif; ?>
 </div>
 

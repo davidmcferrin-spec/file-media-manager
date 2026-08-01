@@ -14,6 +14,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.16.0] — 2026-08-01
+
+### Added
+
+- **Suggest from audio** on Split workbench (when no captions / as alternate): FFmpeg `silencedetect`
+  - Long quiet (≥ content gap, default 30 min) separates programs / trims dead air
+  - Short dips (default &lt; 5 min) treated as ads; continuous multi-hour audio uses schedule hours
+  - Min program hold (default 9 min) drops false starts; silence map cached under `storage/media/…/audio_silence.json`
+  - Settings → Processing knobs + migration `026_split_audio_suggest`
+
+## [0.15.2] — 2026-08-01
+
+### Changed
+
+- **Split flag default ≥ 2 hours** (`split_flag_threshold_seconds` = 7200); strong note remains ≥ 3 hours
+- Classifier / schedule split suggester use Settings → Processing thresholds (no hardcoded 75m / 1h 11m notes)
+- Settings UI, `.env.example`, and docs describe the configured thresholds
+
+## [0.15.1] — 2026-08-01
+
+### Changed
+
+- **Split workbench contrast polish** for light and dark modes: solid panels, clearer type hierarchy, theme-aware chips, readable timeline labels (white on saturated segment colors), accent playhead, and cleaner borders/active states
+
 ## [0.15.0] — 2026-08-01
 
 ### Added

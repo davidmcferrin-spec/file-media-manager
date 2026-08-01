@@ -15,6 +15,11 @@ final class CaptionSplitSuggester
     /** How close a long gap must be to a schedule hour boundary to refine that cut. */
     public const HOUR_WINDOW_SECONDS = 180.0;
 
+    public function __construct(
+        private readonly int $flagThresholdSeconds = ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS,
+    ) {
+    }
+
     /**
      * @param list<array{start: float, end: float, text?: string}> $cues
      * @return array{
@@ -48,7 +53,11 @@ final class CaptionSplitSuggester
         $gaps = $this->findLongGaps($cues, $duration);
         $schedule = null;
         if ($dateYmd !== null && $timeHhmm !== null && $duration > 0) {
-            $schedule = (new ScheduleSplitSuggester())->suggest($dateYmd, $timeHhmm, $duration);
+            $threshold = $this->flagThresholdSeconds >= 1
+                ? $this->flagThresholdSeconds
+                : ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS;
+            $schedule = (new ScheduleSplitSuggester(flagThresholdSeconds: $threshold))
+                ->suggest($dateYmd, $timeHhmm, $duration);
         }
 
         $segments = [];

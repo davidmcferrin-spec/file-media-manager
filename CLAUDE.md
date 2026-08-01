@@ -62,7 +62,10 @@ storage/logs/           Application + worker logs
 - NOTHING moves on disk without file status = APPROVED + explicit execute action
 - Every disk operation is written to audit_log before AND after execution
 - All thumbnails/previews generated on-demand (not at scan time)
-- Files over the split threshold automatically flagged needs_split = true
+- Files at or above the split flag duration (Settings → Processing; default 2 hours)
+  are flagged needs_split = true; multi-hour schedule spans also flag
+- Split workbench suggest: captions (SRT silence gaps) or audio (FFmpeg silencedetect;
+  long quiet = program gaps; short dips = ads; continuous multi-hour → schedule hours)
 - Bootstrap vendored under public/vendor/ — no external requests
 - No inline SQL — use Repository classes
 - No framework — vanilla PHP, PSR-4 autoloading
@@ -106,7 +109,8 @@ Env: `WORKER_MODE`, `WORKER_POLL_SECONDS`, `CAPTION_EXTRACT_TIMEOUT_SECONDS`.
 - Review loop: Catalog ↔ Gaps; Captions / Glue / Split as needed
 - Commit: Execute
 - Support: Settings; Admin menu: Audit / Rollback
-- Split duration: Settings → Processing (`system_settings`), not day-to-day `.env`
+- Split flag / strong durations: Settings → Processing (`system_settings`; default 2h / 3h);
+  `.env` is fallback only
 
 ## Related Project
 Architecture and PostgreSQL patterns follow `studio-calendar` (davidmcferrin-spec/studio-calendar).

@@ -22,6 +22,7 @@ final class Classifier
 
     private int $splitFlagThreshold;
     private int $splitStrongThreshold;
+    private ScheduleSplitSuggester $scheduleSplit;
 
     public function __construct(
         private readonly ShowRepository $showRepo = new ShowRepository(),
@@ -29,13 +30,25 @@ final class Classifier
         private readonly ConversionRuleRepository $conversionRepo = new ConversionRuleRepository(),
         private readonly SystemRepository $systemRepo = new SystemRepository(),
         private readonly ScheduleLookupService $scheduleLookup = new ScheduleLookupService(),
-        private readonly ScheduleSplitSuggester $scheduleSplit = new ScheduleSplitSuggester(),
+        ?ScheduleSplitSuggester $scheduleSplit = null,
     ) {
         $this->shows           = $showRepo->all(true);
         $this->mediaTypes      = $mediaTypeRepo->all(true);
         $this->conversionRules = $conversionRepo->all();
-        $this->splitFlagThreshold = (int) ($systemRepo->get('split_flag_threshold_seconds') ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', 4260));
-        $this->splitStrongThreshold = (int) ($systemRepo->get('split_strong_threshold_seconds') ?? env('SPLIT_STRONG_THRESHOLD_SECONDS', 10800));
+        $this->splitFlagThreshold = (int) ($systemRepo->get('split_flag_threshold_seconds')
+            ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS));
+        $this->splitStrongThreshold = (int) ($systemRepo->get('split_strong_threshold_seconds')
+            ?? env('SPLIT_STRONG_THRESHOLD_SECONDS', 10800));
+        if ($this->splitFlagThreshold < 1) {
+            $this->splitFlagThreshold = ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS;
+        }
+        if ($this->splitStrongThreshold < $this->splitFlagThreshold) {
+            $this->splitStrongThreshold = $this->splitFlagThreshold;
+        }
+        $this->scheduleSplit = $scheduleSplit ?? new ScheduleSplitSuggester(
+            $this->scheduleLookup,
+            $this->splitFlagThreshold,
+        );
     }
 
     /**
@@ -169,8 +182,8 @@ final class Classifier
         $splitNotes = '';
         if ($needsSplit) {
             $splitNotes = $duration >= $this->splitStrongThreshold
-                ? 'Duration ≥ 3h — strong split candidate'
-                : 'Duration > 1h 11m — review for split';
+                ? 'Duration ≥ ' . self::formatDurationLabel($this->splitStrongThreshold) . ' — strong split candidate'
+                : 'Duration ≥ ' . self::formatDurationLabel($this->splitFlagThreshold) . ' — review for split';
             $signals[] = 'split:duration threshold';
         }
 
@@ -497,5 +510,21 @@ final class Classifier
 
         // Substring fallback only for longer needles — short tokens over-match.
         return strlen($needle) >= 6 && str_contains($haystack, $needle);
+    }
+
+    /** Human-readable duration for split notes (e.g. 2h, 2h 30m, 90m). */
+    private static function formatDurationLabel(int $seconds): string
+    {
+        $minutes = max(0, intdiv($seconds, 60));
+        $hours   = intdiv($minutes, 60);
+        $mins    = $minutes % 60;
+        if ($hours > 0 && $mins > 0) {
+            return sprintf('%dh %dm', $hours, $mins);
+        }
+        if ($hours > 0) {
+            return sprintf('%dh', $hours);
+        }
+
+        return sprintf('%dm', $mins);
     }
 }

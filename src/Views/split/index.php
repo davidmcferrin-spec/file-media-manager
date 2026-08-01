@@ -14,10 +14,21 @@ use MediaManager\Support\View;
 /** @var int $totalPages */
 ?>
 
+<style>
+.sq-page-title { color: var(--text-main); letter-spacing: 0.02em; font-weight: 600; }
+.sq-lede { color: var(--text-soft); font-size: 0.82rem; line-height: 1.5; max-width: 46rem; }
+.sq-empty { color: var(--text-soft); }
+.sq-side-item {
+  background: var(--panel-strong) !important;
+  border-color: var(--border-color) !important;
+}
+.sq-side-item .path-filename { color: var(--text-main); }
+</style>
+
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
-    <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Split Queue</h1>
-    <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
+    <h1 class="h4 mb-1 sq-page-title">Split Queue</h1>
+    <p class="mb-0 sq-lede">
       Long files flagged for segmentation. Mark the show itself in the workbench — export will add ±5&nbsp;min handles later.
     </p>
   </div>
@@ -57,7 +68,7 @@ use MediaManager\Support\View;
           <tbody>
             <?php if ($items === []): ?>
             <tr>
-              <td colspan="5" class="text-center py-4" style="color:var(--text-soft)">No split jobs.</td>
+              <td colspan="5" class="text-center py-4 sq-empty">No split jobs.</td>
             </tr>
             <?php else: ?>
             <?php foreach ($items as $item): ?>
@@ -103,13 +114,13 @@ use MediaManager\Support\View;
       <div class="card-header">Add from Queue</div>
       <div class="card-body p-0">
         <?php if ($splittable === []): ?>
-        <div class="p-4 text-center" style="color:var(--text-soft);font-size:0.85rem">
+        <div class="p-4 text-center sq-empty" style="font-size:0.85rem">
           No flagged files waiting for split queue.
         </div>
         <?php else: ?>
         <ul class="list-group list-group-flush">
           <?php foreach ($splittable as $file): ?>
-          <li class="list-group-item" style="background:transparent;border-color:var(--border-color)">
+          <li class="list-group-item sq-side-item">
             <div class="path-filename" style="font-size:0.82rem"><?php echo View::e($file['original_filename']); ?></div>
             <div class="path-text"><?php echo View::duration($file['duration_seconds'] ?? null); ?>
               · <?php echo View::e($file['show_abbr'] ?? '—'); ?></div>

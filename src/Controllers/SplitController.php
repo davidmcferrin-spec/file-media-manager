@@ -10,11 +10,17 @@ use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SplitQueueRepository;
+use MediaManager\Repositories\SystemRepository;
+use MediaManager\Services\AudioSilenceDetector;
+use MediaManager\Services\AudioSplitSuggester;
 use MediaManager\Services\CaptionSplitSuggester;
 use MediaManager\Services\DateNormalizer;
+use MediaManager\Services\MediaCacheService;
+use MediaManager\Services\ScheduleSplitSuggester;
 use MediaManager\Services\SplitMediaService;
 use MediaManager\Services\SrtCaptionParser;
 use PDOException;
+use Throwable;
 
 Auth::requireAdmin();
 
@@ -204,7 +210,12 @@ if ($method === 'POST') {
         }
 
         $cues = SrtCaptionParser::parseFile($srtPath);
-        $suggestion = (new CaptionSplitSuggester())->suggest(
+        $flagSeconds = (int) ((new SystemRepository())->get('split_flag_threshold_seconds')
+            ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS));
+        if ($flagSeconds < 1) {
+            $flagSeconds = ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS;
+        }
+        $suggestion = (new CaptionSplitSuggester($flagSeconds))->suggest(
             $cues,
             isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : null,
             isset($file['file_date']) ? (string) $file['file_date'] : null,
@@ -239,6 +250,104 @@ if ($method === 'POST') {
             'Filled ' . count($segments) . ' segment(s) from captions (≥'
             . (int) (CaptionSplitSuggester::MIN_GAP_SECONDS / 60)
             . ' min silence gaps). Review before saving.'
+        );
+        header('Location: /split/' . $id . $qs);
+        exit;
+    }
+
+    if ($uri === '/split/suggest-audio') {
+        $id           = (int) ($_POST['id'] ?? 0);
+        $statusFilter = trim((string) ($_POST['status_filter'] ?? ''));
+        if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+            $statusFilter = '';
+        }
+        $qs   = split_status_query($statusFilter !== '' ? $statusFilter : null);
+        $item = $id > 0 ? $splitRepo->findById($id) : null;
+        if ($item === null) {
+            Session::flash('error', 'Split job not found.');
+            header('Location: /split');
+            exit;
+        }
+
+        $file = $fileRepo->findById((int) $item['file_id']);
+        if ($file === null) {
+            Session::flash('error', 'Source file not found.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        $mediaPath = str_replace('\\', '/', (string) ($file['original_path'] ?? ''));
+        if ($mediaPath === '' || !is_readable($mediaPath)) {
+            Session::flash('error', 'Source media is not readable on disk.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        $codecAudio = trim((string) ($file['codec_audio'] ?? ''));
+        if ($codecAudio === '') {
+            Session::flash('error', 'No audio stream on file — cannot suggest from audio.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        @set_time_limit(0);
+        $systemRepo = new SystemRepository();
+        $settings = split_audio_settings($systemRepo);
+
+        try {
+            $gaps = split_detect_silence_cached(
+                $mediaPath,
+                (int) $file['id'],
+                $settings['noise_db'],
+                new MediaCacheService()
+            );
+            $suggestion = (new AudioSplitSuggester(
+                new AudioSilenceDetector(noiseDb: $settings['noise_db']),
+                $settings['flag_seconds'],
+                $settings['content_gap'],
+                $settings['min_program'],
+                $settings['ad_ignore'],
+            ))->suggestFromGaps(
+                $gaps,
+                isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : null,
+                isset($file['file_date']) ? (string) $file['file_date'] : null,
+                isset($file['file_time']) ? (string) $file['file_time'] : null,
+            );
+        } catch (Throwable $e) {
+            Session::flash('error', 'Audio suggest failed: ' . $e->getMessage());
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        if ($suggestion['segments'] === []) {
+            Session::flash('error', $suggestion['notes'] !== '' ? $suggestion['notes'] : 'No audio-based segments found.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        $segments = [];
+        foreach ($suggestion['segments'] as $seg) {
+            $segments[] = [
+                'start'   => $seg['start'],
+                'end'     => $seg['end'],
+                'show_id' => $seg['show_id'],
+                'label'   => $seg['label'],
+            ];
+        }
+
+        $notes = trim((string) ($item['notes'] ?? ''));
+        $notes = trim($notes . "\n\n" . $suggestion['notes']);
+        $splitRepo->update($id, $segments, $notes, (string) ($item['status'] ?? 'PENDING'));
+        split_audit($audit, 'SPLIT_AUDIO_SUGGEST', $id, [
+            'segment_count'     => count($segments),
+            'gap_count'         => $suggestion['gap_count'],
+            'content_gap_count' => $suggestion['content_gap_count'],
+        ]);
+        Session::flash(
+            'success',
+            'Filled ' . count($segments) . ' segment(s) from audio (≥'
+            . (int) round($settings['content_gap'] / 60)
+            . ' min quiet gaps). Review before saving — first run may take a few minutes on long files.'
         );
         header('Location: /split/' . $id . $qs);
         exit;
@@ -316,6 +425,83 @@ $title = 'Split Queue — Media Manager';
 require dirname(__DIR__) . '/Views/layouts/header.php';
 require dirname(__DIR__) . '/Views/split/index.php';
 require dirname(__DIR__) . '/Views/layouts/footer.php';
+
+/**
+ * @return array{
+ *   flag_seconds: int,
+ *   content_gap: float,
+ *   min_program: float,
+ *   ad_ignore: float,
+ *   noise_db: float
+ * }
+ */
+function split_audio_settings(SystemRepository $systemRepo): array
+{
+    $flagSeconds = (int) ($systemRepo->get('split_flag_threshold_seconds')
+        ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS));
+    if ($flagSeconds < 1) {
+        $flagSeconds = ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS;
+    }
+
+    $contentGap = (float) ($systemRepo->get('split_audio_content_gap_seconds')
+        ?? env('SPLIT_AUDIO_CONTENT_GAP_SECONDS', AudioSplitSuggester::DEFAULT_CONTENT_GAP_SECONDS));
+    $minProgram = (float) ($systemRepo->get('split_audio_min_program_seconds')
+        ?? env('SPLIT_AUDIO_MIN_PROGRAM_SECONDS', AudioSplitSuggester::DEFAULT_MIN_PROGRAM_SECONDS));
+    $adIgnore = (float) ($systemRepo->get('split_audio_ad_ignore_seconds')
+        ?? env('SPLIT_AUDIO_AD_IGNORE_SECONDS', AudioSplitSuggester::DEFAULT_AD_IGNORE_SECONDS));
+    $noiseDb = (float) ($systemRepo->get('split_audio_silence_noise_db')
+        ?? env('SPLIT_AUDIO_SILENCE_NOISE_DB', AudioSplitSuggester::DEFAULT_SILENCE_NOISE_DB));
+
+    return [
+        'flag_seconds' => $flagSeconds,
+        'content_gap'  => max(60.0, $contentGap),
+        'min_program'  => max(30.0, $minProgram),
+        'ad_ignore'    => max(1.0, $adIgnore),
+        'noise_db'     => min(-5.0, max(-80.0, $noiseDb)),
+    ];
+}
+
+/**
+ * @return list<array{start: float, end: float, duration: float}>
+ */
+function split_detect_silence_cached(
+    string $mediaPath,
+    int $fileId,
+    float $noiseDb,
+    MediaCacheService $cache,
+): array {
+    $mtime = @filemtime($mediaPath) ?: 0;
+    $size = @filesize($mediaPath) ?: 0;
+    $cacheDir = $cache->assetDir($fileId);
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0755, true);
+    }
+    $cachePath = $cacheDir . '/audio_silence.json';
+    if (is_readable($cachePath)) {
+        $raw = file_get_contents($cachePath);
+        $json = is_string($raw) ? json_decode($raw, true) : null;
+        if (is_array($json)
+            && (int) ($json['mtime'] ?? 0) === $mtime
+            && (int) ($json['size'] ?? 0) === $size
+            && abs((float) ($json['noise_db'] ?? 0) - $noiseDb) < 0.01
+            && isset($json['gaps']) && is_array($json['gaps'])
+        ) {
+            /** @var list<array{start: float, end: float, duration: float}> */
+            return $json['gaps'];
+        }
+    }
+
+    $detector = new AudioSilenceDetector(noiseDb: $noiseDb);
+    $gaps = $detector->detect($mediaPath);
+    @file_put_contents($cachePath, json_encode([
+        'mtime'    => $mtime,
+        'size'     => $size,
+        'noise_db' => $noiseDb,
+        'gaps'     => $gaps,
+    ], JSON_THROW_ON_ERROR));
+
+    return $gaps;
+}
 
 /**
  * @return list<array{start: float, end: float, show_id: int|null, label: string}>

@@ -15,7 +15,9 @@ use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SourceRepository;
 use MediaManager\Repositories\SystemRepository;
 use MediaManager\Repositories\UserRepository;
+use MediaManager\Services\AudioSplitSuggester;
 use MediaManager\Services\DatabaseWipeService;
+use MediaManager\Services\ScheduleSplitSuggester;
 use PDOException;
 
 Auth::requireAdmin();
@@ -378,14 +380,33 @@ if ($method === 'POST') {
             header('Location: /settings/processing');
             exit;
         }
+        $audioContentGapMin = max(5, (int) ($_POST['split_audio_content_gap_minutes'] ?? 0));
+        $audioMinProgramMin = max(1, (int) ($_POST['split_audio_min_program_minutes'] ?? 0));
+        $audioAdIgnoreMin   = max(1, (int) ($_POST['split_audio_ad_ignore_minutes'] ?? 0));
+        if ($audioContentGapMin <= $audioAdIgnoreMin) {
+            Session::flash('error', 'Audio content quiet gap must be greater than the ignore-short-dips duration.');
+            header('Location: /settings/processing');
+            exit;
+        }
+        $audioNoiseDb = (float) ($_POST['split_audio_silence_noise_db'] ?? AudioSplitSuggester::DEFAULT_SILENCE_NOISE_DB);
+        $audioNoiseDb = min(-5.0, max(-80.0, $audioNoiseDb));
+
         $continuityEnabled = isset($_POST['continuity_check_enabled']);
         $systemRepo->set('split_flag_threshold_seconds', (string) ($flagMinutes * 60));
         $systemRepo->set('split_strong_threshold_seconds', (string) ($strongMinutes * 60));
+        $systemRepo->set('split_audio_content_gap_seconds', (string) ($audioContentGapMin * 60));
+        $systemRepo->set('split_audio_min_program_seconds', (string) ($audioMinProgramMin * 60));
+        $systemRepo->set('split_audio_ad_ignore_seconds', (string) ($audioAdIgnoreMin * 60));
+        $systemRepo->set('split_audio_silence_noise_db', (string) $audioNoiseDb);
         $systemRepo->set('continuity_check_enabled', $continuityEnabled ? 'true' : 'false');
         settings_audit($audit, 'PROCESSING_SETTINGS_UPDATED', 'system_settings', null, [
-            'split_flag_threshold_seconds'   => $flagMinutes * 60,
-            'split_strong_threshold_seconds' => $strongMinutes * 60,
-            'continuity_check_enabled'       => $continuityEnabled,
+            'split_flag_threshold_seconds'     => $flagMinutes * 60,
+            'split_strong_threshold_seconds'   => $strongMinutes * 60,
+            'split_audio_content_gap_seconds'  => $audioContentGapMin * 60,
+            'split_audio_min_program_seconds'  => $audioMinProgramMin * 60,
+            'split_audio_ad_ignore_seconds'    => $audioAdIgnoreMin * 60,
+            'split_audio_silence_noise_db'     => $audioNoiseDb,
+            'continuity_check_enabled'         => $continuityEnabled,
         ]);
         Session::flash('success', 'Processing settings saved. New scans and reclassifies will use the updated thresholds.');
         header('Location: /settings/processing');
@@ -489,11 +510,24 @@ match ($settingsTab) {
     })(),
     'processing' => (function () use ($systemRepo): void {
         $flagSeconds = (int) ($systemRepo->get('split_flag_threshold_seconds')
-            ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', 5400));
+            ?? env('SPLIT_FLAG_THRESHOLD_SECONDS', ScheduleSplitSuggester::DEFAULT_FLAG_THRESHOLD_SECONDS));
         $strongSeconds = (int) ($systemRepo->get('split_strong_threshold_seconds')
             ?? env('SPLIT_STRONG_THRESHOLD_SECONDS', 10800));
         $splitFlagMinutes   = max(1, (int) round($flagSeconds / 60));
         $splitStrongMinutes = max(1, (int) round($strongSeconds / 60));
+
+        $audioContentGapSeconds = (float) ($systemRepo->get('split_audio_content_gap_seconds')
+            ?? env('SPLIT_AUDIO_CONTENT_GAP_SECONDS', AudioSplitSuggester::DEFAULT_CONTENT_GAP_SECONDS));
+        $audioMinProgramSeconds = (float) ($systemRepo->get('split_audio_min_program_seconds')
+            ?? env('SPLIT_AUDIO_MIN_PROGRAM_SECONDS', AudioSplitSuggester::DEFAULT_MIN_PROGRAM_SECONDS));
+        $audioAdIgnoreSeconds = (float) ($systemRepo->get('split_audio_ad_ignore_seconds')
+            ?? env('SPLIT_AUDIO_AD_IGNORE_SECONDS', AudioSplitSuggester::DEFAULT_AD_IGNORE_SECONDS));
+        $audioSilenceNoiseDb = (float) ($systemRepo->get('split_audio_silence_noise_db')
+            ?? env('SPLIT_AUDIO_SILENCE_NOISE_DB', AudioSplitSuggester::DEFAULT_SILENCE_NOISE_DB));
+        $audioContentGapMinutes = max(5, (int) round($audioContentGapSeconds / 60));
+        $audioMinProgramMinutes = max(1, (int) round($audioMinProgramSeconds / 60));
+        $audioAdIgnoreMinutes   = max(1, (int) round($audioAdIgnoreSeconds / 60));
+
         $continuitySetting = $systemRepo->get('continuity_check_enabled');
         if ($continuitySetting !== null && $continuitySetting !== '') {
             $continuityCheckEnabled = in_array(strtolower(trim($continuitySetting)), ['1', 'true', 'yes', 'on'], true);
