@@ -684,36 +684,43 @@ if ($uri === '/queue/extract-captions') {
     ]);
 
     $projectRoot = dirname(__DIR__, 2);
-    $phpBin = PHP_BINARY;
-    $script = $projectRoot . '/scripts/caption_extract.php';
     $logFile = CaptionExtractJobService::logPathForJob($jobId, $projectRoot);
     $logDir = dirname($logFile);
     if (!is_dir($logDir)) {
         @mkdir($logDir, 0775, true);
     }
+    $modeNote = \MediaManager\Support\WorkerMode::isDaemon()
+        ? 'Queued from Catalog for caption-extract worker'
+        : 'Queued from Catalog — spawning worker';
     @file_put_contents(
         $logFile,
-        '[' . gmdate('Y-m-d\TH:i:s\Z') . "] INFO Queued from Catalog count=" . count($ids) . "\n",
+        '[' . gmdate('Y-m-d\TH:i:s\Z') . "] INFO {$modeNote} count=" . count($ids) . "\n",
         FILE_APPEND | LOCK_EX
     );
-    $flags = '--job-id=' . $jobId;
-    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
-        pclose(popen(
-            'start /B "" ' . escapeshellarg($phpBin) . ' ' . escapeshellarg($script)
-            . ' ' . $flags . ' >> ' . escapeshellarg($logFile) . ' 2>&1',
-            'r'
-        ));
-    } else {
-        exec(sprintf(
-            '%s %s %s >> %s 2>&1 &',
-            escapeshellarg($phpBin),
-            escapeshellarg($script),
-            $flags,
-            escapeshellarg($logFile)
-        ));
+
+    if (\MediaManager\Support\WorkerMode::shouldSpawn()) {
+        $phpBin = PHP_BINARY;
+        $script = $projectRoot . '/scripts/caption_extract.php';
+        $flags = '--job-id=' . $jobId;
+        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+            pclose(popen(
+                'start /B "" ' . escapeshellarg($phpBin) . ' ' . escapeshellarg($script)
+                . ' ' . $flags . ' >> ' . escapeshellarg($logFile) . ' 2>&1',
+                'r'
+            ));
+        } else {
+            exec(sprintf(
+                '%s %s %s >> %s 2>&1 &',
+                escapeshellarg($phpBin),
+                escapeshellarg($script),
+                $flags,
+                escapeshellarg($logFile)
+            ));
+        }
     }
 
-    Session::flash('success', 'Caption extract job #' . $jobId . ' started for ' . count($ids) . ' file(s).');
+    $verb = \MediaManager\Support\WorkerMode::isDaemon() ? 'queued' : 'started';
+    Session::flash('success', 'Caption extract job #' . $jobId . ' ' . $verb . ' for ' . count($ids) . ' file(s).');
     header('Location: /captions/' . $jobId);
     exit;
 }

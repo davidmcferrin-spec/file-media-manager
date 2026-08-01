@@ -214,7 +214,8 @@ final class ScanJobRepository extends BaseRepository
                  completed_at = NULL,
                  error_message = NULL,
                  processed_files = 0,
-                 total_files = 0
+                 total_files = 0,
+                 force_rescan = true
              WHERE id = ?
                AND status IN (\'COMPLETED\', \'CANCELLED\', \'PAUSED\', \'FAILED\')
              RETURNING id'
@@ -222,6 +223,13 @@ final class ScanJobRepository extends BaseRepository
         $stmt->execute([$id]);
 
         return $stmt->fetchColumn() !== false;
+    }
+
+    public function clearForceRescan(int $id): void
+    {
+        $this->db()->prepare(
+            'UPDATE scan_jobs SET force_rescan = false WHERE id = ?'
+        )->execute([$id]);
     }
 
     public function incrementProcessed(int $id): void

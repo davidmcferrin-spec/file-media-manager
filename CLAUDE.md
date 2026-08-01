@@ -10,28 +10,35 @@ only after human approval via a web-based review queue.
 - PHP 8.2+ (strict_types=1 everywhere)
 - Bootstrap 5 vendored (no CDN — must work on isolated broadcast network)
 - PostgreSQL 14+
-- FFmpeg + FFprobe (metadata extraction, thumbnail generation)
+- FFmpeg + FFprobe (metadata, thumbnails, previews, glue concat, caption extract)
 - Apache 2.4 on Debian 13
-- Session-based auth (bcrypt passwords)
+- Session-based auth (bcrypt local + optional LDAP)
+- systemd: `media-manager-scan`, `media-manager-caption-extract`
 
 ## Architecture
 ```
 public/index.php        Front controller — all requests route through here
 src/bootstrap.php       Autoload + env + config
-src/App.php             Router + dependency wiring
-src/Auth/               Auth, Session, rate limiting
+src/Auth/               Auth, Session, rate limiting, LDAP
 src/Controllers/        One controller per module
 src/Repositories/       All DB access — no inline SQL in controllers/views
-src/Services/           Classifier, Executor, Rollback, FFprobe, Thumbnail
+src/Services/           Scan, Classifier, Glue, Captions, Executor, Rollback,
+                        FFprobe, Thumbnail, Preview, Continuity, Split media, …
 src/Views/              PHP templates only — no logic beyond display
-src/Support/            View helpers, AppVersion
+src/Support/            View helpers, AppVersion, WorkerMode
 VERSION                 App semver (displayed in footer)
 CHANGELOG.md            Release notes (shown on /versions)
 scripts/migrate.php     Versioned PostgreSQL migration runner
+scripts/scan_worker.php              Long-running scan queue daemon
+scripts/caption_extract_worker.php   Long-running CC extract daemon
+scripts/scan.php                     One-shot scan (CLI / legacy spawn)
+scripts/caption_extract.php          One-shot caption job (CLI / legacy spawn)
+deploy/systemd/         Unit files (installed by setup.sh)
 sql/migrations/         Versioned PostgreSQL migrations (001_, 002_, etc.)
 storage/media/          Derived assets sharded by files.public_id (ULID): aa/bb/cc/{ulid}/
 storage/thumbnails/     Legacy flat thumbs (read fallback; new writes use storage/media)
-storage/logs/           Application logs
+storage/tmp/            FFmpeg concat lists, short-lived temp
+storage/logs/           Application + worker logs
 ```
 
 ## NAS Mount Points
@@ -46,17 +53,32 @@ storage/logs/           Application logs
 - Date: YYYYMMDD, Time: HHMM 24hr Eastern
 
 ## Roles
-- admin — full access: scan, execute, rollback, audit, user mgmt, dictionary
-- editor — queue review only: approve, reject, edit proposed name/path, flag
+- admin — full access: scan, execute, rollback, audit, user mgmt, dictionary,
+  captions jobs, glue execute, split
+- editor — queue review only: approve, reject, edit proposed name/path, flag;
+  glue mark/clear
 
 ## Key Rules
 - NOTHING moves on disk without file status = APPROVED + explicit execute action
 - Every disk operation is written to audit_log before AND after execution
-- All thumbnails generated on-demand (not at scan time)
-- Files > 3600s duration automatically flagged needs_split = true
+- All thumbnails/previews generated on-demand (not at scan time)
+- Files over the split threshold automatically flagged needs_split = true
 - Bootstrap vendored under public/vendor/ — no external requests
 - No inline SQL — use Repository classes
 - No framework — vanilla PHP, PSR-4 autoloading
+- Background Scan + Caption extract: web enqueues only; systemd workers poll
+  (`WORKER_MODE=daemon`). Do not SIGKILL the daemon PID on cancel — use
+  cooperative `cancel_requested`. Local/dev may set `WORKER_MODE=spawn`.
+
+## Background workers
+| Unit | Drains |
+|------|--------|
+| media-manager-scan | scan_jobs PENDING/PAUSED/FAILED/orphaned RUNNING |
+| media-manager-caption-extract | caption_extract_jobs same statuses |
+
+Logs: `journalctl -u <unit> -f` and `storage/logs/*-worker.log`.
+Per caption job: `storage/logs/caption-extract-{id}.log`.
+Env: `WORKER_MODE`, `WORKER_POLL_SECONDS`, `CAPTION_EXTRACT_TIMEOUT_SECONDS`.
 
 ## Code Style
 - strict_types=1 on every PHP file
@@ -69,7 +91,7 @@ storage/logs/           Application logs
 
 ## Testing
 - Run php -l on all files before committing
-- Key classifier logic covered by unit tests in tests/
+- Key classifier / glue / caption logic covered by unit tests in tests/
 
 ## App versioning
 - Single source of truth: root `VERSION` (semver)
@@ -80,10 +102,10 @@ storage/logs/           Application logs
 
 ## User workflow (IA)
 - Setup: Shows → Timeline (admin)
-- Ingest: Scan
-- Review loop: Catalog ↔ Gaps
+- Ingest: Scan (worker processes queue)
+- Review loop: Catalog ↔ Gaps; Captions / Glue / Split as needed
 - Commit: Execute
-- Support: Split, Settings; Admin menu: Audit / Rollback
+- Support: Settings; Admin menu: Audit / Rollback
 - Split duration: Settings → Processing (`system_settings`), not day-to-day `.env`
 
 ## Related Project

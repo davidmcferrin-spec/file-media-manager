@@ -23,6 +23,19 @@ final class CaptionExtractJobService
     ) {
     }
 
+    /** Claim and run the next queued job. Returns job id, or null if idle. */
+    public function runNextPending(): ?int
+    {
+        $jobId = $this->jobs->claimNextPending();
+        if ($jobId === null) {
+            return null;
+        }
+
+        $this->executeClaimedJob($jobId);
+
+        return $jobId;
+    }
+
     public function runJob(int $jobId): void
     {
         $job = $this->jobs->findById($jobId);
@@ -42,6 +55,16 @@ final class CaptionExtractJobService
             throw new \RuntimeException('Job #' . $jobId . ' cannot be claimed (status=' . $status . ').');
         }
 
+        $this->executeClaimedJob($jobId);
+    }
+
+    private function executeClaimedJob(int $jobId): void
+    {
+        $job = $this->jobs->findById($jobId);
+        if ($job === null) {
+            throw new \InvalidArgumentException('Caption extract job not found: ' . $jobId);
+        }
+
         $this->jobs->setWorkerPid($jobId, (int) getmypid());
         $this->logPath = $this->resolveLogPath($jobId);
         $this->log('INFO', 'Worker started', [
@@ -52,6 +75,7 @@ final class CaptionExtractJobService
 
         try {
             $scope = (string) ($job['scope'] ?? 'missing_srt');
+            $probeOnly = $scope === 'probe_only';
             $selectedIds = $this->decodeFileIds($job['file_ids'] ?? null);
 
             $summary = $this->files->summarizeCaptionExtractCandidates($scope, $selectedIds);
@@ -95,7 +119,7 @@ final class CaptionExtractJobService
                         $row = $this->files->findById($priorityId);
                         if ($row !== null && $this->isStillCandidate($row, $scope, $selectedIds)) {
                             $this->log('INFO', 'PRIORITY file', ['file_id' => $priorityId]);
-                            $this->processOne($jobId, $row, true);
+                            $this->processOne($jobId, $row, true, $probeOnly);
                         } else {
                             $this->log('INFO', 'PRIORITY drop (not a candidate)', [
                                 'file_id' => $priorityId,
@@ -130,7 +154,7 @@ final class CaptionExtractJobService
                     }
 
                     $afterId = (int) $row['id'];
-                    $this->processOne($jobId, $row, false);
+                    $this->processOne($jobId, $row, false, $probeOnly);
                 }
             }
 
@@ -160,14 +184,17 @@ final class CaptionExtractJobService
      */
     private function isStillCandidate(array $row, string $scope, ?array $selectedIds): bool
     {
-        if (!empty($row['srt_path'])) {
-            return false;
-        }
         $status = (string) ($row['status'] ?? '');
         if (!in_array($status, ['PENDING', 'FLAGGED', 'APPROVED', 'REJECTED', 'EXECUTED'], true)) {
             return false;
         }
         $id = (int) ($row['id'] ?? 0);
+        if ($scope === 'probe_only') {
+            return empty($row['captions_probed']);
+        }
+        if (!empty($row['srt_path'])) {
+            return false;
+        }
         if ($scope === 'has_captions' && empty($row['has_captions'])) {
             return false;
         }
@@ -181,7 +208,7 @@ final class CaptionExtractJobService
     }
 
     /** @param array<string, mixed> $row */
-    private function processOne(int $jobId, array $row, bool $priority): void
+    private function processOne(int $jobId, array $row, bool $priority, bool $probeOnly = false): void
     {
         $fileId = (int) $row['id'];
         $filename = (string) ($row['original_filename'] ?? ('#' . $fileId));
@@ -199,10 +226,13 @@ final class CaptionExtractJobService
             'has_captions'     => !empty($row['has_captions']),
             'stream_index'     => $row['caption_stream_index'] ?? null,
             'priority'         => $priority,
+            'probe_only'       => $probeOnly,
         ]);
 
         try {
-            $result = $this->extractor->extractForFile($fileId);
+            $result = $probeOnly
+                ? $this->extractor->probeForFile($fileId)
+                : $this->extractor->extractForFile($fileId);
             $elapsed = round(microtime(true) - $t0, 2);
 
             if ($result['ok']) {

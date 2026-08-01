@@ -32,6 +32,11 @@ $projectRoot = dirname(__DIR__, 2);
 
 function spawn_scan_worker(int $jobId, string $projectRoot, bool $rescan = false): void
 {
+    if (!\MediaManager\Support\WorkerMode::shouldSpawn()) {
+        // Daemon mode: media-manager-scan.service polls PENDING jobs.
+        return;
+    }
+
     $phpBin  = PHP_BINARY;
     $script  = $projectRoot . '/scripts/scan.php';
     $logFile = $projectRoot . '/storage/logs/scan-' . $jobId . '.log';
@@ -125,7 +130,10 @@ if ($method === 'POST' && $uri === '/scan/start') {
 
     spawn_scan_worker($jobId, $projectRoot);
 
-    Session::flash('success', 'Scan job #' . $jobId . ' started.');
+    $queuedMsg = \MediaManager\Support\WorkerMode::isDaemon()
+        ? 'Scan job #' . $jobId . ' queued — the scan worker will pick it up.'
+        : 'Scan job #' . $jobId . ' started.';
+    Session::flash('success', $queuedMsg);
     header('Location: /scan/' . $jobId);
     exit;
 }
@@ -206,7 +214,8 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
     $killed      = false;
     $pid         = null;
     $stopOutcome = null;
-    if ($status === 'RUNNING') {
+    // In daemon mode never SIGKILL the long-running worker — cooperative cancel only.
+    if ($status === 'RUNNING' && \MediaManager\Support\WorkerMode::shouldSpawn()) {
         $pid = $scanJobs->getWorkerPid($jobId);
         if ($pid !== null && $pid > 0) {
             $killed = kill_scan_worker($pid);
@@ -232,11 +241,11 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
     $message = match ($status) {
         'PENDING' => 'Scan job #' . $jobId . ' cancelled.',
         'RUNNING' => match ($stopOutcome ?? null) {
-            'PAUSED'  => 'Scan job #' . $jobId . ' paused. Run scan.php or click Resume to continue.',
+            'PAUSED'  => 'Scan job #' . $jobId . ' paused. Click Resume when ready.',
             'CANCELLED' => 'Scan job #' . $jobId . ' stopped.',
             default   => $killed
                 ? 'Scan job #' . $jobId . ' stopped.'
-                : 'Stop requested for scan job #' . $jobId . '. It will halt after the current file.',
+                : 'Stop requested for scan job #' . $jobId . '. The worker will halt after the current file.',
         },
         default => 'Scan job #' . $jobId . ' updated.',
     };
@@ -268,6 +277,7 @@ if ($method === 'POST' && $uri === '/scan/resume') {
         exit;
     }
 
+    // PAUSED jobs are already claimable by the daemon / scan.php --job-id.
     spawn_scan_worker($jobId, $projectRoot);
 
     $user = Auth::user();
@@ -283,7 +293,10 @@ if ($method === 'POST' && $uri === '/scan/resume') {
         []
     );
 
-    Session::flash('success', 'Scan job #' . $jobId . ' resumed.');
+    $msg = \MediaManager\Support\WorkerMode::isDaemon()
+        ? 'Scan job #' . $jobId . ' queued for resume — the scan worker will pick it up.'
+        : 'Scan job #' . $jobId . ' resumed.';
+    Session::flash('success', $msg);
     header('Location: /scan/' . $jobId);
     exit;
 }
@@ -404,10 +417,13 @@ if ($method === 'POST' && $uri === '/scan/rescan') {
 
     spawn_scan_worker($jobId, $projectRoot, true);
 
+    $rescanMsg = \MediaManager\Support\WorkerMode::isDaemon()
+        ? 'Full rescan queued for job #' . $jobId . ' — the scan worker will pick it up.'
+        : 'Full rescan started for job #' . $jobId . '.';
     Session::flash(
         'success',
-        'Full rescan started for job #' . $jobId
-        . ' — re-walking the path, reclassifying pending/flagged/rejected files, queueing new ones. Approved/executed files are left unchanged.'
+        $rescanMsg
+        . ' Re-walks the path, reclassifies pending/flagged/rejected files, queues new ones. Approved/executed files are left unchanged.'
     );
     header('Location: /scan/' . $jobId);
     exit;

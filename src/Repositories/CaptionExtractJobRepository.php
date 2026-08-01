@@ -11,7 +11,7 @@ final class CaptionExtractJobRepository extends BaseRepository
      */
     public function create(int $createdBy, string $scope = 'missing_srt', ?array $fileIds = null): int
     {
-        if (!in_array($scope, ['missing_srt', 'has_captions', 'selected'], true)) {
+        if (!in_array($scope, ['missing_srt', 'has_captions', 'selected', 'probe_only'], true)) {
             $scope = 'missing_srt';
         }
         if ($scope === 'selected' && $fileIds !== null && $fileIds !== []) {
@@ -115,6 +115,69 @@ final class CaptionExtractJobRepository extends BaseRepository
         $stmt->execute([$id]);
 
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Atomically claim the oldest runnable job for the daemon worker.
+     */
+    public function claimNextPending(): ?int
+    {
+        $stmt = $this->db()->query(
+            "WITH next AS (
+                SELECT id FROM caption_extract_jobs
+                WHERE status IN ('PENDING', 'PAUSED')
+                ORDER BY
+                    CASE status
+                        WHEN 'PENDING' THEN 0
+                        ELSE 1
+                    END,
+                    created_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+             )
+             UPDATE caption_extract_jobs j
+             SET status = 'RUNNING',
+                 started_at = COALESCE(j.started_at, now()),
+                 error_message = NULL,
+                 cancel_requested = false,
+                 completed_at = NULL,
+                 worker_pid = NULL
+             FROM next
+             WHERE j.id = next.id
+             RETURNING j.id"
+        );
+        $id = $stmt->fetchColumn();
+        if ($id !== false) {
+            return (int) $id;
+        }
+
+        return $this->claimNextOrphanedRunning();
+    }
+
+    private function claimNextOrphanedRunning(): ?int
+    {
+        $rows = $this->db()->query(
+            "SELECT id, worker_pid FROM caption_extract_jobs
+             WHERE status = 'RUNNING'
+             ORDER BY created_at ASC
+             LIMIT 20"
+        )->fetchAll();
+        if (!is_array($rows)) {
+            return null;
+        }
+
+        foreach ($rows as $row) {
+            $id = (int) $row['id'];
+            $pid = (int) ($row['worker_pid'] ?? 0);
+            if ($this->pidAlive($pid)) {
+                continue;
+            }
+            if ($this->claimOrphanedRunning($id)) {
+                return $id;
+            }
+        }
+
+        return null;
     }
 
     public function claimOrphanedRunning(int $id): bool

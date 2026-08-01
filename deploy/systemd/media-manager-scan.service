@@ -1,0 +1,31 @@
+[Unit]
+Description=Media Manager scan queue worker
+Documentation=file:///var/www/media-manager/README.md
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/media-manager
+ExecStart=/usr/bin/php8.4 /var/www/media-manager/scripts/scan_worker.php
+Restart=always
+RestartSec=5
+Nice=10
+
+# Logs also go to storage/logs/scan-worker.log; journal captures stdout/stderr.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-manager-scan
+
+# Long NAS walks + FFprobe
+TimeoutStopSec=120
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Environment from app .env is loaded by PHP bootstrap; optional overrides:
+Environment=WORKER_MODE=daemon
+
+[Install]
+WantedBy=multi-user.target

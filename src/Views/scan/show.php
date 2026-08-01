@@ -178,7 +178,8 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
 <?php elseif ($status === 'PAUSED'): ?>
 <div class="alert alert-info mb-4" style="font-size:0.84rem;">
   Scan paused<?php echo $done > 0 ? ' after processing ' . number_format($done) . ' of ' . number_format($total) . ' file(s)' : ''; ?>.
-  Run <code>php scripts/scan.php</code> (no flags) or click <strong>Resume Scan</strong> to continue.
+  Click <strong>Resume Scan</strong> (the scan worker picks it up), or run
+  <code>php scripts/scan.php --job-id=<?php echo (int) $job['id']; ?></code>.
   Already-queued files are kept; duplicates are skipped on resume.
 </div>
 <?php elseif ($status === 'CANCELLED'): ?>

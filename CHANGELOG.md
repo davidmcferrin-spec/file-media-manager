@@ -14,6 +14,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.14.1] — 2026-08-01
+
+### Added
+
+- **`scripts/probe_captions.php`** — one-shot CLI to enqueue (or `--run`) a `probe_only` job that FFprobes all unprobed catalog files for Catalog CC badges without clicking each row
+
+## [0.14.0] — 2026-08-01
+
+### Added
+
+- **systemd queue workers** for Scan and Caption extract (no CLI babysitting)
+  - `media-manager-scan.service` → `scripts/scan_worker.php` (poll loop)
+  - `media-manager-caption-extract.service` → `scripts/caption_extract_worker.php`
+  - `setup.sh` installs, enables, and starts both units
+  - Env: `WORKER_MODE=daemon` (default) / `spawn` for local one-shot forks; `WORKER_POLL_SECONDS`
+  - Cooperative cancel only in daemon mode (does not kill the long-running process)
+  - Scan full-rescan flag: migration `023_scan_force_rescan` (`force_rescan`) so the daemon can run rescans without `--rescan`
+- README + CLAUDE.md brought current (workers, Captions, Glue, Split, Continuity, LDAP)
+
+### Changed
+
+- Web UI enqueues Scan / Caption jobs when `WORKER_MODE=daemon`; workers drain the queue
+- Caption extract `claimNextPending` for daemon pickup (including orphaned RUNNING)
+
+## [0.14.0] — 2026-08-01
+
+### Added
+
+- **Catalog CC badges always visible** with clear states:
+  - Grey `CC?` — not probed yet
+  - Orange `CC` — captions/subtitles detected
+  - Green `CC` — SRT extracted
+  - Muted struck `CC` — probed, no stream found
+- `captions_probed` column + Captions job scope **Probe CC badges only** (fast FFprobe, no FFmpeg extract)
+- Catalog legend + Extract CC available for any file missing SRT (not only already-flagged CC)
+- Migration `024_captions_probed`
+
 ## [0.13.0] — 2026-08-01
 
 ### Added

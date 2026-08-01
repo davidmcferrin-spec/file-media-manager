@@ -1,0 +1,31 @@
+[Unit]
+Description=Media Manager caption extract (CC) queue worker
+Documentation=file:///var/www/media-manager/README.md
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/media-manager
+ExecStart=/usr/bin/php8.4 /var/www/media-manager/scripts/caption_extract_worker.php
+Restart=always
+RestartSec=5
+Nice=10
+
+# Per-job detail: storage/logs/caption-extract-{id}.log
+# Worker loop: storage/logs/caption-extract-worker.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-manager-caption-extract
+
+# FFmpeg extract can run a long time per file
+TimeoutStopSec=120
+KillMode=mixed
+KillSignal=SIGTERM
+
+Environment=WORKER_MODE=daemon
+
+[Install]
+WantedBy=multi-user.target

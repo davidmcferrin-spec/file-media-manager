@@ -36,6 +36,78 @@ final class CaptionExtractService
     }
 
     /**
+     * Probe only — update Catalog CC badge flags without FFmpeg extract.
+     *
+     * @return array{
+     *   ok: bool,
+     *   skip: bool,
+     *   srt_path: ?string,
+     *   message: string,
+     *   ffmpeg_tail: string
+     * }
+     */
+    public function probeForFile(int $fileId): array
+    {
+        $fail = static fn (string $msg, bool $skip = false): array => [
+            'ok'          => false,
+            'skip'        => $skip,
+            'srt_path'    => null,
+            'message'     => $msg,
+            'ffmpeg_tail' => '',
+        ];
+
+        $file = $this->files->findById($fileId);
+        if ($file === null) {
+            return $fail('File not found.');
+        }
+
+        $source = FileRepository::mediaSourcePath($file);
+        if ($source === '' || !is_readable($source)) {
+            return $fail('Media file is not readable: ' . $source);
+        }
+
+        $existing = FFprobeService::adjacentCaptionSidecar($source);
+        if ($existing !== null && str_ends_with(strtolower($existing), '.srt')) {
+            $this->files->recordSrtSidecar($fileId, $existing, true, null);
+
+            return [
+                'ok'          => true,
+                'skip'        => false,
+                'srt_path'    => $existing,
+                'message'     => 'Existing SRT sidecar linked.',
+                'ffmpeg_tail' => '',
+            ];
+        }
+
+        $probe = $this->ffprobe->probe($source);
+        if ($probe === null) {
+            return $fail('FFprobe failed — captions_probed left unchanged.');
+        }
+
+        $streamIndex = isset($probe['caption_stream_index'])
+            ? (int) $probe['caption_stream_index']
+            : null;
+        $hasCaptions = !empty($probe['has_captions']) || $streamIndex !== null;
+        $this->files->updateCaptionFlags($fileId, $hasCaptions, $streamIndex);
+
+        if ($hasCaptions) {
+            return [
+                'ok'          => true,
+                'skip'        => false,
+                'srt_path'    => null,
+                'message'     => 'Captions detected (stream '
+                    . ($streamIndex !== null ? (string) $streamIndex : '?') . ').',
+                'ffmpeg_tail' => '',
+            ];
+        }
+
+        return $fail(
+            'No caption/subtitle stream detected. (CEA-608 in MXF may need a separate extractor.)',
+            true
+        );
+    }
+
+    /**
      * @return array{
      *   ok: bool,
      *   skip: bool,
@@ -85,28 +157,34 @@ final class CaptionExtractService
             ? (int) $file['caption_stream_index']
             : null;
         $hasCaptions = !empty($file['has_captions']);
+        $probeOk = !empty($file['captions_probed']) && ($hasCaptions || $streamIndex !== null);
 
         if ($streamIndex === null || !$hasCaptions) {
             $probe = $this->ffprobe->probe($source);
             if ($probe !== null) {
+                $probeOk = true;
                 if (isset($probe['caption_stream_index'])) {
                     $streamIndex = (int) $probe['caption_stream_index'];
                 }
-                if (!empty($probe['has_captions'])) {
+                if (!empty($probe['has_captions']) || $streamIndex !== null) {
                     $hasCaptions = true;
                     $this->files->updateCaptionFlags($fileId, true, $streamIndex);
+                } else {
+                    $this->files->updateCaptionFlags($fileId, false, null);
                 }
             }
         }
 
         if (!$hasCaptions && $streamIndex === null) {
-            $this->files->updateCaptionFlags($fileId, false, null);
+            if ($probeOk) {
+                return $fail(
+                    'No caption/subtitle stream detected. (CEA-608 in MXF may need a separate extractor.)',
+                    '',
+                    true
+                );
+            }
 
-            return $fail(
-                'No caption/subtitle stream detected. (CEA-608 in MXF may need a separate extractor.)',
-                '',
-                true
-            );
+            return $fail('FFprobe failed — could not determine captions.', '', false);
         }
 
         $srtPath = dirname($source) . DIRECTORY_SEPARATOR

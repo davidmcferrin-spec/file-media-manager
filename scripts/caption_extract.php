@@ -16,19 +16,25 @@ foreach ($argv as $arg) {
     }
 }
 
-if ($jobId === null || $jobId <= 0) {
-    fwrite(STDERR, "Usage: php scripts/caption_extract.php --job-id=N\n");
-    exit(1);
-}
-
 $root = dirname(__DIR__);
 $service = new CaptionExtractJobService(projectRoot: $root);
 
 try {
-    $service->runJob($jobId);
-    echo "Caption extract job {$jobId} finished.\n";
+    if ($jobId !== null && $jobId > 0) {
+        $service->runJob($jobId);
+        echo "Caption extract job {$jobId} finished.\n";
+        exit(0);
+    }
+
+    $ran = $service->runNextPending();
+    if ($ran === null) {
+        echo "No pending caption extract jobs.\n";
+        exit(0);
+    }
+    echo "Caption extract job {$ran} finished.\n";
     exit(0);
 } catch (Throwable $e) {
-    fwrite(STDERR, 'Caption extract job ' . $jobId . ' failed: ' . $e->getMessage() . "\n");
+    $label = $jobId !== null && $jobId > 0 ? (string) $jobId : 'pending';
+    fwrite(STDERR, 'Caption extract job ' . $label . ' failed: ' . $e->getMessage() . "\n");
     exit(1);
 }

@@ -19,13 +19,38 @@ if (preg_match('#^/queue/ffprobe/(\d+)$#', $uri, $m) !== 1) {
 }
 
 $fileId = (int) $m[1];
-$file   = (new FileRepository())->findById($fileId);
+$files  = new FileRepository();
+$file   = $files->findById($fileId);
 
 if ($file === null) {
     http_response_code(404);
     header('Content-Type: application/json');
     echo json_encode(['error' => 'File not found'], JSON_THROW_ON_ERROR);
     exit;
+}
+
+$sourcePath = FileRepository::mediaSourcePath($file);
+$ffprobe    = new FFprobeService();
+$live       = null;
+$error      = null;
+
+if (!$ffprobe->isAvailable()) {
+    $error = 'FFprobe is not available on this server.';
+} elseif (!is_readable($sourcePath)) {
+    $error = 'Source file is not readable: ' . $sourcePath;
+} else {
+    $live = $ffprobe->probeRaw($sourcePath);
+    if ($live === null) {
+        $error = 'FFprobe could not read this file.';
+    } else {
+        $summary = is_array($live['summary'] ?? null) ? $live['summary'] : [];
+        $streamIndex = isset($summary['caption_stream_index'])
+            ? (int) $summary['caption_stream_index']
+            : null;
+        $hasCaptions = !empty($summary['has_captions']) || $streamIndex !== null;
+        $files->updateCaptionFlags($fileId, $hasCaptions, $streamIndex);
+        $file = $files->findById($fileId) ?? $file;
+    }
 }
 
 $storedSummary = [
@@ -44,26 +69,11 @@ $storedSummary = [
     ),
     'metadata_extracted' => !empty($file['metadata_extracted']),
     'has_captions'   => !empty($file['has_captions']),
+    'captions_probed'=> !empty($file['captions_probed']),
     'caption_stream_index' => $file['caption_stream_index'] ?? null,
     'srt_path'       => $file['srt_path'] ?? null,
     'source'         => 'scan',
 ];
-
-$sourcePath = FileRepository::mediaSourcePath($file);
-$ffprobe    = new FFprobeService();
-$live       = null;
-$error      = null;
-
-if (!$ffprobe->isAvailable()) {
-    $error = 'FFprobe is not available on this server.';
-} elseif (!is_readable($sourcePath)) {
-    $error = 'Source file is not readable: ' . $sourcePath;
-} else {
-    $live = $ffprobe->probeRaw($sourcePath);
-    if ($live === null) {
-        $error = 'FFprobe could not read this file.';
-    }
-}
 
 header('Content-Type: application/json');
 echo json_encode([

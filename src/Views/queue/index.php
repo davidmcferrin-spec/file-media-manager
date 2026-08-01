@@ -60,6 +60,16 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
       <a href="/execute" class="ms-1"><?php echo (int) $statusCounts['APPROVED']; ?> approved — ready to execute</a>
       <?php endif; ?>
     </p>
+    <p class="mb-0 mt-1 path-text" style="font-size:0.72rem">
+      CC legend:
+      <span class="badge" style="font-size:0.65rem;background:rgba(148,163,184,0.45);color:var(--text-main)">CC?</span> not probed
+      · <span class="badge" style="font-size:0.65rem;background:#e67e22;color:#fff">CC</span> captions found
+      · <span class="badge" style="font-size:0.65rem;background:#198754;color:#fff">CC</span> SRT extracted
+      · <span class="badge" style="font-size:0.65rem;background:rgba(148,163,184,0.28);color:var(--text-soft);text-decoration:line-through">CC</span> probed, none
+      <?php if (Auth::isAdmin()): ?>
+      · <a href="/captions">Probe / extract</a>
+      <?php endif; ?>
+    </p>
   </div>
 </div>
 
@@ -460,11 +470,9 @@ $queueBatchable = Auth::isEditor() && (
               <button type="submit" class="btn btn-outline-info btn-xs">Split</button>
             </form>
             <?php endif; ?>
-            <?php if (Auth::isEditor()
-                && !empty($item['has_captions'])
+            <?php if (Auth::isAdmin()
                 && empty($item['srt_path'])
-                && in_array($item['status'] ?? '', ['PENDING', 'FLAGGED', 'APPROVED', 'REJECTED'], true)): ?>
-            <?php if (Auth::isAdmin()): ?>
+                && in_array($item['status'] ?? '', ['PENDING', 'FLAGGED', 'APPROVED', 'REJECTED', 'EXECUTED'], true)): ?>
             <form method="post" action="/queue/extract-captions" class="d-inline"
                   onsubmit="return confirm('Extract CC: start a job, or move this clip to the top of the active Captions cue?');">
               <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
@@ -472,7 +480,6 @@ $queueBatchable = Auth::isEditor() && (
               <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
               <button type="submit" class="btn btn-outline-secondary btn-xs">Extract CC</button>
             </form>
-            <?php endif; ?>
             <?php endif; ?>
           </td>
         </tr>

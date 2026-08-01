@@ -105,12 +105,15 @@ info "Creating storage directories..."
 mkdir -p "${WEB_ROOT}/storage/thumbnails"
 mkdir -p "${WEB_ROOT}/storage/logs"
 mkdir -p "${WEB_ROOT}/storage/backups"
+mkdir -p "${WEB_ROOT}/storage/tmp"
+mkdir -p "${WEB_ROOT}/storage/media"
 mkdir -p "${WEB_ROOT}/uploads"
 
 # .gitkeep placeholders
 touch "${WEB_ROOT}/storage/thumbnails/.gitkeep"
 touch "${WEB_ROOT}/storage/logs/.gitkeep"
 touch "${WEB_ROOT}/storage/backups/.gitkeep"
+touch "${WEB_ROOT}/storage/tmp/.gitkeep"
 touch "${WEB_ROOT}/uploads/.gitkeep"
 
 success "Storage directories created."
@@ -331,7 +334,38 @@ sudo -u www-data php8.4 -r "
     echo 'Continuity setting enabled.' . PHP_EOL;
 " || warn "Could not persist continuity setting (non-fatal)."
 
-# ── 13. Restart Apache ────────────────────────────────────────
+# ── 13. Background workers (systemd) ──────────────────────────
+info "Installing scan + caption extract systemd workers..."
+ensure_env_key "WORKER_MODE" "daemon"
+ensure_env_key "WORKER_POLL_SECONDS" "5"
+
+PHP_BIN="$(command -v php8.4 || command -v php || true)"
+if [[ -z "${PHP_BIN}" ]]; then
+    warn "PHP binary not found — skip systemd workers."
+elif command -v systemctl >/dev/null 2>&1; then
+    UNIT_DIR="/etc/systemd/system"
+    for unit in media-manager-scan media-manager-caption-extract; do
+        src="${WEB_ROOT}/deploy/systemd/${unit}.service"
+        if [[ -f "${src}" ]]; then
+            # Rewrite paths/PHP binary for this install
+            sed -e "s|/var/www/media-manager|${WEB_ROOT}|g" \
+                -e "s|/usr/bin/php8.4|${PHP_BIN}|g" \
+                "${src}" > "${UNIT_DIR}/${unit}.service"
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl enable "${unit}.service" >/dev/null 2>&1 || true
+            systemctl restart "${unit}.service" >/dev/null 2>&1 || true
+            if systemctl is-active --quiet "${unit}.service"; then
+                success "${unit}.service active."
+            else
+                warn "${unit}.service not active — check: journalctl -u ${unit} -n 50"
+            fi
+        fi
+    done
+else
+    warn "systemctl unavailable — start workers manually: php scripts/scan_worker.php"
+fi
+
+# ── 14. Restart Apache ────────────────────────────────────────
 info "Restarting Apache..."
 systemctl reload apache2
 success "Apache reloaded."
@@ -350,5 +384,8 @@ fi
 echo ""
 echo -e "  Edit ${CYAN}${ENV_FILE}${NC} to configure NAS mount paths"
 echo -e "  and other settings before first use."
+echo -e "  Workers:  ${CYAN}media-manager-scan${NC} + ${CYAN}media-manager-caption-extract${NC}"
+echo -e "  Logs:     journalctl -u media-manager-scan -f"
+echo -e "            journalctl -u media-manager-caption-extract -f"
 echo -e "  Broadcast continuity check runs quietly during Scan/Reclassify."
 echo ""

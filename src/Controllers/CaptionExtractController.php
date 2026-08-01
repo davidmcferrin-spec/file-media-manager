@@ -24,21 +24,29 @@ $audit = new AuditRepository();
 
 function spawn_caption_extract_worker(int $jobId, string $projectRoot): void
 {
-    $phpBin  = PHP_BINARY;
-    $script  = $projectRoot . '/scripts/caption_extract.php';
     $logFile = CaptionExtractJobService::logPathForJob($jobId, $projectRoot);
     $logDir  = dirname($logFile);
     if (!is_dir($logDir)) {
         @mkdir($logDir, 0775, true);
     }
-    $flags = '--job-id=' . $jobId;
 
     // Seed log so the UI can open it immediately.
+    $modeNote = \MediaManager\Support\WorkerMode::isDaemon()
+        ? 'Queued for media-manager-caption-extract.service'
+        : 'Spawned one-shot worker';
     @file_put_contents(
         $logFile,
-        '[' . gmdate('Y-m-d\TH:i:s\Z') . "] INFO Spawned worker job_id={$jobId}\n",
+        '[' . gmdate('Y-m-d\TH:i:s\Z') . "] INFO {$modeNote} job_id={$jobId}\n",
         FILE_APPEND | LOCK_EX
     );
+
+    if (!\MediaManager\Support\WorkerMode::shouldSpawn()) {
+        return;
+    }
+
+    $phpBin = PHP_BINARY;
+    $script = $projectRoot . '/scripts/caption_extract.php';
+    $flags = '--job-id=' . $jobId;
 
     if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
         pclose(popen(
@@ -68,7 +76,7 @@ if ($method === 'POST') {
 
     if ($uri === '/captions/start') {
         $scope = (string) ($_POST['scope'] ?? 'missing_srt');
-        if (!in_array($scope, ['missing_srt', 'has_captions', 'selected'], true)) {
+        if (!in_array($scope, ['missing_srt', 'has_captions', 'selected', 'probe_only'], true)) {
             $scope = 'missing_srt';
         }
         $selected = null;
@@ -119,9 +127,10 @@ if ($method === 'POST') {
             ]
         );
         spawn_caption_extract_worker($jobId, $projectRoot);
+        $verb = \MediaManager\Support\WorkerMode::isDaemon() ? 'queued' : 'started';
         Session::flash(
             'success',
-            'Caption extract job #' . $jobId . ' started — '
+            'Caption extract job #' . $jobId . ' ' . $verb . ' — '
             . number_format($summary['count']) . ' file(s), ~'
             . number_format($summary['duration_seconds'] / 3600, 1) . 'h media.'
         );
@@ -276,6 +285,7 @@ if ($uri === '/captions') {
     $running = $jobs->findRunning();
     $missing = $files->summarizeCaptionExtractCandidates('missing_srt', null);
     $knownCc = $files->summarizeCaptionExtractCandidates('has_captions', null);
+    $unprobed = $files->summarizeCaptionExtractCandidates('probe_only', null);
     $title = 'Caption Extract — Media Manager';
 
     require dirname(__DIR__) . '/Views/layouts/header.php';

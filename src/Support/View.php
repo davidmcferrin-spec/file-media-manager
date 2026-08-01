@@ -105,6 +105,7 @@ class View
             ),
             'metadata_extracted'  => !empty($file['metadata_extracted']),
             'has_captions'        => !empty($file['has_captions']),
+            'captions_probed'     => !empty($file['captions_probed']),
             'has_srt'             => !empty($file['srt_path']),
             'public_id'           => $publicId,
             'media_cache_path'    => $publicId !== '' ? self::mediaCachePath($publicId) : '',
@@ -149,25 +150,38 @@ class View
     }
 
     /**
-     * Catalog CC badge: orange = captions present; green = captions + extracted SRT.
+     * Catalog CC badge (always visible):
+     * green CC = SRT extracted; orange CC = captions detected; grey CC? = not probed yet;
+     * muted CC = probed, no captions found.
      *
      * @param array<string, mixed> $file
      */
     public static function captionBadge(array $file): string
     {
-        if (empty($file['has_captions']) && empty($file['srt_path'])) {
-            return '';
-        }
         $hasSrt = !empty($file['srt_path']);
-        $title = $hasSrt
-            ? 'Captions present and SRT extracted'
-            : 'Captions/subtitles detected in media';
-        $style = $hasSrt
-            ? 'background:#198754;color:#fff'
-            : 'background:#e67e22;color:#fff';
+        $hasCc = !empty($file['has_captions']);
+        $probed = !empty($file['captions_probed']);
+
+        if ($hasSrt) {
+            $label = 'CC';
+            $title = 'Captions present and SRT extracted';
+            $style = 'background:#198754;color:#fff';
+        } elseif ($hasCc) {
+            $label = 'CC';
+            $title = 'Captions/subtitles detected in media (no SRT yet)';
+            $style = 'background:#e67e22;color:#fff';
+        } elseif ($probed) {
+            $label = 'CC';
+            $title = 'Probed — no caption/subtitle stream found (CEA-608-only MXF may still need a special extractor)';
+            $style = 'background:rgba(148,163,184,0.28);color:var(--text-soft);text-decoration:line-through';
+        } else {
+            $label = 'CC?';
+            $title = 'Captions not checked yet — run Captions → Probe CC badges, or Extract CC';
+            $style = 'background:rgba(148,163,184,0.45);color:var(--text-main)';
+        }
 
         return '<span class="badge mt-1 caption-cc-badge" style="font-size:0.68rem;'
-            . $style . '" title="' . self::e($title) . '">CC</span>';
+            . $style . '" title="' . self::e($title) . '">' . self::e($label) . '</span>';
     }
 
     /**

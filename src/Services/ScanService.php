@@ -83,6 +83,15 @@ final class ScanService
             throw new RuntimeException("Scan job {$jobId} not found.");
         }
 
+        // Daemon workers claim via runNextPending without a CLI --rescan flag.
+        $forceRescan = $this->pgTruthy($job['force_rescan'] ?? false);
+        if (!$this->rescanMode && $forceRescan) {
+            $this->rescanMode = true;
+        }
+        if ($forceRescan) {
+            $this->scanJobs->clearForceRescan($jobId);
+        }
+
         $mountPath = rtrim((string) $job['mount_path'], '/');
         $subpath   = trim((string) ($job['subpath'] ?? ''), '/');
         $scanRoot  = $subpath !== '' ? $mountPath . '/' . $subpath : $mountPath;
@@ -737,6 +746,7 @@ final class ScanService
                 'has_captions'       => $hasCaptions,
                 'caption_stream_index' => $captionStreamIndex,
                 'srt_path'           => $srtPath,
+                'captions_probed'    => $probe !== null || $srtPath !== null,
             ]);
             $this->continuity->attachFileId($path, $fileId);
 
@@ -771,5 +781,20 @@ final class ScanService
         }
 
         return 'skipped';
+    }
+
+    private function pgTruthy(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int) $value !== 0;
+        }
+        if (is_string($value)) {
+            return in_array(strtolower($value), ['1', 't', 'true', 'yes', 'on'], true);
+        }
+
+        return false;
     }
 }

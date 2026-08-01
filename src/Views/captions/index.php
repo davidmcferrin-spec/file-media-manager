@@ -9,13 +9,16 @@ use MediaManager\Support\View;
 /** @var array<string, mixed>|null $running */
 /** @var array{count: int, duration_seconds: float} $missing */
 /** @var array{count: int, duration_seconds: float} $knownCc */
+/** @var array{count: int, duration_seconds: float} $unprobed */
+$unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
     <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Caption Extract</h1>
     <p class="mb-0 path-text">
-      Background worker probes each file and writes an <code>.srt</code> sidecar when captions are available.
+      Jobs are queued here; the <code>media-manager-caption-extract</code> systemd worker probes each file
+      and writes an <code>.srt</code> sidecar when captions are available.
       Progress, duration-weighted ETA, and a detailed log are on each job page.
     </p>
   </div>
@@ -37,6 +40,8 @@ use MediaManager\Support\View;
       <div class="card-header">Start new job</div>
       <div class="card-body">
         <p class="path-text mb-3" style="font-size:0.82rem">
+          Not probed yet (grey <strong>CC?</strong>):
+          <strong><?php echo number_format($unprobed['count']); ?></strong> files<br>
           Missing SRT: <strong><?php echo number_format($missing['count']); ?></strong> files
           (~<?php echo number_format($missing['duration_seconds'] / 3600, 1); ?>h media).<br>
           Already flagged CC, missing SRT:
@@ -44,21 +49,23 @@ use MediaManager\Support\View;
           (~<?php echo number_format($knownCc['duration_seconds'] / 3600, 1); ?>h).
         </p>
         <form method="post" action="/captions/start"
-              onsubmit="return confirm('Start background caption extract for this scope?');">
+              onsubmit="return confirm('Start background caption job for this scope?');">
           <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
           <div class="mb-3">
             <label class="form-label">Scope</label>
             <select name="scope" class="form-select">
+              <option value="probe_only">Probe CC badges only (fast — no SRT extract)</option>
               <option value="missing_srt">All files missing SRT (probe + extract)</option>
               <option value="has_captions">Only files already marked has_captions</option>
             </select>
             <div class="form-text path-text">
-              For Catalog selections, use <strong>Extract CC</strong> on the queue — that enqueues a selected-scope job.
+              Start with <strong>Probe CC badges only</strong> to paint Catalog orange/grey CC marks without waiting on FFmpeg extract.
+              Catalog <strong>Extract CC</strong> enqueues or prioritizes a selected-scope extract job.
             </div>
           </div>
           <button type="submit" class="btn btn-primary btn-sm"
                   <?php echo $running !== null ? 'disabled' : ''; ?>>
-            Start extract job
+            Start job
           </button>
         </form>
       </div>
@@ -69,12 +76,15 @@ use MediaManager\Support\View;
       <div class="card-header">Notes</div>
       <div class="card-body path-text" style="font-size:0.82rem">
         <ul class="mb-0 ps-3">
-          <li>Logs: <code>storage/logs/caption-extract-{id}.log</code></li>
+          <li>Worker: <code>systemctl status media-manager-caption-extract</code></li>
+          <li>Logs: <code>journalctl -u media-manager-caption-extract -f</code> · <code>storage/logs/caption-extract-{id}.log</code></li>
           <li>Per-file timeout: <code>CAPTION_EXTRACT_TIMEOUT_SECONDS</code> (default 900)</li>
           <li>ETA uses processed media duration ÷ wall time (longer files weigh more)</li>
           <li>On a job page: select one/many upcoming clips → <strong>Move selected to top</strong></li>
           <li>While a job is active, Catalog <strong>Extract CC</strong> bumps those clips to the top</li>
           <li>Files with no subtitle stream are skipped (not counted as hard failures)</li>
+          <li>Bulk one-time probe: <code>php scripts/probe_captions.php</code> (or <code>--run</code>)</li>
+          <li>Local without systemd: set <code>WORKER_MODE=spawn</code> in <code>.env</code></li>
         </ul>
       </div>
     </div>

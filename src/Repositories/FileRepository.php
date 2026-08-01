@@ -47,7 +47,7 @@ final class FileRepository extends BaseRepository
                 duration_seconds, filesize_bytes, container, codec_video, codec_audio,
                 resolution, framerate, metadata_extracted, needs_split, split_notes,
                 needs_glue, glue_group_key, glue_part_index, glue_notes,
-                has_captions, caption_stream_index, srt_path,
+                has_captions, caption_stream_index, srt_path, captions_probed,
                 classifier_confidence, classifier_proposed_dir, classifier_proposed_filename,
                 proposed_source
              ) VALUES (
@@ -58,11 +58,17 @@ final class FileRepository extends BaseRepository
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?,
+                ?, ?, ?, ?,
                 ?, ?, ?, ?
              )
              RETURNING id'
         );
+
+        $hasCaptions = (bool) ($data['has_captions'] ?? false);
+        $srtPath = $data['srt_path'] ?? null;
+        $captionsProbed = array_key_exists('captions_probed', $data)
+            ? (bool) $data['captions_probed']
+            : ($hasCaptions || $srtPath !== null || !empty($data['metadata_extracted']));
 
         $stmt->execute([
             $publicId,
@@ -94,9 +100,10 @@ final class FileRepository extends BaseRepository
             $data['glue_group_key'] ?? null,
             $data['glue_part_index'] ?? null,
             $data['glue_notes'] ?? '',
-            $this->pgBool((bool) ($data['has_captions'] ?? false)),
+            $this->pgBool($hasCaptions),
             $data['caption_stream_index'] ?? null,
-            $data['srt_path'] ?? null,
+            $srtPath,
+            $this->pgBool($captionsProbed),
             $data['classifier_confidence'] ?? $data['confidence'],
             $data['classifier_proposed_dir'] ?? $data['proposed_dir'],
             $data['classifier_proposed_filename'] ?? $data['proposed_filename'],
@@ -501,7 +508,7 @@ final class FileRepository extends BaseRepository
     public function updateCaptionFlags(int $id, bool $hasCaptions, ?int $captionStreamIndex = null): bool
     {
         $stmt = $this->db()->prepare(
-            'UPDATE files SET has_captions = ?, caption_stream_index = ? WHERE id = ?'
+            'UPDATE files SET has_captions = ?, caption_stream_index = ?, captions_probed = TRUE WHERE id = ?'
         );
 
         return $stmt->execute([
@@ -565,6 +572,7 @@ final class FileRepository extends BaseRepository
                 has_captions = ?,
                 caption_stream_index = COALESCE(?, caption_stream_index),
                 srt_path = ?,
+                captions_probed = TRUE,
                 classifier_notes = ?
              WHERE id = ?'
         );
@@ -641,30 +649,16 @@ final class FileRepository extends BaseRepository
         int $limit = 100
     ): array {
         $limit = max(1, min(500, $limit));
-        $params = [];
-        $where = ["f.srt_path IS NULL", "f.id > ?", "f.status IN ('PENDING','FLAGGED','APPROVED','REJECTED','EXECUTED')"];
-        $params[] = $afterId;
-
-        if ($scope === 'has_captions') {
-            $where[] = 'f.has_captions IS TRUE';
-        } elseif ($scope === 'selected') {
-            $ids = array_values(array_unique(array_filter(
-                array_map('intval', $selectedIds ?? []),
-                static fn (int $id): bool => $id > 0
-            )));
-            if ($ids === []) {
-                return [];
-            }
-            $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $where[] = "f.id IN ({$placeholders})";
-            foreach ($ids as $id) {
-                $params[] = $id;
-            }
+        [$where, $params] = $this->captionCandidateWhere($scope, $selectedIds, 'f.');
+        if ($where === null) {
+            return [];
         }
-
+        $where[] = 'f.id > ?';
+        $params[] = $afterId;
         $params[] = $limit;
+
         $sql = 'SELECT f.id, f.original_path, f.original_filename, f.duration_seconds,
-                       f.has_captions, f.caption_stream_index, f.srt_path, f.status,
+                       f.has_captions, f.caption_stream_index, f.srt_path, f.captions_probed, f.status,
                        f.executed_path, s.mount_path AS source_mount
                 FROM files f
                 LEFT JOIN sources s ON s.id = f.source_id
@@ -684,22 +678,9 @@ final class FileRepository extends BaseRepository
      */
     public function summarizeCaptionExtractCandidates(string $scope, ?array $selectedIds): array
     {
-        $params = [];
-        $where = ["srt_path IS NULL", "status IN ('PENDING','FLAGGED','APPROVED','REJECTED','EXECUTED')"];
-
-        if ($scope === 'has_captions') {
-            $where[] = 'has_captions IS TRUE';
-        } elseif ($scope === 'selected') {
-            $ids = array_values(array_unique(array_filter(
-                array_map('intval', $selectedIds ?? []),
-                static fn (int $id): bool => $id > 0
-            )));
-            if ($ids === []) {
-                return ['count' => 0, 'duration_seconds' => 0.0];
-            }
-            $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            $where[] = "id IN ({$placeholders})";
-            $params = $ids;
+        [$where, $params] = $this->captionCandidateWhere($scope, $selectedIds, '');
+        if ($where === null) {
+            return ['count' => 0, 'duration_seconds' => 0.0];
         }
 
         // Null durations count as 1h so ETA is not understated for unscanned metadata.
@@ -715,6 +696,46 @@ final class FileRepository extends BaseRepository
             'count'             => (int) ($row['cnt'] ?? 0),
             'duration_seconds'  => (float) ($row['dur'] ?? 0),
         ];
+    }
+
+    /**
+     * @param list<int>|null $selectedIds
+     * @return array{0: ?list<string>, 1: list<mixed>} null where = empty result set
+     */
+    private function captionCandidateWhere(string $scope, ?array $selectedIds, string $prefix): array
+    {
+        $statusCol = $prefix . 'status';
+        $srtCol = $prefix . 'srt_path';
+        $hasCol = $prefix . 'has_captions';
+        $probedCol = $prefix . 'captions_probed';
+        $idCol = $prefix . 'id';
+
+        $where = ["{$statusCol} IN ('PENDING','FLAGGED','APPROVED','REJECTED','EXECUTED')"];
+        $params = [];
+
+        if ($scope === 'probe_only') {
+            $where[] = "{$probedCol} IS FALSE";
+        } elseif ($scope === 'has_captions') {
+            $where[] = "{$srtCol} IS NULL";
+            $where[] = "{$hasCol} IS TRUE";
+        } elseif ($scope === 'selected') {
+            $where[] = "{$srtCol} IS NULL";
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', $selectedIds ?? []),
+                static fn (int $id): bool => $id > 0
+            )));
+            if ($ids === []) {
+                return [null, []];
+            }
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $where[] = "{$idCol} IN ({$placeholders})";
+            $params = $ids;
+        } else {
+            // missing_srt (default)
+            $where[] = "{$srtCol} IS NULL";
+        }
+
+        return [$where, $params];
     }
 
     public function updateGlueFlag(
