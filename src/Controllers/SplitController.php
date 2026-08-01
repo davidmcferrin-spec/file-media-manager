@@ -11,6 +11,7 @@ use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SplitQueueRepository;
 use MediaManager\Repositories\SystemRepository;
+use MediaManager\Services\AudioLevelMapService;
 use MediaManager\Services\AudioSilenceDetector;
 use MediaManager\Services\AudioSplitSuggester;
 use MediaManager\Services\CaptionSplitSuggester;
@@ -294,13 +295,26 @@ if ($method === 'POST') {
         $systemRepo = new SystemRepository();
         $settings = split_audio_settings($systemRepo);
 
+        $mediaCache = new MediaCacheService();
         try {
             $gaps = split_detect_silence_cached(
                 $mediaPath,
                 (int) $file['id'],
                 $settings['noise_db'],
-                new MediaCacheService()
+                $mediaCache
             );
+            $durationSec = isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : 0.0;
+            try {
+                (new AudioLevelMapService($mediaCache))->buildFromSilenceAndCache(
+                    (int) $file['id'],
+                    $mediaPath,
+                    $durationSec,
+                    $settings['noise_db'],
+                    $gaps
+                );
+            } catch (Throwable) {
+                // Lane cache is best-effort; suggest still proceeds.
+            }
             $suggestion = (new AudioSplitSuggester(
                 new AudioSilenceDetector(noiseDb: $settings['noise_db']),
                 $settings['flag_seconds'],
@@ -309,7 +323,7 @@ if ($method === 'POST') {
                 $settings['ad_ignore'],
             ))->suggestFromGaps(
                 $gaps,
-                isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : null,
+                $durationSec > 0 ? $durationSec : null,
                 isset($file['file_date']) ? (string) $file['file_date'] : null,
                 isset($file['file_time']) ? (string) $file['file_time'] : null,
             );
@@ -353,7 +367,137 @@ if ($method === 'POST') {
         exit;
     }
 
+    if ($uri === '/split/build-audio-map') {
+        $id           = (int) ($_POST['id'] ?? 0);
+        $statusFilter = trim((string) ($_POST['status_filter'] ?? ''));
+        $wantJson     = str_contains((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+            || (($_POST['format'] ?? '') === 'json');
+        if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+            $statusFilter = '';
+        }
+        $qs   = split_status_query($statusFilter !== '' ? $statusFilter : null);
+        $item = $id > 0 ? $splitRepo->findById($id) : null;
+        if ($item === null) {
+            if ($wantJson) {
+                header('Content-Type: application/json');
+                http_response_code(404);
+                echo json_encode(['ok' => false, 'error' => 'Split job not found.'], JSON_THROW_ON_ERROR);
+                exit;
+            }
+            Session::flash('error', 'Split job not found.');
+            header('Location: /split');
+            exit;
+        }
+
+        $file = $fileRepo->findById((int) $item['file_id']);
+        $mediaPath = str_replace('\\', '/', (string) ($file['original_path'] ?? ''));
+        if ($file === null || $mediaPath === '' || !is_readable($mediaPath)) {
+            if ($wantJson) {
+                header('Content-Type: application/json');
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'error' => 'Source media is not readable.'], JSON_THROW_ON_ERROR);
+                exit;
+            }
+            Session::flash('error', 'Source media is not readable on disk.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+        if (trim((string) ($file['codec_audio'] ?? '')) === '') {
+            if ($wantJson) {
+                header('Content-Type: application/json');
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'error' => 'No audio stream on file.'], JSON_THROW_ON_ERROR);
+                exit;
+            }
+            Session::flash('error', 'No audio stream on file — cannot build audio levels.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        @set_time_limit(0);
+        $systemRepo = new SystemRepository();
+        $settings = split_audio_settings($systemRepo);
+        $mediaCache = new MediaCacheService();
+        $levelSvc = new AudioLevelMapService($mediaCache);
+
+        try {
+            $gaps = null;
+            try {
+                $gaps = split_detect_silence_cached(
+                    $mediaPath,
+                    (int) $file['id'],
+                    $settings['noise_db'],
+                    $mediaCache
+                );
+            } catch (Throwable) {
+                $gaps = null;
+            }
+            $map = $levelSvc->buildAndCache(
+                (int) $file['id'],
+                $mediaPath,
+                isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : 0.0,
+                $settings['noise_db'],
+                $gaps
+            );
+            split_audit($audit, 'SPLIT_AUDIO_MAP', $id, [
+                'source'         => $map['source'],
+                'bucket_seconds' => $map['bucket_seconds'],
+                'block_count'    => count($map['blocks']),
+            ]);
+        } catch (Throwable $e) {
+            if ($wantJson) {
+                header('Content-Type: application/json');
+                http_response_code(500);
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_THROW_ON_ERROR);
+                exit;
+            }
+            Session::flash('error', 'Audio level map failed: ' . $e->getMessage());
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        if ($wantJson) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => true, 'map' => $map], JSON_THROW_ON_ERROR);
+            exit;
+        }
+
+        Session::flash(
+            'success',
+            'Audio level lane ready (' . $map['source'] . ', '
+            . count($map['blocks']) . ' blocks).'
+        );
+        header('Location: /split/' . $id . $qs);
+        exit;
+    }
+
     http_response_code(404);
+    exit;
+}
+
+// GET /split/{id}/audio-map
+if (preg_match('#^/split/(\d+)/audio-map$#', $uri, $m) && $method === 'GET') {
+    $id   = (int) $m[1];
+    $item = $splitRepo->findById($id);
+    header('Content-Type: application/json');
+    if ($item === null) {
+        http_response_code(404);
+        echo json_encode(['available' => false, 'error' => 'not_found'], JSON_THROW_ON_ERROR);
+        exit;
+    }
+    $file = $fileRepo->findById((int) $item['file_id']);
+    $mediaPath = str_replace('\\', '/', (string) ($file['original_path'] ?? ''));
+    if ($file === null || $mediaPath === '') {
+        echo json_encode(['available' => false], JSON_THROW_ON_ERROR);
+        exit;
+    }
+    $settings = split_audio_settings(new SystemRepository());
+    $map = (new AudioLevelMapService())->loadCached((int) $file['id'], $mediaPath, $settings['noise_db']);
+    if ($map === null) {
+        echo json_encode(['available' => false], JSON_THROW_ON_ERROR);
+        exit;
+    }
+    echo json_encode($map, JSON_THROW_ON_ERROR);
     exit;
 }
 
@@ -400,6 +544,16 @@ if (preg_match('#^/split/(\d+)$#', $uri, $m)) {
     }
 
     $mediaInfo = (new SplitMediaService())->describe($item);
+    $audioMap = null;
+    $mediaPath = str_replace('\\', '/', (string) ($item['original_path'] ?? ''));
+    if ($mediaPath !== '' && trim((string) ($item['codec_audio'] ?? '')) !== '') {
+        $noiseDb = split_audio_settings(new SystemRepository())['noise_db'];
+        $audioMap = (new AudioLevelMapService())->loadCached(
+            (int) $item['file_id'],
+            $mediaPath,
+            $noiseDb
+        );
+    }
     $title = 'Split Workbench #' . $id . ' — Media Manager';
 
     require dirname(__DIR__) . '/Views/layouts/header.php';

@@ -14,6 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.17.0] — 2026-08-01
+
+### Added
+
+- **Audio level lane** on Split workbench timeline (Quiet / Low / Dialog / Hot blocks — not a waveform)
+  - **Load audio levels** runs FFmpeg RMS sampling (2s buckets), cached as `audio_levels.json`
+  - Suggest from audio also seeds a quiet/active lane from silence gaps
+  - Shared scrub playhead across audio lane + segment timeline
+
 ## [0.16.0] — 2026-08-01
 
 ### Added

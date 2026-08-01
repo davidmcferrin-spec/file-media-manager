@@ -66,6 +66,8 @@ storage/logs/           Application + worker logs
   are flagged needs_split = true; multi-hour schedule spans also flag
 - Split workbench suggest: captions (SRT silence gaps) or audio (FFmpeg silencedetect;
   long quiet = program gaps; short dips = ads; continuous multi-hour → schedule hours)
+- Split workbench audio lane: Quiet/Low/Dialog/Hot blocks from cached RMS map
+  (`audio_levels.json`; Load audio levels or seeded by Suggest from audio)
 - Bootstrap vendored under public/vendor/ — no external requests
 - No inline SQL — use Repository classes
 - No framework — vanilla PHP, PSR-4 autoloading

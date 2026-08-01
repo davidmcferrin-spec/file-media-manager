@@ -11,7 +11,7 @@ naming/folder policy, and moves/renames them only after human approval.
 - **Catalog** — paginated review (approve / edit / reject / flag), thumbnails + WebM preview
 - **Captions / CC** — detect caption streams; background extract to `.srt` sidecars; Catalog viewer; priority cue
 - **Glue** — detect multipart sets, queue ffmpeg concat, QC, then delete source parts
-- **Split** — flag files at/above Settings → Processing duration (default ≥ 2 hours) or multi-hour schedule spans; workbench mark in/out; caption- or audio-based segment suggest; export handle policy
+- **Split** — flag files at/above Settings → Processing duration (default ≥ 2 hours) or multi-hour schedule spans; workbench mark in/out; caption- or audio-based segment suggest; coarse audio level lane; export handle policy
 - **Gaps / Show audit** — completeness vs Timeline
 - **Execute / Rollback** — atomic rename+move of APPROVED files; per-file or batch undo
 - **Audit log** — every action with user, IP, before/after paths

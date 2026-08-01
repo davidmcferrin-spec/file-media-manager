@@ -24,9 +24,17 @@ $position = (int) $neighbors['position'];
 $total = (int) $neighbors['total'];
 $hasSrt = !empty($item['srt_path']);
 $hasCaptions = !empty($item['has_captions']);
+$hasAudio = trim((string) ($item['codec_audio'] ?? '')) !== '';
 $playMode = (string) ($mediaInfo['mode'] ?? 'proxy');
 $playSupported = !empty($mediaInfo['supported']);
 $segPlaySeconds = (int) ($mediaInfo['segment_seconds'] ?? 45);
+/** @var array<string, mixed>|null $audioMap */
+$audioMap = $audioMap ?? null;
+$audioBlocks = is_array($audioMap['blocks'] ?? null) ? $audioMap['blocks'] : [];
+$audioMapSource = (string) ($audioMap['source'] ?? '');
+$audioLevelLabels = is_array($audioMap['labels'] ?? null)
+    ? $audioMap['labels']
+    : ['Quiet', 'Low', 'Dialog', 'Hot'];
 
 $formatTc = static function (float $seconds): string {
     $seconds = max(0.0, $seconds);
@@ -237,18 +245,76 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   color: var(--text-soft);
   font-size: 0.78rem;
 }
-.sw-timeline {
+.sw-timeline-stack {
   position: relative;
-  height: 44px;
   border-radius: 8px;
-  background: var(--form-bg);
   border: 1px solid var(--border-strong);
+  background: var(--form-bg);
   overflow: hidden;
   cursor: pointer;
   user-select: none;
 }
-.sw-timeline:hover {
+.sw-timeline-stack:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
+.sw-audio-lane {
+  position: relative;
+  height: 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--form-bg) 88%, #0f172a);
+}
+.sw-audio-lane.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-soft);
+  font-size: 0.68rem;
+}
+.sw-audio-block {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+  opacity: 0.92;
+}
+.sw-audio-block[data-level="0"] { background: color-mix(in srgb, var(--text-soft) 22%, transparent); }
+.sw-audio-block[data-level="1"] { background: color-mix(in srgb, #38bdf8 45%, transparent); }
+.sw-audio-block[data-level="2"] { background: color-mix(in srgb, #22c55e 55%, transparent); }
+.sw-audio-block[data-level="3"] { background: color-mix(in srgb, #f59e0b 70%, transparent); }
+.sw-audio-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--text-soft);
+}
+.sw-audio-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+.sw-audio-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  display: inline-block;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+}
+.sw-audio-swatch[data-level="0"] { background: color-mix(in srgb, var(--text-soft) 22%, transparent); }
+.sw-audio-swatch[data-level="1"] { background: #38bdf8; }
+.sw-audio-swatch[data-level="2"] { background: #22c55e; }
+.sw-audio-swatch[data-level="3"] { background: #f59e0b; }
+.sw-timeline {
+  position: relative;
+  height: 44px;
+  background: transparent;
+  border: 0;
+  overflow: hidden;
+  cursor: inherit;
+  user-select: none;
 }
 .sw-timeline-seg {
   position: absolute;
@@ -525,31 +591,57 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
             <span class="sw-play-status" id="sw-play-status"></span>
           </div>
 
-          <div class="sw-timeline mt-3" id="sw-timeline" aria-label="Segment timeline" title="Click to scrub">
-            <div id="sw-timeline-segs">
-            <?php if ($duration > 0): ?>
-            <?php foreach ($segments as $i => $seg):
-                $start = (float) ($seg['start'] ?? 0);
-                $end = (float) ($seg['end'] ?? 0);
-                if ($end <= $start) {
-                    continue;
-                }
-                $left = max(0.0, min(100.0, ($start / $duration) * 100));
-                $width = max(0.4, min(100.0 - $left, (($end - $start) / $duration) * 100));
-                $color = $segmentColors[$i % count($segmentColors)];
-                $label = trim((string) ($seg['label'] ?? ''));
-                if ($label === '') {
-                    $label = 'Seg ' . ($i + 1);
-                }
-            ?>
-            <div class="sw-timeline-seg"
-                 data-seg-index="<?php echo (int) $i; ?>"
-                 style="left:<?php echo View::e((string) round($left, 2)); ?>%;width:<?php echo View::e((string) round($width, 2)); ?>%;background:<?php echo View::e($color); ?>"
-                 title="<?php echo View::e($label . ' · ' . $formatTc($start) . ' – ' . $formatTc($end)); ?>">
-              <?php echo View::e($label); ?>
+          <div class="sw-timeline-stack mt-3" id="sw-timeline-stack" title="Click to scrub">
+            <div class="sw-audio-lane<?php echo $audioBlocks === [] ? ' is-empty' : ''; ?>"
+                 id="sw-audio-lane"
+                 aria-label="Audio level lane">
+              <?php if ($audioBlocks === []): ?>
+                <?php echo $hasAudio ? 'Audio levels not loaded' : 'No audio stream'; ?>
+              <?php elseif ($duration > 0): ?>
+                <?php foreach ($audioBlocks as $block):
+                    $bStart = (float) ($block['start'] ?? 0);
+                    $bEnd = (float) ($block['end'] ?? 0);
+                    if ($bEnd <= $bStart) {
+                        continue;
+                    }
+                    $bLeft = max(0.0, min(100.0, ($bStart / $duration) * 100));
+                    $bWidth = max(0.15, min(100.0 - $bLeft, (($bEnd - $bStart) / $duration) * 100));
+                    $bLevel = max(0, min(3, (int) ($block['level'] ?? 0)));
+                    $bLabel = $audioLevelLabels[$bLevel] ?? ('L' . $bLevel);
+                ?>
+                <div class="sw-audio-block"
+                     data-level="<?php echo $bLevel; ?>"
+                     style="left:<?php echo View::e((string) round($bLeft, 3)); ?>%;width:<?php echo View::e((string) round($bWidth, 3)); ?>%"
+                     title="<?php echo View::e($bLabel . ' · ' . $formatTc($bStart) . ' – ' . $formatTc($bEnd)); ?>"></div>
+                <?php endforeach; ?>
+              <?php endif; ?>
             </div>
-            <?php endforeach; ?>
-            <?php endif; ?>
+            <div class="sw-timeline" id="sw-timeline" aria-label="Segment timeline">
+              <div id="sw-timeline-segs">
+              <?php if ($duration > 0): ?>
+              <?php foreach ($segments as $i => $seg):
+                  $start = (float) ($seg['start'] ?? 0);
+                  $end = (float) ($seg['end'] ?? 0);
+                  if ($end <= $start) {
+                      continue;
+                  }
+                  $left = max(0.0, min(100.0, ($start / $duration) * 100));
+                  $width = max(0.4, min(100.0 - $left, (($end - $start) / $duration) * 100));
+                  $color = $segmentColors[$i % count($segmentColors)];
+                  $label = trim((string) ($seg['label'] ?? ''));
+                  if ($label === '') {
+                      $label = 'Seg ' . ($i + 1);
+                  }
+              ?>
+              <div class="sw-timeline-seg"
+                   data-seg-index="<?php echo (int) $i; ?>"
+                   style="left:<?php echo View::e((string) round($left, 2)); ?>%;width:<?php echo View::e((string) round($width, 2)); ?>%;background:<?php echo View::e($color); ?>"
+                   title="<?php echo View::e($label . ' · ' . $formatTc($start) . ' – ' . $formatTc($end)); ?>">
+                <?php echo View::e($label); ?>
+              </div>
+              <?php endforeach; ?>
+              <?php endif; ?>
+              </div>
             </div>
             <div class="sw-timeline-playhead" id="sw-playhead" style="left:0%"></div>
           </div>
@@ -557,6 +649,16 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
             <span>0:00</span>
             <span><?php echo View::duration($duration > 0 ? $duration / 2 : null); ?></span>
             <span><?php echo View::duration($duration > 0 ? $duration : null); ?></span>
+          </div>
+          <div class="sw-audio-legend" id="sw-audio-legend">
+            <?php foreach ($audioLevelLabels as $li => $llabel): ?>
+            <span><i class="sw-audio-swatch" data-level="<?php echo (int) $li; ?>"></i><?php echo View::e((string) $llabel); ?></span>
+            <?php endforeach; ?>
+            <span class="ms-auto" id="sw-audio-source"><?php
+              echo $audioMapSource !== ''
+                  ? View::e('Source: ' . $audioMapSource)
+                  : ($hasAudio ? 'Load audio levels for a Quiet / Low / Dialog / Hot lane' : '');
+            ?></span>
           </div>
           <div class="sw-help">
             Scrub = frame peek · Play = <?php echo $playMode === 'fast' ? 'stream-copy segment when possible' : 'H.264 proxy segment'; ?>.
@@ -718,9 +820,6 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   </div>
 </form>
 
-<?php
-$hasAudio = trim((string) ($item['codec_audio'] ?? '')) !== '';
-?>
 <div class="d-flex flex-wrap gap-2 mt-3 mb-2">
   <form method="post" action="/split/suggest-captions"
         onsubmit="return confirm('Replace segment rows with caption-based suggestions (≥5 min silence gaps near hour boundaries)? Unsaved edits will be lost.');">
@@ -740,6 +839,10 @@ $hasAudio = trim((string) ($item['codec_audio'] ?? '')) !== '';
       Suggest from audio
     </button>
   </form>
+  <button type="button" class="btn btn-outline-secondary btn-sm" id="sw-load-audio-levels"
+          <?php echo $hasAudio ? '' : 'disabled'; ?>>
+    <?php echo $audioBlocks === [] ? 'Load audio levels' : 'Refresh audio levels'; ?>
+  </button>
   <form method="post" action="/split/delete"
         onsubmit="return confirm('Remove this split job from the queue?');">
     <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
@@ -833,9 +936,20 @@ $hasAudio = trim((string) ($item['codec_audio'] ?? '')) !== '';
     var videoEl = document.getElementById('sw-video');
     var emptyEl = document.getElementById('sw-stage-empty');
     var loadingEl = document.getElementById('sw-loading');
-    var timeline = document.getElementById('sw-timeline');
+    var timelineStack = document.getElementById('sw-timeline-stack');
+    var timeline = timelineStack || document.getElementById('sw-timeline');
     var timelineSegs = document.getElementById('sw-timeline-segs');
+    var audioLane = document.getElementById('sw-audio-lane');
+    var audioSourceEl = document.getElementById('sw-audio-source');
+    var btnLoadAudio = document.getElementById('sw-load-audio-levels');
     var playhead = document.getElementById('sw-playhead');
+    var csrfToken = form.querySelector('input[name="_csrf"]')
+        ? form.querySelector('input[name="_csrf"]').value
+        : '';
+    var statusFilter = form.querySelector('input[name="status_filter"]')
+        ? form.querySelector('input[name="status_filter"]').value
+        : '';
+    var audioLabels = <?php echo json_encode($audioLevelLabels, JSON_THROW_ON_ERROR); ?>;
     var playheadTc = document.getElementById('sw-playhead-tc');
     var playStatus = document.getElementById('sw-play-status');
     var btnPlay = document.getElementById('sw-play');
@@ -1030,6 +1144,76 @@ $hasAudio = trim((string) ($item['codec_audio'] ?? '')) !== '';
             el.title = label + ' · ' + secondsToTc(s) + ' – ' + secondsToTc(e);
             el.textContent = label;
             timelineSegs.appendChild(el);
+        });
+    }
+
+    function paintAudioLane(map) {
+        if (!audioLane || !map || !map.blocks || duration <= 0) return;
+        audioLane.classList.remove('is-empty');
+        audioLane.innerHTML = '';
+        (map.blocks || []).forEach(function (block) {
+            var s = Number(block.start) || 0;
+            var e = Number(block.end) || 0;
+            if (e <= s) return;
+            var left = Math.max(0, Math.min(100, (s / duration) * 100));
+            var width = Math.max(0.15, Math.min(100 - left, ((e - s) / duration) * 100));
+            var level = Math.max(0, Math.min(3, Number(block.level) || 0));
+            var label = (map.labels && map.labels[level]) || audioLabels[level] || ('L' + level);
+            var el = document.createElement('div');
+            el.className = 'sw-audio-block';
+            el.setAttribute('data-level', String(level));
+            el.style.left = left + '%';
+            el.style.width = width + '%';
+            el.title = label + ' · ' + secondsToTc(s) + ' – ' + secondsToTc(e);
+            audioLane.appendChild(el);
+        });
+        if (audioSourceEl) {
+            audioSourceEl.textContent = map.source ? ('Source: ' + map.source) : '';
+        }
+        if (btnLoadAudio) {
+            btnLoadAudio.textContent = 'Refresh audio levels';
+        }
+    }
+
+    if (btnLoadAudio) {
+        btnLoadAudio.addEventListener('click', function () {
+            if (!jobId || btnLoadAudio.disabled) return;
+            if (!window.confirm('Scan audio levels with FFmpeg? First run may take several minutes on long files.')) {
+                return;
+            }
+            btnLoadAudio.disabled = true;
+            var prevLabel = btnLoadAudio.textContent;
+            btnLoadAudio.textContent = 'Scanning audio…';
+            playStatus.textContent = 'Building audio level lane…';
+            var body = new FormData();
+            body.append('_csrf', csrfToken);
+            body.append('id', jobId);
+            body.append('status_filter', statusFilter);
+            body.append('format', 'json');
+            fetch('/split/build-audio-map', {
+                method: 'POST',
+                body: body,
+                headers: { 'Accept': 'application/json' },
+                credentials: 'same-origin'
+            }).then(function (res) {
+                return res.json().then(function (data) {
+                    return { ok: res.ok, data: data };
+                });
+            }).then(function (result) {
+                btnLoadAudio.disabled = false;
+                if (!result.ok || !result.data || !result.data.ok || !result.data.map) {
+                    var err = (result.data && result.data.error) ? result.data.error : 'Audio level scan failed';
+                    playStatus.textContent = err;
+                    btnLoadAudio.textContent = prevLabel;
+                    return;
+                }
+                paintAudioLane(result.data.map);
+                playStatus.textContent = 'Audio levels ready (' + (result.data.map.source || 'scan') + ')';
+            }).catch(function () {
+                btnLoadAudio.disabled = false;
+                btnLoadAudio.textContent = prevLabel;
+                playStatus.textContent = 'Audio level scan failed';
+            });
         });
     }
 
