@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use MediaManager\Auth\Session;
+use MediaManager\Repositories\CaptionExtractJobRepository;
 use MediaManager\Support\View;
 
 /** @var list<array<string, mixed>> $recent */
 /** @var array<string, mixed>|null $running */
+/** @var CaptionExtractJobRepository $jobs */
 /** @var array{count: int, duration_seconds: float} $missing */
 /** @var array{count: int, duration_seconds: float} $knownCc */
 /** @var array{count: int, duration_seconds: float} $unprobed */
@@ -110,10 +112,19 @@ $unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
         <?php if ($recent === []): ?>
         <tr><td colspan="7" class="path-text">No jobs yet.</td></tr>
         <?php else: ?>
-        <?php foreach ($recent as $j): ?>
+        <?php foreach ($recent as $j):
+          $jStatus = (string) ($j['status'] ?? '');
+          $jOrphan = $jStatus === 'RUNNING' && !$jobs->isWorkerAlive((int) $j['id']);
+          $jCanDelete = $jStatus !== 'RUNNING' || $jOrphan;
+        ?>
         <tr>
           <td>#<?php echo (int) $j['id']; ?></td>
-          <td><?php echo View::statusBadge((string) ($j['status'] ?? '')); ?></td>
+          <td>
+            <?php echo View::statusBadge($jStatus); ?>
+            <?php if ($jOrphan): ?>
+            <span class="badge bg-warning text-dark">hung</span>
+            <?php endif; ?>
+          </td>
           <td class="path-text"><?php echo View::e((string) ($j['scope'] ?? '')); ?></td>
           <td>
             <?php echo (int) ($j['processed_files'] ?? 0); ?> /
@@ -125,8 +136,23 @@ $unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
             <?php echo (int) ($j['skip_count'] ?? 0); ?>
           </td>
           <td class="path-text"><?php echo View::e(substr((string) ($j['created_at'] ?? ''), 0, 19)); ?></td>
-          <td class="text-end">
+          <td class="text-end text-nowrap">
             <a href="/captions/<?php echo (int) $j['id']; ?>" class="btn btn-outline-secondary btn-xs">Open</a>
+            <?php if ($jCanDelete): ?>
+            <form method="post" action="/captions/delete" class="d-inline"
+                  onsubmit="return confirm('<?php echo $jOrphan
+                      ? 'Force-delete hung caption job #' . (int) $j['id'] . '?'
+                      : 'Delete caption job #' . (int) $j['id'] . '?'; ?>');">
+              <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+              <input type="hidden" name="id" value="<?php echo (int) $j['id']; ?>">
+              <?php if ($jOrphan): ?>
+              <input type="hidden" name="force" value="1">
+              <button type="submit" class="btn btn-danger btn-xs">Force del</button>
+              <?php else: ?>
+              <button type="submit" class="btn btn-outline-danger btn-xs">Delete</button>
+              <?php endif; ?>
+            </form>
+            <?php endif; ?>
           </td>
         </tr>
         <?php endforeach; ?>

@@ -11,11 +11,25 @@ use MediaManager\Support\View;
 /** @var list<string> $logTail */
 /** @var bool $refresh */
 /** @var bool $canReorder */
+/** @var bool $canDelete */
+/** @var bool $canForceDelete */
+/** @var bool $workerOrphan */
+/** @var bool $workerAlive */
+/** @var array<string, mixed> $timing */
 /** @var list<array<string, mixed>> $priorityFiles */
 /** @var list<array<string, mixed>> $upcoming */
 
 $status = (string) ($job['status'] ?? '');
 $canReorder = $canReorder ?? false;
+$canDelete = $canDelete ?? true;
+$canForceDelete = $canForceDelete ?? false;
+$workerOrphan = $workerOrphan ?? false;
+$workerAlive = $workerAlive ?? false;
+$timing = $timing ?? [
+    'started_label' => '—',
+    'ended_label' => '—',
+    'elapsed_label' => '—',
+];
 $priorityFiles = $priorityFiles ?? [];
 $upcoming = $upcoming ?? [];
 ?>
@@ -35,11 +49,14 @@ $upcoming = $upcoming ?? [];
       <?php if ($refresh): ?>
       · auto-refresh 5s
       <?php endif; ?>
+      <?php if ($workerOrphan): ?>
+      · <span class="badge bg-warning text-dark">hung — worker not running</span>
+      <?php endif; ?>
     </p>
   </div>
   <div class="d-flex gap-2">
     <a href="/captions" class="btn btn-outline-secondary btn-sm">All jobs</a>
-    <?php if (in_array($status, ['PENDING', 'RUNNING'], true)): ?>
+    <?php if (in_array($status, ['PENDING', 'RUNNING'], true) && !$workerOrphan): ?>
     <form method="post" action="/captions/cancel"
           onsubmit="return confirm('Cancel after the current file finishes?');">
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
@@ -47,11 +64,49 @@ $upcoming = $upcoming ?? [];
       <button type="submit" class="btn btn-outline-danger btn-sm">Cancel</button>
     </form>
     <?php endif; ?>
+    <?php if ($canForceDelete): ?>
+    <form method="post" action="/captions/delete"
+          onsubmit="return confirm('Worker is not running but job still shows <?php echo View::e($status); ?>. Force-delete job #<?php echo (int) $job['id']; ?>?');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <input type="hidden" name="force" value="1">
+      <button type="submit" class="btn btn-danger btn-sm">Force delete (hung)</button>
+    </form>
+    <?php elseif ($canDelete): ?>
+    <form method="post" action="/captions/delete"
+          onsubmit="return confirm('Delete caption job #<?php echo (int) $job['id']; ?>? This does not undo extracted SRTs.');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <button type="submit" class="btn btn-outline-danger btn-sm">Delete job</button>
+    </form>
+    <?php elseif ($workerAlive): ?>
+    <span class="align-self-center path-text" style="font-size:0.78rem">Worker still running — Cancel before delete</span>
+    <?php endif; ?>
   </div>
 </div>
 
 <div class="row g-4 mb-4">
   <div class="col-lg-7">
+    <div class="card mb-3">
+      <div class="card-header">Timing</div>
+      <div class="card-body py-3">
+        <div class="row g-2" style="font-size:0.84rem">
+          <div class="col-sm-4">
+            <div class="path-text">Started</div>
+            <strong><?php echo View::e((string) $timing['started_label']); ?></strong>
+          </div>
+          <div class="col-sm-4">
+            <div class="path-text">Ended</div>
+            <strong><?php echo View::e((string) $timing['ended_label']); ?></strong>
+          </div>
+          <div class="col-sm-4">
+            <div class="path-text">Elapsed</div>
+            <strong><?php echo View::e((string) $timing['elapsed_label']); ?></strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card mb-3">
       <div class="card-header">Progress</div>
       <div class="card-body">

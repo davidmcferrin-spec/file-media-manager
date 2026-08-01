@@ -14,6 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.15.0] — 2026-08-01
+
+### Added
+
+- **Scan job timing**: Started / Ended / Elapsed + live ETA (files/min) on job detail and list
+- **Delete caption extract jobs** (job row + log); does not undo extracted SRTs
+- **Force-delete hung jobs**: when status is `RUNNING` but worker PID is dead — Scan and Captions (`Force delete (hung)` / hung badge)
+- PENDING scan/caption jobs can be deleted before a worker claims them
+
 ## [0.14.1] — 2026-08-01
 
 ### Added

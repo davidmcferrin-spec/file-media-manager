@@ -386,6 +386,35 @@ final class ScanJobRepository extends BaseRepository
         return (int) $value;
     }
 
+    /** True when job is RUNNING and the recorded worker PID is still alive. */
+    public function isWorkerAlive(int $id): bool
+    {
+        $pid = $this->getWorkerPid($id);
+
+        return $pid !== null && $this->isProcessAlive($pid);
+    }
+
+    /**
+     * Clear a zombie RUNNING/PENDING job so it can be deleted (worker dead or never started).
+     */
+    public function forceAbandon(int $id, string $reason = 'Force-deleted: worker not running'): bool
+    {
+        $stmt = $this->db()->prepare(
+            "UPDATE scan_jobs
+             SET status = 'CANCELLED',
+                 error_message = COALESCE(error_message, ?),
+                 completed_at = COALESCE(completed_at, now()),
+                 worker_pid = NULL,
+                 cancel_requested = false
+             WHERE id = ?
+               AND status IN ('PENDING', 'RUNNING')
+             RETURNING id"
+        );
+        $stmt->execute([$reason, $id]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function delete(int $id): bool
     {
         $stmt = $this->db()->prepare('DELETE FROM scan_jobs WHERE id = ?');

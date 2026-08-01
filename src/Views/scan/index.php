@@ -3,10 +3,13 @@
 declare(strict_types=1);
 
 use MediaManager\Auth\Session;
+use MediaManager\Repositories\ScanJobRepository;
+use MediaManager\Services\ScanEtaEstimator;
 use MediaManager\Support\View;
 
 /** @var list<array<string, mixed>> $activeSources */
 /** @var list<array<string, mixed>> $recentJobs */
+/** @var ScanJobRepository $scanJobsRepo */
 /** @var bool $ffprobeOk */
 /** @var bool $timelineReady */
 /** @var string $timelineReadyAt */
@@ -125,23 +128,26 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
               <th>Status</th>
               <th>Progress</th>
               <th>Started</th>
+              <th>Ended</th>
+              <th>Elapsed / ETA</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             <?php if ($recentJobs === []): ?>
             <tr>
-              <td colspan="7" class="text-center py-4" style="color:var(--text-soft)">No scans yet.</td>
+              <td colspan="9" class="text-center py-4" style="color:var(--text-soft)">No scans yet.</td>
             </tr>
             <?php else: ?>
-            <?php foreach ($recentJobs as $job): ?>
-            <?php
+            <?php foreach ($recentJobs as $job):
             $total = (int) ($job['total_files'] ?? 0);
             $done  = (int) ($job['processed_files'] ?? 0);
             $pct   = $total > 0 ? round(($done / $total) * 100) : 0;
             $status = (string) $job['status'];
+            $timingRow = ScanEtaEstimator::estimate($job);
+            $orphanRow = $status === 'RUNNING' && !$scanJobsRepo->isWorkerAlive((int) $job['id']);
             $canStopRow = in_array($status, ['PENDING', 'RUNNING'], true);
-            $canDeleteRow = $status !== 'RUNNING';
+            $canDeleteRow = $status !== 'RUNNING' || $orphanRow;
             ?>
             <tr>
               <td><a href="/scan/<?php echo (int) $job['id']; ?>">#<?php echo (int) $job['id']; ?></a></td>
@@ -159,6 +165,9 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
                 };
                 ?>
                 <span class="badge bg-<?php echo $badge; ?>"><?php echo View::e($status); ?></span>
+                <?php if ($orphanRow): ?>
+                <span class="badge bg-warning text-dark" title="Worker process not running">hung</span>
+                <?php endif; ?>
               </td>
               <td style="min-width:120px">
                 <?php if ($total > 0): ?>
@@ -170,7 +179,14 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
                 —
                 <?php endif; ?>
               </td>
-              <td class="path-text"><?php echo View::e(substr((string) ($job['started_at'] ?? $job['created_at']), 0, 16)); ?></td>
+              <td class="path-text"><?php echo View::e((string) $timingRow['started_label']); ?></td>
+              <td class="path-text"><?php echo View::e((string) $timingRow['ended_label']); ?></td>
+              <td class="path-text" style="font-size:0.78rem">
+                <?php echo View::e((string) $timingRow['elapsed_label']); ?>
+                <?php if (in_array($status, ['RUNNING', 'PENDING'], true)): ?>
+                <br><span style="color:var(--accent)"><?php echo View::e((string) $timingRow['eta_label']); ?></span>
+                <?php endif; ?>
+              </td>
               <td class="text-end text-nowrap">
                 <?php if ($status === 'PAUSED'): ?>
                 <form method="post" action="/scan/resume" class="d-inline">
@@ -179,7 +195,7 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
                   <button type="submit" class="btn btn-outline-primary btn-xs">Resume</button>
                 </form>
                 <?php endif; ?>
-                <?php if ($canStopRow): ?>
+                <?php if ($canStopRow && !$orphanRow): ?>
                 <form method="post" action="/scan/cancel" class="d-inline"
                       onsubmit="return confirm('Stop scan #<?php echo (int) $job['id']; ?>?');">
                   <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
@@ -189,10 +205,17 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
                 <?php endif; ?>
                 <?php if ($canDeleteRow): ?>
                 <form method="post" action="/scan/delete" class="d-inline"
-                      onsubmit="return confirm('Delete scan #<?php echo (int) $job['id']; ?> and its queued files?');">
+                      onsubmit="return confirm('<?php echo $orphanRow
+                          ? 'Force-delete hung scan #' . (int) $job['id'] . ' and its queued files?'
+                          : 'Delete scan #' . (int) $job['id'] . ' and its queued files?'; ?>');">
                   <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
                   <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+                  <?php if ($orphanRow): ?>
+                  <input type="hidden" name="force" value="1">
+                  <button type="submit" class="btn btn-danger btn-xs">Force del</button>
+                  <?php else: ?>
                   <button type="submit" class="btn btn-outline-secondary btn-xs">Delete</button>
+                  <?php endif; ?>
                 </form>
                 <?php endif; ?>
               </td>

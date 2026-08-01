@@ -11,6 +11,7 @@ use MediaManager\Repositories\CaptionExtractJobRepository;
 use MediaManager\Repositories\FileRepository;
 use MediaManager\Services\CaptionExtractEtaEstimator;
 use MediaManager\Services\CaptionExtractJobService;
+use MediaManager\Services\ScanEtaEstimator;
 
 Auth::requireAdmin();
 
@@ -160,6 +161,60 @@ if ($method === 'POST') {
         exit;
     }
 
+    if ($uri === '/captions/delete') {
+        $id = (int) ($_POST['id'] ?? 0);
+        $force = !empty($_POST['force']);
+        $job = $id > 0 ? $jobs->findById($id) : null;
+        if ($job === null) {
+            Session::flash('error', 'Caption job not found.');
+            header('Location: /captions');
+            exit;
+        }
+
+        $status = (string) ($job['status'] ?? '');
+        $workerAlive = $jobs->isWorkerAlive($id);
+
+        if ($status === 'RUNNING' && $workerAlive) {
+            Session::flash('error', 'Worker is still running. Cancel the job first, or wait for it to finish.');
+            header('Location: /captions/' . $id);
+            exit;
+        }
+        if (in_array($status, ['PENDING', 'RUNNING', 'PAUSED'], true)) {
+            $jobs->forceAbandon($id, 'Force-deleted: worker not running');
+            $status = 'CANCELLED';
+        }
+
+        $logPath = CaptionExtractJobService::logPathForJob($id, $projectRoot);
+        if (is_file($logPath)) {
+            @unlink($logPath);
+        }
+
+        if (!$jobs->delete($id)) {
+            Session::flash('error', 'Could not delete caption job.');
+            header('Location: /captions/' . $id);
+            exit;
+        }
+
+        $audit->record(
+            Auth::id(),
+            Auth::email(),
+            $_SERVER['REMOTE_ADDR'] ?? '',
+            'CAPTION_EXTRACT_DELETED',
+            'caption_extract_job',
+            $id,
+            null,
+            null,
+            [
+                'previous_status' => $status,
+                'force'           => $force || in_array($status, ['PENDING', 'RUNNING', 'PAUSED', 'CANCELLED'], true),
+                'scope'           => $job['scope'] ?? null,
+            ]
+        );
+        Session::flash('success', 'Caption extract job #' . $id . ' deleted.');
+        header('Location: /captions');
+        exit;
+    }
+
     if ($uri === '/captions/prioritize') {
         $id = (int) ($_POST['id'] ?? 0);
         $raw = $_POST['ids'] ?? [];
@@ -225,9 +280,15 @@ if (preg_match('#^/captions/(\d+)$#', $uri, $m)) {
     }
 
     $eta = CaptionExtractEtaEstimator::estimate($job);
+    $timing = ScanEtaEstimator::estimate($job);
     $logPath = CaptionExtractJobService::logPathForJob($id, $projectRoot);
     $logTail = CaptionExtractJobService::tailLog($logPath, 150);
-    $refresh = in_array(($job['status'] ?? ''), ['PENDING', 'RUNNING'], true);
+    $statusStr = (string) ($job['status'] ?? '');
+    $refresh = in_array($statusStr, ['PENDING', 'RUNNING'], true);
+    $workerAlive = $statusStr === 'RUNNING' && $jobs->isWorkerAlive($id);
+    $workerOrphan = $statusStr === 'RUNNING' && !$jobs->isWorkerAlive($id);
+    $canForceDelete = $workerOrphan;
+    $canDelete = $statusStr !== 'RUNNING' || $workerOrphan;
 
     $scope = (string) ($job['scope'] ?? 'missing_srt');
     $selectedIds = null;

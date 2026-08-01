@@ -415,6 +415,49 @@ final class CaptionExtractJobRepository extends BaseRepository
         )));
     }
 
+    public function isWorkerAlive(int $id): bool
+    {
+        $job = $this->findById($id);
+        if ($job === null) {
+            return false;
+        }
+        $pid = isset($job['worker_pid']) ? (int) $job['worker_pid'] : 0;
+
+        return $this->pidAlive($pid);
+    }
+
+    /**
+     * Clear a zombie PENDING/RUNNING job so it can be deleted (worker dead).
+     */
+    public function forceAbandon(int $id, string $reason = 'Force-deleted: worker not running'): bool
+    {
+        $stmt = $this->db()->prepare(
+            "UPDATE caption_extract_jobs
+             SET status = 'CANCELLED',
+                 error_message = COALESCE(error_message, ?),
+                 last_error = COALESCE(last_error, ?),
+                 completed_at = COALESCE(completed_at, now()),
+                 current_file_id = NULL,
+                 current_filename = NULL,
+                 current_started_at = NULL,
+                 worker_pid = NULL,
+                 cancel_requested = false
+             WHERE id = ?
+               AND status IN ('PENDING', 'RUNNING', 'PAUSED')
+             RETURNING id"
+        );
+        $stmt->execute([$reason, $reason, $id]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function delete(int $id): bool
+    {
+        $stmt = $this->db()->prepare('DELETE FROM caption_extract_jobs WHERE id = ?');
+
+        return $stmt->execute([$id]);
+    }
+
     private function pidAlive(int $pid): bool
     {
         if ($pid <= 0) {

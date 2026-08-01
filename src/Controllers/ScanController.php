@@ -13,6 +13,7 @@ use MediaManager\Repositories\ScanJobRepository;
 use MediaManager\Repositories\SourceRepository;
 use MediaManager\Repositories\SystemRepository;
 use MediaManager\Services\FFprobeService;
+use MediaManager\Services\ScanEtaEstimator;
 
 Auth::requireAdmin();
 
@@ -319,10 +320,24 @@ if ($method === 'POST' && $uri === '/scan/delete') {
     }
 
     $status = (string) ($job['status'] ?? '');
+    $force = !empty($_POST['force']);
+    $workerAlive = $scanJobs->isWorkerAlive($jobId);
+
     if ($status === 'RUNNING') {
-        Session::flash('error', 'Stop the scan and wait for it to finish before deleting.');
-        header('Location: /scan/' . $jobId);
-        exit;
+        if ($workerAlive) {
+            Session::flash('error', 'Scan worker is still running. Stop the scan first, or wait for it to finish.');
+            header('Location: /scan/' . $jobId);
+            exit;
+        }
+        // Orphaned RUNNING: clear so delete can proceed.
+        $scanJobs->forceAbandon($jobId);
+        $job = $scanJobs->findById($jobId) ?? $job;
+        $status = (string) ($job['status'] ?? $status);
+    } elseif ($status === 'PENDING') {
+        // Not started yet — abandon then delete (does not require force).
+        $scanJobs->forceAbandon($jobId);
+        $job = $scanJobs->findById($jobId) ?? $job;
+        $status = (string) ($job['status'] ?? $status);
     }
 
     $protected = $files->countProtectedByScanJob($jobId);
@@ -360,6 +375,7 @@ if ($method === 'POST' && $uri === '/scan/delete') {
             'files_removed' => $deletedFiles,
             'previous_status' => $status,
             'source_id' => (int) ($job['source_id'] ?? 0),
+            'force' => $force,
         ]
     );
 
@@ -539,12 +555,18 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
     $confidence    = $files->confidenceSummary($jobId);
     $protectedCount = $files->countProtectedByScanJob($jobId);
     $reclassifiableCount = $files->countReclassifiableByScanJob($jobId);
-    $canStop       = in_array((string) $job['status'], ['PENDING', 'RUNNING'], true);
-    $canResume     = (string) $job['status'] === 'PAUSED';
-    $canDelete     = (string) $job['status'] !== 'RUNNING' && $protectedCount === 0;
-    $canReclassify = in_array((string) $job['status'], ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true)
+    $statusStr     = (string) $job['status'];
+    $workerAlive   = $statusStr === 'RUNNING' && $scanJobs->isWorkerAlive($jobId);
+    // Hung = marked RUNNING but worker PID is dead/missing (not PENDING waiting for pickup).
+    $workerOrphan  = $statusStr === 'RUNNING' && !$scanJobs->isWorkerAlive($jobId);
+    $canStop       = in_array($statusStr, ['PENDING', 'RUNNING'], true);
+    $canResume     = $statusStr === 'PAUSED';
+    $canDelete     = $protectedCount === 0 && ($statusStr !== 'RUNNING' || $workerOrphan);
+    $canForceDelete = $protectedCount === 0 && $workerOrphan;
+    $canReclassify = in_array($statusStr, ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true)
         && $reclassifiableCount > 0;
-    $canRescan = in_array((string) $job['status'], ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true);
+    $canRescan = in_array($statusStr, ['COMPLETED', 'CANCELLED', 'PAUSED', 'FAILED'], true);
+    $timing = ScanEtaEstimator::estimate($job);
 
     $title = 'Scan Job #' . $jobId . ' — Media Manager';
     require dirname(__DIR__) . '/Views/layouts/header.php';
@@ -556,6 +578,7 @@ if (preg_match('#^/scan/(\d+)$#', $uri, $m) === 1) {
 // ── GET: scan index ───────────────────────────────────────────
 $activeSources = array_filter($sources->all(), fn ($s) => !empty($s['active']));
 $recentJobs    = $scanJobs->recent(15);
+$scanJobsRepo  = $scanJobs;
 $ffprobeOk     = $ffprobe->isAvailable();
 $timelineReady = in_array(
     strtolower(trim((string) ($systemRepo->get('timeline_ready_for_scan') ?? ''))),

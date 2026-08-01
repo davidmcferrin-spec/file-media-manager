@@ -14,13 +14,27 @@ use MediaManager\Support\View;
 /** @var int $reclassifiableCount */
 /** @var bool $canStop */
 /** @var bool $canDelete */
+/** @var bool $canForceDelete */
 /** @var bool $canResume */
 /** @var bool $canReclassify */
 /** @var bool $canRescan */
+/** @var bool $workerAlive */
+/** @var bool $workerOrphan */
+/** @var array<string, mixed> $timing */
 $status = (string) ($job['status'] ?? '');
 $reclassifiableCount = $reclassifiableCount ?? 0;
 $canReclassify = $canReclassify ?? false;
 $canRescan = $canRescan ?? false;
+$canForceDelete = $canForceDelete ?? false;
+$workerAlive = $workerAlive ?? false;
+$workerOrphan = $workerOrphan ?? false;
+$timing = $timing ?? [
+    'started_label' => '—',
+    'ended_label' => '—',
+    'elapsed_label' => '—',
+    'eta_label' => '—',
+    'rate_label' => '—',
+];
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
@@ -50,7 +64,15 @@ $canRescan = $canRescan ?? false;
       <button type="submit" class="btn btn-primary btn-sm">Resume Scan</button>
     </form>
     <?php endif; ?>
-    <?php if ($canDelete): ?>
+    <?php if ($canForceDelete): ?>
+    <form method="post" action="/scan/delete" class="d-inline"
+          onsubmit="return confirm('Worker is not running but job still shows <?php echo View::e($status); ?>. Force-delete scan #<?php echo (int) $job['id']; ?> and remove <?php echo number_format($totalQueued); ?> queued file(s)?');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <input type="hidden" name="force" value="1">
+      <button type="submit" class="btn btn-danger btn-sm">Force delete (hung)</button>
+    </form>
+    <?php elseif ($canDelete): ?>
     <form method="post" action="/scan/delete" class="d-inline"
           onsubmit="return confirm('Delete scan job #<?php echo (int) $job['id']; ?> and remove <?php echo number_format($totalQueued); ?> queued file(s) from the review queue?');">
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
@@ -60,6 +82,10 @@ $canRescan = $canRescan ?? false;
     <?php elseif ($protectedCount > 0): ?>
     <span class="align-self-center" style="font-size:0.78rem;color:var(--text-soft)">
       Cannot delete — <?php echo number_format($protectedCount); ?> protected file(s)
+    </span>
+    <?php elseif ($workerAlive): ?>
+    <span class="align-self-center" style="font-size:0.78rem;color:var(--text-soft)">
+      Worker still running — Stop before delete
     </span>
     <?php endif; ?>
     <a href="/scan" class="btn btn-outline-secondary btn-sm">All Scans</a>
@@ -153,12 +179,46 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
   </div>
 </div>
 
+<div class="card mb-4">
+  <div class="card-header">Timing</div>
+  <div class="card-body py-3">
+    <div class="row g-2" style="font-size:0.84rem">
+      <div class="col-sm-3">
+        <div class="path-text">Started</div>
+        <strong><?php echo View::e((string) $timing['started_label']); ?></strong>
+      </div>
+      <div class="col-sm-3">
+        <div class="path-text">Ended</div>
+        <strong><?php echo View::e((string) $timing['ended_label']); ?></strong>
+      </div>
+      <div class="col-sm-3">
+        <div class="path-text">Elapsed</div>
+        <strong><?php echo View::e((string) $timing['elapsed_label']); ?></strong>
+      </div>
+      <div class="col-sm-3">
+        <div class="path-text"><?php echo in_array($status, ['RUNNING', 'PENDING'], true) ? 'ETA' : 'Rate'; ?></div>
+        <strong style="color:var(--accent)">
+          <?php echo View::e((string) (in_array($status, ['RUNNING', 'PENDING'], true) ? $timing['eta_label'] : $timing['rate_label'])); ?>
+        </strong>
+      </div>
+    </div>
+    <?php if ($workerOrphan): ?>
+    <div class="alert alert-warning py-2 mt-3 mb-0" style="font-size:0.8rem">
+      Job shows <strong><?php echo View::e($status); ?></strong> but the worker process is not running (orphaned).
+      Use <strong>Force delete (hung)</strong> if you want to clear it.
+    </div>
+    <?php endif; ?>
+  </div>
+</div>
+
 <?php if ($status === 'RUNNING' || ($status === 'PENDING' && empty($job['cancel_requested']))): ?>
 <div class="card mb-4">
   <div class="card-body py-3">
     <div class="d-flex justify-content-between mb-1">
       <span style="font-size:0.82rem;color:var(--text-soft)">
         <?php echo $status === 'PENDING' ? 'Waiting to start…' : 'Processing…'; ?>
+        · ETA <?php echo View::e((string) $timing['eta_label']); ?>
+        · <?php echo View::e((string) $timing['rate_label']); ?>
       </span>
       <span style="font-size:0.82rem"><?php echo $done; ?> / <?php echo $total; ?> (<?php echo $pct; ?>%)</span>
     </div>
@@ -169,7 +229,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
       <?php if (!empty($job['cancel_requested'])): ?>
       Stop requested — scan will halt shortly.
       <?php else: ?>
-      Refresh this page to update progress.
+      Elapsed <?php echo View::e((string) $timing['elapsed_label']); ?> · auto-refresh 5s
       <?php endif; ?>
     </p>
   </div>
