@@ -77,6 +77,8 @@ final class FFprobeService
         $streams  = is_array($data['streams'] ?? null) ? $data['streams'] : [];
         $video    = null;
         $audio    = null;
+        $hasCaptions = false;
+        $captionStreamIndex = null;
 
         foreach ($streams as $stream) {
             if (!is_array($stream)) {
@@ -88,6 +90,12 @@ final class FFprobeService
             }
             if ($codecType === 'audio' && $audio === null) {
                 $audio = $stream;
+            }
+            if (self::streamLooksLikeCaptions($stream)) {
+                $hasCaptions = true;
+                if ($captionStreamIndex === null && isset($stream['index'])) {
+                    $captionStreamIndex = (int) $stream['index'];
+                }
             }
         }
 
@@ -116,15 +124,67 @@ final class FFprobeService
         }
 
         return [
-            'duration'       => $duration,
-            'creation_time'  => is_string($creation) ? $creation : null,
-            'filesize_bytes' => isset($format['size']) ? (int) $format['size'] : null,
-            'container'      => $container,
-            'codec_video'    => isset($video['codec_name']) ? (string) $video['codec_name'] : null,
-            'codec_audio'    => isset($audio['codec_name']) ? (string) $audio['codec_name'] : null,
-            'resolution'     => $resolution,
-            'framerate'      => $framerate,
+            'duration'              => $duration,
+            'creation_time'         => is_string($creation) ? $creation : null,
+            'filesize_bytes'        => isset($format['size']) ? (int) $format['size'] : null,
+            'container'             => $container,
+            'codec_video'           => isset($video['codec_name']) ? (string) $video['codec_name'] : null,
+            'codec_audio'           => isset($audio['codec_name']) ? (string) $audio['codec_name'] : null,
+            'resolution'            => $resolution,
+            'framerate'             => $framerate,
+            'has_captions'          => $hasCaptions,
+            'caption_stream_index'  => $captionStreamIndex,
         ];
+    }
+
+    /** @param array<string, mixed> $stream */
+    public static function streamLooksLikeCaptions(array $stream): bool
+    {
+        $codecType = strtolower((string) ($stream['codec_type'] ?? ''));
+        $codecName = strtolower((string) ($stream['codec_name'] ?? ''));
+        $codecTag = strtolower((string) ($stream['codec_tag_string'] ?? ''));
+
+        if ($codecType === 'subtitle') {
+            return true;
+        }
+
+        $disposition = is_array($stream['disposition'] ?? null) ? $stream['disposition'] : [];
+        if (!empty($disposition['captions']) || !empty($disposition['hearing_impaired'])) {
+            return true;
+        }
+
+        foreach (['eia_608', 'eia_708', 'cea608', 'cea708', 'dvb_teletext', 'hdmv_pgs', 'dvd_subtitle', 'mov_text', 'subrip', 'ass', 'webvtt'] as $needle) {
+            if (str_contains($codecName, $needle) || str_contains($codecTag, $needle)) {
+                return true;
+            }
+        }
+
+        $tags = is_array($stream['tags'] ?? null) ? $stream['tags'] : [];
+        foreach (['title', 'handler_name', 'language'] as $key) {
+            $val = strtolower((string) ($tags[$key] ?? ''));
+            if ($val !== '' && (str_contains($val, 'caption') || str_contains($val, 'subtitle') || $val === 'cc')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Path of an existing caption sidecar next to a media file (.srt preferred, then .vtt).
+     */
+    public static function adjacentCaptionSidecar(string $mediaPath): ?string
+    {
+        $dir = dirname($mediaPath);
+        $stem = pathinfo($mediaPath, PATHINFO_FILENAME);
+        foreach (['srt', 'vtt'] as $ext) {
+            $candidate = $dir . DIRECTORY_SEPARATOR . $stem . '.' . $ext;
+            if (is_readable($candidate)) {
+                return str_replace('\\', '/', $candidate);
+            }
+        }
+
+        return null;
     }
 
     private function parseFrameRate(string $rate): ?string

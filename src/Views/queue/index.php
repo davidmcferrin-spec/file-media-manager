@@ -202,6 +202,10 @@ $queueBatchable = Auth::isEditor() && (
     <button type="submit" formaction="/queue/clear-glue" class="btn btn-outline-warning btn-sm"
             onclick="return confirm('Clear glue flags on selected files?');">Clear Glue</button>
     <?php endif; ?>
+    <?php if (Auth::isAdmin() && in_array($queueStatus, ['PENDING', 'FLAGGED', 'APPROVED', 'REJECTED'], true)): ?>
+    <button type="submit" formaction="/queue/extract-captions" class="btn btn-outline-secondary btn-sm"
+            onclick="return confirm('Extract CC for selected clips (starts a job, or moves them to the top of the active Captions cue)?');">Extract CC</button>
+    <?php endif; ?>
     <span id="selection-count" class="path-text ms-1" style="font-size:0.78rem"></span>
     <button type="button" id="clear-selection" class="btn btn-link btn-sm p-0 path-text d-none"
             style="font-size:0.78rem">Clear selection</button>
@@ -286,8 +290,16 @@ $queueBatchable = Auth::isEditor() && (
           <td>
             <div class="path-filename"><?php echo View::e($item['original_filename']); ?></div>
             <div class="path-text"><?php echo View::e(dirname(\MediaManager\Repositories\FileRepository::displayPath($item))); ?></div>
+            <?php echo View::assetIdBlock($item); ?>
             <?php if (!empty($item['needs_split'])): ?>
             <span class="badge bg-warning text-dark mt-1" style="font-size:0.68rem">Needs split</span>
+            <?php endif; ?>
+            <?php echo View::captionBadge($item); ?>
+            <?php if (!empty($item['srt_path'])): ?>
+            <button type="button" class="btn btn-link btn-xs p-0 ms-1 queue-open-captions"
+                    data-file-id="<?php echo (int) $item['id']; ?>"
+                    data-filename="<?php echo View::e((string) $item['original_filename']); ?>"
+                    style="font-size:0.68rem;vertical-align:baseline">View SRT</button>
             <?php endif; ?>
             <?php if (!empty($item['needs_glue'])): ?>
             <span class="badge bg-primary mt-1" style="font-size:0.68rem"
@@ -448,6 +460,20 @@ $queueBatchable = Auth::isEditor() && (
               <button type="submit" class="btn btn-outline-info btn-xs">Split</button>
             </form>
             <?php endif; ?>
+            <?php if (Auth::isEditor()
+                && !empty($item['has_captions'])
+                && empty($item['srt_path'])
+                && in_array($item['status'] ?? '', ['PENDING', 'FLAGGED', 'APPROVED', 'REJECTED'], true)): ?>
+            <?php if (Auth::isAdmin()): ?>
+            <form method="post" action="/queue/extract-captions" class="d-inline"
+                  onsubmit="return confirm('Extract CC: start a job, or move this clip to the top of the active Captions cue?');">
+              <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+              <input type="hidden" name="return" value="<?php echo View::e($returnUrl); ?>">
+              <input type="hidden" name="id" value="<?php echo (int) $item['id']; ?>">
+              <button type="submit" class="btn btn-outline-secondary btn-xs">Extract CC</button>
+            </form>
+            <?php endif; ?>
+            <?php endif; ?>
           </td>
         </tr>
         <?php endforeach; ?>
@@ -499,6 +525,7 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
         </div>
         <div class="modal-body">
           <p class="path-text mb-2"><?php echo View::e($item['original_path']); ?></p>
+          <?php echo View::assetIdBlock($item); ?>
           <?php if ($suggestHint !== ''): ?>
           <div class="alert alert-secondary py-2 px-3 mb-3" style="font-size:0.78rem">
             Detected: <?php echo View::e($suggestHint); ?>
@@ -652,6 +679,27 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 </div>
 <?php endif; ?>
 
+<!-- Captions (SRT) viewer modal -->
+<div class="modal fade" id="captions-modal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="background:var(--panel);border-color:var(--border-color)">
+      <div class="modal-header border-secondary py-2">
+        <h6 class="modal-title fs-6 mb-0" id="captions-modal-title">Captions</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="path-text mb-2" id="captions-modal-meta" style="font-size:0.78rem"></p>
+        <div id="captions-modal-loading" class="d-none py-4 text-center">
+          <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+          <span class="ms-2 path-text">Loading captions…</span>
+        </div>
+        <div id="captions-modal-error" class="alert alert-warning d-none py-2" style="font-size:0.82rem"></div>
+        <div id="captions-modal-list" class="captions-cue-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Media preview modal -->
 <div class="modal fade" id="media-preview-modal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
@@ -730,6 +778,28 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 }
 #queue-table .queue-select-row:has(.row-check) {
     cursor: pointer;
+}
+.captions-cue-list {
+    max-height: 60vh;
+    overflow: auto;
+    font-size: 0.84rem;
+}
+.captions-cue-row {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 0.5rem 0.75rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.captions-cue-time {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-soft);
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+.captions-cue-text {
+    white-space: pre-wrap;
+    line-height: 1.4;
 }
 </style>
 
@@ -1007,7 +1077,9 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
                 ['Frame rate', meta.framerate ? meta.framerate + ' fps' : '—'],
                 ['Container', meta.container ? meta.container.toUpperCase() : '—'],
                 ['File size', meta.filesize_label || '—'],
-                ['At scan', meta.metadata_extracted ? 'Yes' : 'No']
+                ['At scan', meta.metadata_extracted ? 'Yes' : 'No'],
+                ['Asset ID', meta.public_id || '—'],
+                ['Cache path', meta.media_cache_path || '—']
             ];
             metaSummary.innerHTML = rows.map(function (row) {
                 return '<dt class="col-sm-4 path-text">' + row[0] + '</dt>'
@@ -1199,6 +1271,71 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
     }
 
     initPreviewModal(0);
+
+    (function initCaptionsModal() {
+        var modalEl = document.getElementById('captions-modal');
+        if (!modalEl || typeof bootstrap === 'undefined') return;
+        var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        var titleEl = document.getElementById('captions-modal-title');
+        var metaEl = document.getElementById('captions-modal-meta');
+        var listEl = document.getElementById('captions-modal-list');
+        var loadingEl = document.getElementById('captions-modal-loading');
+        var errorEl = document.getElementById('captions-modal-error');
+
+        function openCaptions(fileId, filename) {
+            titleEl.textContent = 'Captions — ' + (filename || ('#' + fileId));
+            metaEl.textContent = '';
+            listEl.innerHTML = '';
+            errorEl.classList.add('d-none');
+            errorEl.textContent = '';
+            loadingEl.classList.remove('d-none');
+            modal.show();
+
+            fetch('/queue/captions/' + fileId, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    loadingEl.classList.add('d-none');
+                    if (data.error) {
+                        errorEl.textContent = data.error;
+                        errorEl.classList.remove('d-none');
+                        return;
+                    }
+                    metaEl.textContent = (data.cue_count || 0) + ' cues'
+                        + (data.srt_path ? ' · ' + data.srt_path : '');
+                    var html = '';
+                    (data.cues || []).forEach(function (cue) {
+                        html += '<div class="captions-cue-row">'
+                            + '<div class="captions-cue-time">'
+                            + escapeHtml(cue.start_label) + '<br>→ ' + escapeHtml(cue.end_label)
+                            + '</div>'
+                            + '<div class="captions-cue-text">' + escapeHtml(cue.text) + '</div>'
+                            + '</div>';
+                    });
+                    listEl.innerHTML = html || '<p class="path-text mb-0">No cues.</p>';
+                })
+                .catch(function () {
+                    loadingEl.classList.add('d-none');
+                    errorEl.textContent = 'Could not load captions.';
+                    errorEl.classList.remove('d-none');
+                });
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.queue-open-captions');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openCaptions(btn.getAttribute('data-file-id'), btn.getAttribute('data-filename'));
+        });
+    })();
 })();
 
 function confirmSplitSelected(form) {

@@ -43,6 +43,9 @@ $storedSummary = [
         isset($file['filesize_bytes']) ? (int) $file['filesize_bytes'] : null
     ),
     'metadata_extracted' => !empty($file['metadata_extracted']),
+    'has_captions'   => !empty($file['has_captions']),
+    'caption_stream_index' => $file['caption_stream_index'] ?? null,
+    'srt_path'       => $file['srt_path'] ?? null,
     'source'         => 'scan',
 ];
 

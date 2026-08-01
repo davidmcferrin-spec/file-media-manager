@@ -30,11 +30,12 @@ final class PreviewService
 
     public function ensurePreview(int $fileId): string
     {
-        $dest = $this->cache->previewPath($fileId);
-        if (is_readable($dest) && filesize($dest) > 0) {
-            return $dest;
+        $existing = $this->cache->resolvePreviewPath($fileId);
+        if ($existing !== null) {
+            return $existing;
         }
 
+        $dest = $this->cache->previewPath($fileId);
         if (is_file($dest)) {
             @unlink($dest);
         }
@@ -43,6 +44,8 @@ final class PreviewService
         if ($file === null) {
             throw new RuntimeException('File not found.');
         }
+
+        $this->cache->ensureAssetDir($fileId);
 
         $source = FileRepository::mediaSourcePath($file);
         if ($source === '' || !is_readable($source)) {

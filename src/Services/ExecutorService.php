@@ -94,6 +94,7 @@ final class ExecutorService
         }
 
         $sidecarErrors = $this->moveSidecars($file, $targetDir, $userId, $userEmail, $ip);
+        $this->relocateSrtPath($file, $targetDir);
 
         $this->files->markExecuted($id, $targetPath, $userId);
         $this->cache->invalidate($id);
@@ -151,5 +152,35 @@ final class ExecutorService
         }
 
         return $errors;
+    }
+
+    /**
+     * Keep files.srt_path pointing at the post-execute sidecar location.
+     *
+     * @param array<string, mixed> $file
+     */
+    private function relocateSrtPath(array $file, string $targetDir): void
+    {
+        $old = str_replace('\\', '/', (string) ($file['srt_path'] ?? ''));
+        if ($old === '') {
+            return;
+        }
+
+        $proposedStem = pathinfo(
+            (string) ($file['proposed_filename'] ?: $file['original_filename']),
+            PATHINFO_FILENAME
+        );
+        $candidates = [
+            rtrim($targetDir, '/\\') . '/' . $proposedStem . '.srt',
+            rtrim($targetDir, '/\\') . '/' . pathinfo($old, PATHINFO_BASENAME),
+        ];
+        foreach ($candidates as $candidate) {
+            $candidate = str_replace('\\', '/', $candidate);
+            if (is_readable($candidate)) {
+                $this->files->updateSrtPath((int) $file['id'], $candidate);
+
+                return;
+            }
+        }
     }
 }

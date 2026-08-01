@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MediaManager\Repositories;
 
+use MediaManager\Support\Ulid;
+
 final class FileRepository extends BaseRepository
 {
     public function existsByOriginalPath(string $path): bool
@@ -32,29 +34,38 @@ final class FileRepository extends BaseRepository
     /** @param array<string, mixed> $data */
     public function insert(array $data): int
     {
+        $publicId = isset($data['public_id']) && is_string($data['public_id']) && Ulid::isValid($data['public_id'])
+            ? Ulid::normalize($data['public_id'])
+            : Ulid::generate();
+
         $stmt = $this->db()->prepare(
             'INSERT INTO files (
+                public_id,
                 scan_job_id, source_id, original_path, original_dir, original_filename,
                 proposed_dir, proposed_filename, show_id, media_type_id,
                 file_date, file_time, confidence, classifier_notes, status,
                 duration_seconds, filesize_bytes, container, codec_video, codec_audio,
                 resolution, framerate, metadata_extracted, needs_split, split_notes,
                 needs_glue, glue_group_key, glue_part_index, glue_notes,
+                has_captions, caption_stream_index, srt_path,
                 classifier_confidence, classifier_proposed_dir, classifier_proposed_filename,
                 proposed_source
              ) VALUES (
+                ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
+                ?, ?, ?,
                 ?, ?, ?, ?
              )
              RETURNING id'
         );
 
         $stmt->execute([
+            $publicId,
             $data['scan_job_id'],
             $data['source_id'],
             $data['original_path'],
@@ -83,6 +94,9 @@ final class FileRepository extends BaseRepository
             $data['glue_group_key'] ?? null,
             $data['glue_part_index'] ?? null,
             $data['glue_notes'] ?? '',
+            $this->pgBool((bool) ($data['has_captions'] ?? false)),
+            $data['caption_stream_index'] ?? null,
+            $data['srt_path'] ?? null,
             $data['classifier_confidence'] ?? $data['confidence'],
             $data['classifier_proposed_dir'] ?? $data['proposed_dir'],
             $data['classifier_proposed_filename'] ?? $data['proposed_filename'],
@@ -90,6 +104,81 @@ final class FileRepository extends BaseRepository
         ]);
 
         return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Ensure a file has a public_id; generate and persist if missing (legacy rows).
+     */
+    public function ensurePublicId(int $id): string
+    {
+        $stmt = $this->db()->prepare('SELECT public_id FROM files WHERE id = ? LIMIT 1');
+        $stmt->execute([$id]);
+        $existing = $stmt->fetchColumn();
+        if (is_string($existing) && Ulid::isValid($existing)) {
+            return Ulid::normalize($existing);
+        }
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $publicId = Ulid::generate();
+            try {
+                $upd = $this->db()->prepare(
+                    'UPDATE files SET public_id = ? WHERE id = ? AND public_id IS NULL'
+                );
+                $upd->execute([$publicId, $id]);
+                if ($upd->rowCount() > 0) {
+                    return $publicId;
+                }
+
+                $stmt->execute([$id]);
+                $again = $stmt->fetchColumn();
+                if (is_string($again) && Ulid::isValid($again)) {
+                    return Ulid::normalize($again);
+                }
+            } catch (\PDOException) {
+                // unique collision — retry
+            }
+        }
+
+        throw new \RuntimeException('Unable to assign public_id for file ' . $id);
+    }
+
+    /** @return int Number of rows backfilled */
+    public function backfillMissingPublicIds(): int
+    {
+        $ids = $this->db()->query(
+            'SELECT id FROM files WHERE public_id IS NULL ORDER BY id'
+        )->fetchAll(\PDO::FETCH_COLUMN);
+
+        $count = 0;
+        foreach ($ids as $id) {
+            $this->ensurePublicId((int) $id);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    public function findByPublicId(string $publicId): ?array
+    {
+        if (!Ulid::isValid($publicId)) {
+            return null;
+        }
+
+        $stmt = $this->db()->prepare(
+            'SELECT f.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name,
+                    mt.name AS media_type_name, mt.abbreviation AS media_type_abbr,
+                    s.mount_path AS source_mount, s.name AS source_name
+             FROM files f
+             LEFT JOIN shows sh ON sh.id = f.show_id
+             LEFT JOIN media_types mt ON mt.id = f.media_type_id
+             LEFT JOIN sources s ON s.id = f.source_id
+             WHERE f.public_id = ?
+             LIMIT 1'
+        );
+        $stmt->execute([Ulid::normalize($publicId)]);
+        $row = $stmt->fetch();
+
+        return is_array($row) ? $row : null;
     }
 
     public function findById(int $id): ?array
@@ -260,6 +349,14 @@ final class FileRepository extends BaseRepository
         }
 
         $this->db()->prepare('DELETE FROM split_queue WHERE file_id = ?')->execute([$id]);
+        try {
+            // Drop glue jobs that still point at this row as their registered output.
+            $this->db()->prepare(
+                'UPDATE glue_queue SET output_file_id = NULL WHERE output_file_id = ?'
+            )->execute([$id]);
+        } catch (\PDOException) {
+            // glue_queue may not exist before migration 019
+        }
         $stmt = $this->db()->prepare('DELETE FROM files WHERE id = ?');
         $stmt->execute([$id]);
 
@@ -401,6 +498,225 @@ final class FileRepository extends BaseRepository
         return $stmt->execute([$this->pgBool($needsSplit), trim($splitNotes), $id]);
     }
 
+    public function updateCaptionFlags(int $id, bool $hasCaptions, ?int $captionStreamIndex = null): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE files SET has_captions = ?, caption_stream_index = ? WHERE id = ?'
+        );
+
+        return $stmt->execute([
+            $this->pgBool($hasCaptions),
+            $captionStreamIndex,
+            $id,
+        ]);
+    }
+
+    /**
+     * Persist extracted/linked SRT path and ensure it is listed as a moveable sidecar.
+     */
+    public function recordSrtSidecar(
+        int $id,
+        string $srtPath,
+        bool $hasCaptions = true,
+        ?int $captionStreamIndex = null
+    ): bool {
+        $file = $this->findById($id);
+        if ($file === null) {
+            return false;
+        }
+
+        $srtPath = str_replace('\\', '/', $srtPath);
+        $proposedStem = pathinfo(
+            (string) ($file['proposed_filename'] ?: $file['original_filename']),
+            PATHINFO_FILENAME
+        );
+        $proposedSrt = $proposedStem . '.srt';
+
+        $notesRaw = (string) ($file['classifier_notes'] ?? '{}');
+        $notes = json_decode($notesRaw, true);
+        if (!is_array($notes)) {
+            $notes = [];
+        }
+        $sidecars = isset($notes['sidecars']) && is_array($notes['sidecars']) ? $notes['sidecars'] : [];
+        $found = false;
+        foreach ($sidecars as &$entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $path = str_replace('\\', '/', (string) ($entry['original_path'] ?? ''));
+            $name = strtolower((string) ($entry['proposed_filename'] ?? ''));
+            if ($path === $srtPath || str_ends_with($name, '.srt')) {
+                $entry['original_path'] = $srtPath;
+                $entry['proposed_filename'] = $proposedSrt;
+                $found = true;
+            }
+        }
+        unset($entry);
+        if (!$found) {
+            $sidecars[] = [
+                'original_path'      => $srtPath,
+                'proposed_filename'  => $proposedSrt,
+            ];
+        }
+        $notes['sidecars'] = $sidecars;
+
+        $stmt = $this->db()->prepare(
+            'UPDATE files SET
+                has_captions = ?,
+                caption_stream_index = COALESCE(?, caption_stream_index),
+                srt_path = ?,
+                classifier_notes = ?
+             WHERE id = ?'
+        );
+
+        return $stmt->execute([
+            $this->pgBool($hasCaptions),
+            $captionStreamIndex,
+            $srtPath,
+            json_encode($notes, JSON_THROW_ON_ERROR),
+            $id,
+        ]);
+    }
+
+    public function updateSrtPath(int $id, ?string $srtPath): bool
+    {
+        $stmt = $this->db()->prepare('UPDATE files SET srt_path = ? WHERE id = ?');
+
+        return $stmt->execute([$srtPath, $id]);
+    }
+
+    /**
+     * Load files by id (preserves requested order).
+     *
+     * @param list<int> $ids
+     * @return list<array<string, mixed>>
+     */
+    public function findByIdsOrdered(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $ids),
+            static fn (int $id): bool => $id > 0
+        )));
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db()->prepare(
+            "SELECT f.id, f.original_path, f.original_filename, f.duration_seconds,
+                    f.has_captions, f.caption_stream_index, f.srt_path, f.status,
+                    f.executed_path, s.mount_path AS source_mount
+             FROM files f
+             LEFT JOIN sources s ON s.id = f.source_id
+             WHERE f.id IN ({$placeholders})"
+        );
+        $stmt->execute($ids);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows) || $rows === []) {
+            return [];
+        }
+        $byId = [];
+        foreach ($rows as $row) {
+            $byId[(int) $row['id']] = $row;
+        }
+        $ordered = [];
+        foreach ($ids as $id) {
+            if (isset($byId[$id])) {
+                $ordered[] = $byId[$id];
+            }
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Candidates for background caption extract (cursor by id).
+     *
+     * @param list<int>|null $selectedIds
+     * @return list<array<string, mixed>>
+     */
+    public function listCaptionExtractCandidates(
+        string $scope,
+        ?array $selectedIds,
+        int $afterId,
+        int $limit = 100
+    ): array {
+        $limit = max(1, min(500, $limit));
+        $params = [];
+        $where = ["f.srt_path IS NULL", "f.id > ?", "f.status IN ('PENDING','FLAGGED','APPROVED','REJECTED','EXECUTED')"];
+        $params[] = $afterId;
+
+        if ($scope === 'has_captions') {
+            $where[] = 'f.has_captions IS TRUE';
+        } elseif ($scope === 'selected') {
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', $selectedIds ?? []),
+                static fn (int $id): bool => $id > 0
+            )));
+            if ($ids === []) {
+                return [];
+            }
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $where[] = "f.id IN ({$placeholders})";
+            foreach ($ids as $id) {
+                $params[] = $id;
+            }
+        }
+
+        $params[] = $limit;
+        $sql = 'SELECT f.id, f.original_path, f.original_filename, f.duration_seconds,
+                       f.has_captions, f.caption_stream_index, f.srt_path, f.status,
+                       f.executed_path, s.mount_path AS source_mount
+                FROM files f
+                LEFT JOIN sources s ON s.id = f.source_id
+                WHERE ' . implode(' AND ', $where) . '
+                ORDER BY f.id ASC
+                LIMIT ?';
+        $stmt = $this->db()->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @param list<int>|null $selectedIds
+     * @return array{count: int, duration_seconds: float}
+     */
+    public function summarizeCaptionExtractCandidates(string $scope, ?array $selectedIds): array
+    {
+        $params = [];
+        $where = ["srt_path IS NULL", "status IN ('PENDING','FLAGGED','APPROVED','REJECTED','EXECUTED')"];
+
+        if ($scope === 'has_captions') {
+            $where[] = 'has_captions IS TRUE';
+        } elseif ($scope === 'selected') {
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', $selectedIds ?? []),
+                static fn (int $id): bool => $id > 0
+            )));
+            if ($ids === []) {
+                return ['count' => 0, 'duration_seconds' => 0.0];
+            }
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $where[] = "id IN ({$placeholders})";
+            $params = $ids;
+        }
+
+        // Null durations count as 1h so ETA is not understated for unscanned metadata.
+        $sql = 'SELECT COUNT(*)::int AS cnt,
+                       COALESCE(SUM(COALESCE(duration_seconds, 3600)), 0)::float AS dur
+                FROM files
+                WHERE ' . implode(' AND ', $where);
+        $stmt = $this->db()->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+
+        return [
+            'count'             => (int) ($row['cnt'] ?? 0),
+            'duration_seconds'  => (float) ($row['dur'] ?? 0),
+        ];
+    }
+
     public function updateGlueFlag(
         int $id,
         bool $needsGlue,
@@ -507,6 +823,37 @@ final class FileRepository extends BaseRepository
         return (int) $this->db()->query(
             'SELECT COUNT(*) FROM files WHERE needs_glue IS TRUE'
         )->fetchColumn();
+    }
+
+    /**
+     * Parts for one glue group, ordered by part index.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listByGlueGroupKey(string $glueGroupKey): array
+    {
+        $glueGroupKey = trim($glueGroupKey);
+        if ($glueGroupKey === '') {
+            return [];
+        }
+
+        $stmt = $this->db()->prepare(
+            "SELECT f.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name,
+                    mt.name AS media_type_name, mt.abbreviation AS media_type_abbr,
+                    s.mount_path AS source_mount, s.name AS source_name
+             FROM files f
+             LEFT JOIN shows sh ON sh.id = f.show_id
+             LEFT JOIN media_types mt ON mt.id = f.media_type_id
+             LEFT JOIN sources s ON s.id = f.source_id
+             WHERE f.needs_glue IS TRUE
+               AND f.glue_group_key = ?
+               AND f.status IN ('PENDING', 'FLAGGED', 'REJECTED', 'APPROVED')
+             ORDER BY f.glue_part_index ASC NULLS LAST, f.original_filename ASC"
+        );
+        $stmt->execute([$glueGroupKey]);
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
     }
 
     /**

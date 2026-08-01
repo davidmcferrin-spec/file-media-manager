@@ -14,6 +14,89 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.13.0] — 2026-08-01
+
+### Added
+
+- **File asset ULID (`public_id`)** for derived media cache pathing and UI
+  - Migration `022_file_public_id`; assigned on scan/ingest; backfilled by `scripts/migrate.php`
+  - Sharded app cache: `storage/media/aa/bb/cc/{ULID}/` (`thumb.jpg`, `preview.webm`, `split/…`)
+  - Catalog, split, glue, and preview meta show Asset ID + cache path
+  - NAS originals and deliverable video outputs are unchanged (still on NAS policy paths)
+  - Env: `STORAGE_MEDIA` (default `storage/media`); legacy thumb/preview/split dirs remain as read fallback
+
+## [0.12.0] — 2026-08-01
+
+### Added
+
+- **Caption extract cue priority**: select one or many clips and **Move to top**
+  - Job page lists prioritized + upcoming candidates with multi-select
+  - Worker drains the priority lane before normal id order (re-checks between files)
+  - Catalog **Extract CC** while a job is active bumps selected clips to the top of that job
+  - Migration `021_caption_extract_priority` (`priority_file_ids`)
+
+## [0.11.0] — 2026-08-01
+
+### Added
+
+- **Split export handle policy**: export will include up to **5 minutes before Mark In** and **5 minutes after Mark Out** (clamped to file edges)
+  - `SplitExportPolicy` encodes the rule for future cut/export (ffmpeg or Vantage)
+  - Workbench callout + per-segment “Export will cut …” preview so operators mark the **show only** and do not pad manually
+
+## [0.10.0] — 2026-08-01
+
+### Added
+
+- **Background caption extract** for large catalogs (~tens of thousands of files)
+  - Admin **Captions** page: start jobs by scope (`missing_srt` or `has_captions`)
+  - Catalog **Extract CC** enqueues a selected-scope job and opens the job page
+  - Live progress with **duration-weighted ETA** (longer files weigh more)
+  - Hang warning when a file runs >20 minutes
+  - Detailed per-job log: `storage/logs/caption-extract-{id}.log` (START/OK/SKIP/FAIL with path, wall time, FFmpeg tail, stack traces)
+  - CLI worker: `php scripts/caption_extract.php --job-id=N`
+  - Per-file timeout via `CAPTION_EXTRACT_TIMEOUT_SECONDS` (default 900)
+  - Migration `020_caption_extract_jobs`
+
+## [0.9.0] — 2026-08-01
+
+### Added
+
+- **Split Hybrid C media**: workbench scrubber + play for the real library mix (MP4/H.264, TS, MXF, MPEG-2, DNxHD, ProRes)
+  - Timeline click/drag → ffmpeg **frame peek** (cached under `storage/split-proxy/`)
+  - **Set In / Set Out** (keys `I` / `O`) apply to the active segment
+  - **Play** loads a ~45s window: stream-copy fast path for MP4/H.264, H.264/AAC proxy for TS/MXF/etc.
+  - WMV explicitly unsupported
+- Endpoints `/split/media/{jobId}/frame` and `/split/media/{jobId}/play` (Range-aware MP4)
+- Settings wipe also clears split proxy cache
+
+### Notes
+
+- Cut execute (ffmpeg or Telestream Vantage) still deferred — this is review/marking only
+
+## [0.8.0] — 2026-08-01
+
+### Added
+
+- **Split workbench**: redesign `/split/{id}` as a review workspace for mark in/out across N segments (one per show/output)
+- Queue **Back / Next** navigation with position (`3 / 47`), optional status filter preserved from the Split Queue list
+- **Save & Next** to keep reviewing without returning to the list; keyboard ← / → when not in a form field
+- Per-segment derived **air date/time** from file clock + mark in; HH:MM:SS.mmm mark inputs; visual timeline of segments
+
+## [0.7.0] — 2026-08-01
+
+### Added
+
+- **Glue concat execute**: queue multipart groups on `/glue`, run ffmpeg stream-copy concat (`*_GLUED.ext`), QC approve/reject with duration check, then delete source parts from disk + catalog
+- `glue_queue` table (migration `019_glue_queue`) with job statuses through DONE; audit events for queue/run/QC/source delete
+- Glue job detail page with per-step admin actions; Catalog still used to mark/clear groups
+- **Captions / CC**: FFprobe detects subtitle/caption streams; Catalog shows orange **CC** (present) or green **CC** (SRT extracted)
+- Extract captions to an `.srt` sidecar beside the media (Execute moves it with other sidecars); View SRT modal in Catalog
+- Split job **Suggest from captions** — uses ≥5 min caption silence gaps (ignores commercial-length gaps) near hour boundaries to tighten in/out
+
+### Changed
+
+- Sidecar extensions now include `srt` and `vtt`
+
 ## [0.6.0] — 2026-07-31
 
 ### Added

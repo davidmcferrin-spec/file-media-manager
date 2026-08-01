@@ -34,12 +34,11 @@ final class ThumbnailService
     public function ensureThumbnail(int $fileId, ?int $width = null): string
     {
         $width ??= $this->defaultWidth;
-        $dest  = $width > $this->defaultWidth
-            ? $this->cache->thumbnailPath($fileId) . '.large.jpg'
-            : $this->cache->thumbnailPath($fileId);
+        $large = $width > $this->defaultWidth;
 
-        if (is_readable($dest)) {
-            return $dest;
+        $existing = $this->cache->resolveThumbnailPath($fileId, $large);
+        if ($existing !== null) {
+            return $existing;
         }
 
         $file = $this->files->findById($fileId);
@@ -52,9 +51,10 @@ final class ThumbnailService
             throw new RuntimeException('Source file not readable for thumbnail.');
         }
 
-        if (!is_dir(dirname($dest)) && !mkdir(dirname($dest), 0775, true)) {
-            throw new RuntimeException('Cannot create thumbnail directory.');
-        }
+        $this->cache->ensureAssetDir($fileId);
+        $dest = $large
+            ? $this->cache->thumbnailLargePath($fileId)
+            : $this->cache->thumbnailPath($fileId);
 
         $offset = $this->offsetSeconds;
         if (!empty($file['duration_seconds']) && (float) $file['duration_seconds'] < $offset) {
@@ -76,8 +76,8 @@ final class ThumbnailService
             throw new RuntimeException('Thumbnail generation failed: ' . trim((string) $output));
         }
 
-        if ($width === $this->defaultWidth) {
-            $this->files->updateThumbnail($fileId, 'storage/thumbnails/' . $fileId . '.jpg');
+        if (!$large) {
+            $this->files->updateThumbnail($fileId, $this->cache->relativeThumbnailPath($fileId));
         }
 
         return $dest;

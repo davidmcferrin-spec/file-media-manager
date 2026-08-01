@@ -699,6 +699,12 @@ final class ScanService
             $filesize = $prepared['filesize'] ?? null;
             $probe = $prepared['probe'] ?? null;
 
+            $srtPath = FFprobeService::adjacentCaptionSidecar($path);
+            $hasCaptions = !empty($meta['has_captions']) || $srtPath !== null;
+            $captionStreamIndex = isset($meta['caption_stream_index'])
+                ? (int) $meta['caption_stream_index']
+                : null;
+
             $fileId = $this->files->insert([
                 'scan_job_id'        => (int) $job['id'],
                 'source_id'          => (int) $job['source_id'],
@@ -728,6 +734,9 @@ final class ScanService
                 'metadata_extracted' => $probe !== null,
                 'needs_split'        => $result->needsSplit,
                 'split_notes'        => $result->splitNotes,
+                'has_captions'       => $hasCaptions,
+                'caption_stream_index' => $captionStreamIndex,
+                'srt_path'           => $srtPath,
             ]);
             $this->continuity->attachFileId($path, $fileId);
 

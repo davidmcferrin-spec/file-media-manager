@@ -521,6 +521,9 @@ code, .path-text kbd {
         <li class="nav-item">
           <a class="nav-link<?php echo navActive('/scan', $currentPath); ?>" href="/scan">Scan</a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link<?php echo navActive('/captions', $currentPath); ?>" href="/captions">Captions</a>
+        </li>
         <?php endif; ?>
         <li class="nav-item">
           <a class="nav-link<?php echo navActive('/queue', $currentPath); ?>" href="/queue">Catalog</a>

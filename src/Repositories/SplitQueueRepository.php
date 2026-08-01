@@ -12,7 +12,7 @@ final class SplitQueueRepository extends BaseRepository
     public function all(?string $status = null, int $limit = 100, int $offset = 0): array
     {
         $sql = 'SELECT sq.*,
-                       f.original_path, f.original_filename, f.duration_seconds,
+                       f.public_id, f.original_path, f.original_filename, f.duration_seconds,
                        f.split_notes, f.proposed_dir, f.proposed_filename,
                        sh.abbreviation AS show_abbr,
                        u.email AS created_by_email
@@ -69,8 +69,10 @@ final class SplitQueueRepository extends BaseRepository
     {
         $stmt = $this->db()->prepare(
             'SELECT sq.*,
-                    f.original_path, f.original_filename, f.original_dir,
+                    f.public_id, f.original_path, f.original_filename, f.original_dir,
                     f.duration_seconds, f.split_notes, f.proposed_dir, f.proposed_filename,
+                    f.file_date, f.file_time, f.has_captions, f.srt_path,
+                    f.container, f.codec_video, f.codec_audio, f.filesize_bytes,
                     f.show_id, sh.abbreviation AS show_abbr,
                     u.email AS created_by_email
              FROM split_queue sq
@@ -84,6 +86,66 @@ final class SplitQueueRepository extends BaseRepository
         $row = $stmt->fetch();
 
         return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Prev/next job IDs in queue order (created_at DESC, id DESC), optional status filter.
+     *
+     * @return array{prev_id: ?int, next_id: ?int, position: int, total: int}
+     */
+    public function neighbors(int $id, ?string $status = null): array
+    {
+        $empty = ['prev_id' => null, 'next_id' => null, 'position' => 0, 'total' => 0];
+        $item = $this->findById($id);
+        if ($item === null) {
+            return $empty;
+        }
+
+        $createdAt = (string) ($item['created_at'] ?? '');
+        $statusClause = '';
+        $statusParams = [];
+        if ($status !== null && $status !== '') {
+            $statusClause = ' AND status = ?';
+            $statusParams[] = $status;
+        }
+
+        $totalStmt = $this->db()->prepare('SELECT COUNT(*) FROM split_queue WHERE 1=1' . $statusClause);
+        $totalStmt->execute($statusParams);
+        $total = (int) $totalStmt->fetchColumn();
+
+        // Position among filtered jobs (1-based, same order as list).
+        $posSql = 'SELECT COUNT(*) FROM split_queue
+                   WHERE (created_at > ? OR (created_at = ? AND id > ?))' . $statusClause;
+        $posStmt = $this->db()->prepare($posSql);
+        $posStmt->execute(array_merge([$createdAt, $createdAt, $id], $statusParams));
+        $position = (int) $posStmt->fetchColumn() + 1;
+
+        // Previous = newer in DESC list (higher on the index page).
+        $prevSql = 'SELECT id FROM split_queue
+                    WHERE (created_at > ? OR (created_at = ? AND id > ?))' . $statusClause . '
+                    ORDER BY created_at ASC, id ASC
+                    LIMIT 1';
+        $prevStmt = $this->db()->prepare($prevSql);
+        $prevStmt->execute(array_merge([$createdAt, $createdAt, $id], $statusParams));
+        $prevRaw = $prevStmt->fetchColumn();
+        $prevId = $prevRaw === false ? null : (int) $prevRaw;
+
+        // Next = older in DESC list (lower on the index page).
+        $nextSql = 'SELECT id FROM split_queue
+                    WHERE (created_at < ? OR (created_at = ? AND id < ?))' . $statusClause . '
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1';
+        $nextStmt = $this->db()->prepare($nextSql);
+        $nextStmt->execute(array_merge([$createdAt, $createdAt, $id], $statusParams));
+        $nextRaw = $nextStmt->fetchColumn();
+        $nextId = $nextRaw === false ? null : (int) $nextRaw;
+
+        return [
+            'prev_id'  => $prevId,
+            'next_id'  => $nextId,
+            'position' => $position,
+            'total'    => $total,
+        ];
     }
 
     public function hasActiveForFile(int $fileId): bool

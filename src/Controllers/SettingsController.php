@@ -409,23 +409,27 @@ if ($method === 'POST') {
             $result = (new DatabaseWipeService())->wipe($projectRoot);
             $user = Auth::user();
             $logLine = sprintf(
-                "[%s] DB_WIPE by %s from %s — tables: %s; thumbnails=%d; previews=%d\n",
+                "[%s] DB_WIPE by %s from %s — tables: %s; media=%d; thumbnails=%d; previews=%d; split_proxy=%d\n",
                 date('c'),
                 (string) ($user['email'] ?? 'unknown'),
                 (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
                 implode(',', $result['tables']),
+                $result['media_files'] ?? 0,
                 $result['thumbnail_files'],
-                $result['preview_files']
+                $result['preview_files'],
+                $result['split_proxy_files'] ?? 0
             );
             $logPath = $projectRoot . '/' . trim((string) env('STORAGE_LOGS', 'storage/logs'), '/') . '/app.log';
             @file_put_contents($logPath, $logLine, FILE_APPEND);
             Session::flash(
                 'success',
                 sprintf(
-                    'Workflow data wiped (%d tables). Cleared %d thumbnails and %d previews. Users and settings preserved.',
+                    'Workflow data wiped (%d tables). Cleared %d media assets, %d legacy thumbnails, %d previews, %d split proxies. Users and settings preserved.',
                     count($result['tables']),
+                    $result['media_files'] ?? 0,
                     $result['thumbnail_files'],
-                    $result['preview_files']
+                    $result['preview_files'],
+                    $result['split_proxy_files'] ?? 0
                 )
             );
         } catch (\Throwable $e) {

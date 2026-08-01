@@ -85,6 +85,10 @@ class View
      */
     public static function mediaMetaPayload(array $file): array
     {
+        $publicId = isset($file['public_id']) && is_string($file['public_id'])
+            ? (string) $file['public_id']
+            : '';
+
         return [
             'duration'            => $file['duration_seconds'] ?? null,
             'duration_label'      => self::duration(
@@ -100,7 +104,70 @@ class View
                 isset($file['filesize_bytes']) ? (int) $file['filesize_bytes'] : null
             ),
             'metadata_extracted'  => !empty($file['metadata_extracted']),
+            'has_captions'        => !empty($file['has_captions']),
+            'has_srt'             => !empty($file['srt_path']),
+            'public_id'           => $publicId,
+            'media_cache_path'    => $publicId !== '' ? self::mediaCachePath($publicId) : '',
         ];
+    }
+
+    /**
+     * Relative sharded cache root for a file public_id (ULID).
+     * Example: storage/media/01/J8/X9/01J8X9K2M3N4P5Q6R7S8T9U0V1
+     */
+    public static function mediaCachePath(string $publicId): string
+    {
+        if (!Ulid::isValid($publicId)) {
+            return '';
+        }
+
+        $root = trim((string) env('STORAGE_MEDIA', 'storage/media'), '/');
+
+        return $root . '/' . Ulid::shardPath($publicId);
+    }
+
+    /**
+     * Compact HTML for catalog / detail: Asset ID + cache path.
+     *
+     * @param array<string, mixed> $file
+     */
+    public static function assetIdBlock(array $file): string
+    {
+        $publicId = isset($file['public_id']) ? trim((string) $file['public_id']) : '';
+        if ($publicId === '' || !Ulid::isValid($publicId)) {
+            return '';
+        }
+
+        $path = self::mediaCachePath($publicId);
+
+        return '<div class="path-text mt-1" style="font-size:0.68rem" title="App asset ID (derived cache only; NAS paths unchanged)">'
+            . 'Asset <code class="user-select-all">' . self::e($publicId) . '</code>'
+            . ($path !== ''
+                ? '<br><span class="text-break">' . self::e($path) . '</span>'
+                : '')
+            . '</div>';
+    }
+
+    /**
+     * Catalog CC badge: orange = captions present; green = captions + extracted SRT.
+     *
+     * @param array<string, mixed> $file
+     */
+    public static function captionBadge(array $file): string
+    {
+        if (empty($file['has_captions']) && empty($file['srt_path'])) {
+            return '';
+        }
+        $hasSrt = !empty($file['srt_path']);
+        $title = $hasSrt
+            ? 'Captions present and SRT extracted'
+            : 'Captions/subtitles detected in media';
+        $style = $hasSrt
+            ? 'background:#198754;color:#fff'
+            : 'background:#e67e22;color:#fff';
+
+        return '<span class="badge mt-1 caption-cc-badge" style="font-size:0.68rem;'
+            . $style . '" title="' . self::e($title) . '">CC</span>';
     }
 
     /**
@@ -155,6 +222,9 @@ class View
             'EXECUTED'    => ['success',   'Executed'],
             'ROLLED_BACK' => ['info',      'Rolled Back'],
             'IN_PROGRESS' => ['info',      'In Progress'],
+            'RUNNING'     => ['info',      'Running'],
+            'COMPLETED'   => ['success',   'Completed'],
+            'CANCELLED'   => ['dark',      'Cancelled'],
             'DONE'        => ['success',   'Done'],
             'FAILED'      => ['danger',    'Failed'],
         ];

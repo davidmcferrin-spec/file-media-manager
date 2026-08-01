@@ -7,6 +7,7 @@ chdir(__DIR__ . '/..');
 require_once __DIR__ . '/../src/bootstrap.php';
 
 use MediaManager\Database;
+use MediaManager\Repositories\FileRepository;
 
 /** @return list<string> */
 function migrationFiles(): array
@@ -167,3 +168,14 @@ foreach (migrationFiles() as $file) {
 }
 
 echo 'Migrations complete. Applied: ' . $applied . ', skipped: ' . $skipped . PHP_EOL;
+
+// Backfill ULID public_id for any legacy files rows (no-op when column missing or all set).
+try {
+    $pdo->query('SELECT public_id FROM files LIMIT 1');
+    $backfilled = (new FileRepository())->backfillMissingPublicIds();
+    if ($backfilled > 0) {
+        echo 'Backfilled public_id on ' . $backfilled . ' file(s).' . PHP_EOL;
+    }
+} catch (\Throwable $e) {
+    // Column may not exist yet on a partial install; ignore.
+}

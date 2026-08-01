@@ -11,6 +11,8 @@ use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\MediaTypeRepository;
 use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SplitQueueRepository;
+use MediaManager\Repositories\CaptionExtractJobRepository;
+use MediaManager\Services\CaptionExtractJobService;
 use MediaManager\Services\GlueGroupService;
 use MediaManager\Services\ProposalPathBuilder;
 use PDOException;
@@ -630,6 +632,90 @@ if ($uri === '/queue/clear-glue') {
     ]);
     Session::flash('success', $count . ' file(s) cleared from glue.');
     redirect_queue();
+}
+
+// ── Extract captions — enqueue background job ─────────────────
+if ($uri === '/queue/extract-captions') {
+    if (!Auth::isAdmin()) {
+        Session::flash('error', 'Admin access required to queue caption extract.');
+        redirect_queue();
+    }
+
+    $ids = parse_ids();
+    if ($ids === []) {
+        $single = (int) ($_POST['id'] ?? 0);
+        if ($single > 0) {
+            $ids = [$single];
+        }
+    }
+    $ids = array_values(array_unique(array_filter(
+        array_map('intval', $ids),
+        static fn (int $id): bool => $id > 0
+    )));
+    if ($ids === []) {
+        Session::flash('error', 'Select at least one file.');
+        redirect_queue();
+    }
+
+    $jobRepo = new CaptionExtractJobRepository();
+    $running = $jobRepo->findActive();
+    if ($running !== null) {
+        $jobId = (int) $running['id'];
+        $merged = $jobRepo->prependPriority($jobId, $ids);
+        $audit->record($userId, $user['email'] ?? '', $ip, 'CAPTION_EXTRACT_PRIORITIZE', 'caption_extract_job', $jobId, null, null, [
+            'scope' => 'catalog',
+            'moved' => array_slice($ids, 0, 50),
+            'count' => count($ids),
+            'priority_len' => count($merged),
+        ]);
+        Session::flash(
+            'success',
+            count($ids) . ' clip(s) moved to top of running caption extract #' . $jobId . '.'
+        );
+        header('Location: /captions/' . $jobId);
+        exit;
+    }
+
+    $jobId = $jobRepo->create($userId, 'selected', $ids);
+    $audit->record($userId, $user['email'] ?? '', $ip, 'CAPTION_EXTRACT_QUEUED', 'caption_extract_job', $jobId, null, null, [
+        'scope' => 'selected',
+        'count' => count($ids),
+        'ids'   => array_slice($ids, 0, 50),
+    ]);
+
+    $projectRoot = dirname(__DIR__, 2);
+    $phpBin = PHP_BINARY;
+    $script = $projectRoot . '/scripts/caption_extract.php';
+    $logFile = CaptionExtractJobService::logPathForJob($jobId, $projectRoot);
+    $logDir = dirname($logFile);
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0775, true);
+    }
+    @file_put_contents(
+        $logFile,
+        '[' . gmdate('Y-m-d\TH:i:s\Z') . "] INFO Queued from Catalog count=" . count($ids) . "\n",
+        FILE_APPEND | LOCK_EX
+    );
+    $flags = '--job-id=' . $jobId;
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        pclose(popen(
+            'start /B "" ' . escapeshellarg($phpBin) . ' ' . escapeshellarg($script)
+            . ' ' . $flags . ' >> ' . escapeshellarg($logFile) . ' 2>&1',
+            'r'
+        ));
+    } else {
+        exec(sprintf(
+            '%s %s %s >> %s 2>&1 &',
+            escapeshellarg($phpBin),
+            escapeshellarg($script),
+            $flags,
+            escapeshellarg($logFile)
+        ));
+    }
+
+    Session::flash('success', 'Caption extract job #' . $jobId . ' started for ' . count($ids) . ' file(s).');
+    header('Location: /captions/' . $jobId);
+    exit;
 }
 
 http_response_code(404);

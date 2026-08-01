@@ -29,7 +29,8 @@ VERSION                 App semver (displayed in footer)
 CHANGELOG.md            Release notes (shown on /versions)
 scripts/migrate.php     Versioned PostgreSQL migration runner
 sql/migrations/         Versioned PostgreSQL migrations (001_, 002_, etc.)
-storage/thumbnails/     FFmpeg-generated JPGs cached by file_id
+storage/media/          Derived assets sharded by files.public_id (ULID): aa/bb/cc/{ulid}/
+storage/thumbnails/     Legacy flat thumbs (read fallback; new writes use storage/media)
 storage/logs/           Application logs
 ```
 

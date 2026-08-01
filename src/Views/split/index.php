@@ -18,7 +18,7 @@ use MediaManager\Support\View;
   <div>
     <h1 class="h4 mb-1" style="letter-spacing:0.03em;">Split Queue</h1>
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
-      Long files flagged for manual segmentation before rename/move.
+      Long files flagged for segmentation. Mark the show itself in the workbench — export will add ±5&nbsp;min handles later.
     </p>
   </div>
   <a href="/queue?needs_split=1" class="btn btn-outline-secondary btn-sm">View in Queue</a>
@@ -69,6 +69,7 @@ use MediaManager\Support\View;
               <td>
                 <div class="path-filename"><?php echo View::e($item['original_filename']); ?></div>
                 <div class="path-text"><?php echo View::e($item['original_path']); ?></div>
+                <?php echo View::assetIdBlock($item); ?>
                 <?php if (!empty($item['split_notes'])): ?>
                 <div class="path-text mt-1"><?php echo View::e($item['split_notes']); ?></div>
                 <?php endif; ?>
@@ -77,7 +78,8 @@ use MediaManager\Support\View;
               <td><?php echo View::statusBadge((string) $item['status']); ?></td>
               <td><?php echo $segCount; ?></td>
               <td class="text-end">
-                <a href="/split/<?php echo (int) $item['id']; ?>" class="btn btn-outline-secondary btn-xs">Open</a>
+                <a href="/split/<?php echo (int) $item['id']; ?><?php echo $statusFilter !== '' ? '?status=' . urlencode($statusFilter) : ''; ?>"
+                   class="btn btn-outline-secondary btn-xs">Open</a>
               </td>
             </tr>
             <?php endforeach; ?>

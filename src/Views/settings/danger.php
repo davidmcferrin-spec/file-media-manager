@@ -22,7 +22,8 @@ use MediaManager\Support\View;
           <strong class="d-block mb-1">Deleted</strong>
           Scan jobs, catalog files, split queue, shows, timeline, expected gaps,
           legacy rename map, conversion rules, scan ignore paths, audit log,
-          thumbnails, and preview proxies.
+          sharded media cache (thumbs / previews / split proxies), and legacy
+          thumbnail/preview/split-proxy folders.
         </div>
       </div>
       <div class="col-md-6">

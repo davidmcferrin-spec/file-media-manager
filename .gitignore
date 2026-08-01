@@ -2,12 +2,20 @@
 .env
 
 # Storage (generated files)
+storage/media/*
 storage/thumbnails/*
+storage/previews/*
+storage/split-proxy/*
 storage/logs/*
 storage/backups/*
+storage/tmp/*
+!storage/media/.gitkeep
 !storage/thumbnails/.gitkeep
+!storage/previews/.gitkeep
+!storage/split-proxy/.gitkeep
 !storage/logs/.gitkeep
 !storage/backups/.gitkeep
+!storage/tmp/.gitkeep
 
 # Uploads (temp)
 uploads/*

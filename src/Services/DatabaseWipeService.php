@@ -13,6 +13,8 @@ final class DatabaseWipeService
 {
     /** Tables wiped, in FK-safe order (children first). */
     private const WIPE_TABLES = [
+        'glue_queue',
+        'caption_extract_jobs',
         'split_queue',
         'schedule_expected_gaps',
         'files',
@@ -28,7 +30,13 @@ final class DatabaseWipeService
     ];
 
     /**
-     * @return array{tables: list<string>, thumbnail_files: int, preview_files: int}
+     * @return array{
+     *   tables: list<string>,
+     *   media_files: int,
+     *   thumbnail_files: int,
+     *   preview_files: int,
+     *   split_proxy_files: int
+     * }
      */
     public function wipe(string $projectRoot): array
     {
@@ -48,13 +56,17 @@ final class DatabaseWipeService
         $quoted = array_map(static fn (string $t): string => '"' . str_replace('"', '""', $t) . '"', $wiped);
         $pdo->exec('TRUNCATE TABLE ' . implode(', ', $quoted) . ' RESTART IDENTITY CASCADE');
 
+        $mediaDir = $projectRoot . '/' . trim((string) env('STORAGE_MEDIA', 'storage/media'), '/');
         $thumbDir = $projectRoot . '/' . trim((string) env('STORAGE_THUMBNAILS', 'storage/thumbnails'), '/');
         $prevDir  = $projectRoot . '/' . trim((string) env('STORAGE_PREVIEWS', 'storage/previews'), '/');
+        $splitDir = $projectRoot . '/' . trim((string) env('STORAGE_SPLIT_PROXY', 'storage/split-proxy'), '/');
 
         return [
-            'tables'          => $wiped,
-            'thumbnail_files' => $this->clearDirectory($thumbDir),
-            'preview_files'   => $this->clearDirectory($prevDir),
+            'tables'            => $wiped,
+            'media_files'       => $this->clearDirectory($mediaDir),
+            'thumbnail_files'   => $this->clearDirectory($thumbDir),
+            'preview_files'     => $this->clearDirectory($prevDir),
+            'split_proxy_files' => $this->clearDirectory($splitDir),
         ];
     }
 
@@ -86,6 +98,10 @@ final class DatabaseWipeService
             $path = $fileInfo->getPathname();
             if ($fileInfo->isDir()) {
                 @rmdir($path);
+                continue;
+            }
+            // Keep .gitkeep placeholders
+            if ($fileInfo->getFilename() === '.gitkeep') {
                 continue;
             }
             if (@unlink($path)) {

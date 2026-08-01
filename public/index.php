@@ -70,6 +70,9 @@ match (true) {
     str_starts_with($uri, '/queue/ffprobe')
         => require dirname(__DIR__) . '/src/Controllers/FFprobeController.php',
 
+    str_starts_with($uri, '/queue/captions')
+        => require dirname(__DIR__) . '/src/Controllers/CaptionController.php',
+
     // Queue actions (POST)
     $uri === '/queue/approve'
     || $uri === '/queue/reject'
@@ -83,6 +86,7 @@ match (true) {
     || $uri === '/queue/clear-split'
     || $uri === '/queue/mark-glue'
     || $uri === '/queue/clear-glue'
+    || $uri === '/queue/extract-captions'
         => require dirname(__DIR__) . '/src/Controllers/QueueActionController.php',
 
     // Scan: apply legacy map / reclassify (before general scan routes)
@@ -122,13 +126,21 @@ match (true) {
     $uri === '/execute' || $uri === '/rollback'
         => require dirname(__DIR__) . '/src/Controllers/ExecuteController.php',
 
+    // Split workbench media (frame scrub / play segments) — before general split routes
+    str_starts_with($uri, '/split/media/')
+        => require dirname(__DIR__) . '/src/Controllers/SplitMediaController.php',
+
     // Split queue (admin only)
     $uri === '/split' || str_starts_with($uri, '/split/')
         => require dirname(__DIR__) . '/src/Controllers/SplitController.php',
 
-    // Glue groups (multipart concat candidates)
-    $uri === '/glue'
+    // Glue queue (multipart ffmpeg concat + QC)
+    $uri === '/glue' || str_starts_with($uri, '/glue/')
         => require dirname(__DIR__) . '/src/Controllers/GlueController.php',
+
+    // Caption extract background jobs (admin)
+    $uri === '/captions' || str_starts_with($uri, '/captions/')
+        => require dirname(__DIR__) . '/src/Controllers/CaptionExtractController.php',
 
     // Audit log (admin only)
     $uri === '/audit'

@@ -14,6 +14,7 @@ final class MediaExtensions
     /** @var list<string> */
     public const SIDECAR = [
         'xml', 'scc', 'json', 'xls', 'xlsx', 'csv', 'txt', 'pdf', 'cue', 'cca', 'stl',
+        'srt', 'vtt',
     ];
 
     public static function isMedia(string $path): bool

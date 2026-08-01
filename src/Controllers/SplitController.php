@@ -10,6 +10,10 @@ use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\ShowRepository;
 use MediaManager\Repositories\SplitQueueRepository;
+use MediaManager\Services\CaptionSplitSuggester;
+use MediaManager\Services\DateNormalizer;
+use MediaManager\Services\SplitMediaService;
+use MediaManager\Services\SrtCaptionParser;
 use PDOException;
 
 Auth::requireAdmin();
@@ -41,6 +45,47 @@ function split_audit(
         null,
         $details
     );
+}
+
+function split_status_query(?string $status): string
+{
+    if ($status === null || $status === '') {
+        return '';
+    }
+
+    return '?status=' . rawurlencode($status);
+}
+
+/**
+ * Air date/time for a segment from file clock + mark-in offset.
+ *
+ * @return array{date: string, time: string}
+ */
+function split_derive_air(?string $fileDate, ?string $fileTime, float $offsetSeconds): array
+{
+    $dateDigits = preg_replace('/\D/', '', (string) $fileDate) ?? '';
+    $startMin = DateNormalizer::timeToMinutes($fileTime);
+    if (strlen($dateDigits) !== 8 || !DateNormalizer::isValidDate($dateDigits) || $startMin === null) {
+        return ['date' => '', 'time' => ''];
+    }
+
+    $offsetMin = (int) floor(max(0.0, $offsetSeconds) / 60);
+    $totalMin = $startMin + $offsetMin;
+    $dayAdd = intdiv($totalMin, 24 * 60);
+    $todMin = $totalMin % (24 * 60);
+
+    $dt = \DateTimeImmutable::createFromFormat('Ymd', $dateDigits);
+    if ($dt === false) {
+        return ['date' => '', 'time' => ''];
+    }
+    if ($dayAdd > 0) {
+        $dt = $dt->modify('+' . $dayAdd . ' days');
+    }
+
+    return [
+        'date' => $dt->format('Ymd'),
+        'time' => DateNormalizer::minutesToHhmm($todMin),
+    ];
 }
 
 if ($method === 'POST') {
@@ -79,10 +124,13 @@ if ($method === 'POST') {
     }
 
     if ($uri === '/split/update') {
-        $id     = (int) ($_POST['id'] ?? 0);
-        $notes  = trim($_POST['notes'] ?? '');
-        $status = $_POST['status'] ?? 'PENDING';
-        $item   = $id > 0 ? $splitRepo->findById($id) : null;
+        $id           = (int) ($_POST['id'] ?? 0);
+        $notes        = trim($_POST['notes'] ?? '');
+        $status       = $_POST['status'] ?? 'PENDING';
+        $statusFilter = trim((string) ($_POST['status_filter'] ?? ''));
+        $redirect     = trim((string) ($_POST['redirect'] ?? ''));
+        $nextId       = (int) ($_POST['next_id'] ?? 0);
+        $item         = $id > 0 ? $splitRepo->findById($id) : null;
 
         if ($item === null) {
             Session::flash('error', 'Split job not found.');
@@ -93,6 +141,9 @@ if ($method === 'POST') {
         if (!in_array($status, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
             $status = 'PENDING';
         }
+        if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+            $statusFilter = '';
+        }
 
         $segments = parse_split_segments($_POST);
         $splitRepo->update($id, $segments, $notes, $status);
@@ -101,7 +152,13 @@ if ($method === 'POST') {
             'segment_count'  => count($segments),
         ]);
         Session::flash('success', 'Split job saved.');
-        header('Location: /split/' . $id);
+
+        $qs = split_status_query($statusFilter !== '' ? $statusFilter : null);
+        if ($redirect === 'next' && $nextId > 0 && $splitRepo->findById($nextId) !== null) {
+            header('Location: /split/' . $nextId . $qs);
+        } else {
+            header('Location: /split/' . $id . $qs);
+        }
         exit;
     }
 
@@ -115,6 +172,75 @@ if ($method === 'POST') {
             Session::flash('error', 'Could not remove split job.');
         }
         header('Location: /split');
+        exit;
+    }
+
+    if ($uri === '/split/suggest-captions') {
+        $id           = (int) ($_POST['id'] ?? 0);
+        $statusFilter = trim((string) ($_POST['status_filter'] ?? ''));
+        if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+            $statusFilter = '';
+        }
+        $qs   = split_status_query($statusFilter !== '' ? $statusFilter : null);
+        $item = $id > 0 ? $splitRepo->findById($id) : null;
+        if ($item === null) {
+            Session::flash('error', 'Split job not found.');
+            header('Location: /split');
+            exit;
+        }
+
+        $file = $fileRepo->findById((int) $item['file_id']);
+        if ($file === null) {
+            Session::flash('error', 'Source file not found.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        $srtPath = str_replace('\\', '/', (string) ($file['srt_path'] ?? ''));
+        if ($srtPath === '' || !is_readable($srtPath)) {
+            Session::flash('error', 'No SRT available. Extract captions from the Catalog first.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        $cues = SrtCaptionParser::parseFile($srtPath);
+        $suggestion = (new CaptionSplitSuggester())->suggest(
+            $cues,
+            isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : null,
+            isset($file['file_date']) ? (string) $file['file_date'] : null,
+            isset($file['file_time']) ? (string) $file['file_time'] : null,
+        );
+
+        if ($suggestion['segments'] === []) {
+            Session::flash('error', $suggestion['notes'] !== '' ? $suggestion['notes'] : 'No caption-based segments found.');
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
+
+        $segments = [];
+        foreach ($suggestion['segments'] as $seg) {
+            $segments[] = [
+                'start'   => $seg['start'],
+                'end'     => $seg['end'],
+                'show_id' => $seg['show_id'],
+                'label'   => $seg['label'],
+            ];
+        }
+
+        $notes = trim((string) ($item['notes'] ?? ''));
+        $notes = trim($notes . "\n\n" . $suggestion['notes']);
+        $splitRepo->update($id, $segments, $notes, (string) ($item['status'] ?? 'PENDING'));
+        split_audit($audit, 'SPLIT_CAPTION_SUGGEST', $id, [
+            'segment_count' => count($segments),
+            'gap_count'     => $suggestion['gap_count'],
+        ]);
+        Session::flash(
+            'success',
+            'Filled ' . count($segments) . ' segment(s) from captions (≥'
+            . (int) (CaptionSplitSuggester::MIN_GAP_SECONDS / 60)
+            . ' min silence gaps). Review before saving.'
+        );
+        header('Location: /split/' . $id . $qs);
         exit;
     }
 
@@ -136,12 +262,36 @@ if (preg_match('#^/split/(\d+)$#', $uri, $m)) {
         exit;
     }
 
+    $statusFilter = trim($_GET['status'] ?? '');
+    if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+        $statusFilter = '';
+    }
+
     $segments = json_decode((string) ($item['segments'] ?? '[]'), true);
     if (!is_array($segments)) {
         $segments = [];
     }
+
+    $neighbors = $splitRepo->neighbors(
+        $id,
+        $statusFilter !== '' ? $statusFilter : null
+    );
     $shows = $showRepo->all(true);
-    $title = 'Split Job #' . $id . ' — Media Manager';
+    $statusQuery = split_status_query($statusFilter !== '' ? $statusFilter : null);
+    $fileDate = isset($item['file_date']) ? (string) $item['file_date'] : null;
+    $fileTime = isset($item['file_time']) ? (string) $item['file_time'] : null;
+
+    foreach ($segments as $i => $seg) {
+        if (!is_array($seg)) {
+            continue;
+        }
+        $air = split_derive_air($fileDate, $fileTime, (float) ($seg['start'] ?? 0));
+        $segments[$i]['air_date'] = $air['date'];
+        $segments[$i]['air_time'] = $air['time'];
+    }
+
+    $mediaInfo = (new SplitMediaService())->describe($item);
+    $title = 'Split Workbench #' . $id . ' — Media Manager';
 
     require dirname(__DIR__) . '/Views/layouts/header.php';
     require dirname(__DIR__) . '/Views/split/detail.php';
