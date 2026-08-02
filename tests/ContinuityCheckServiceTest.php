@@ -151,6 +151,88 @@ final class ContinuityCheckServiceTest extends TestCase
         $this->assertFalse(ContinuityCheckService::preferEngineProposal('HIGH', ['agree' => true]));
     }
 
+    public function test_normalize_verdict_coerces_fields(): void
+    {
+        $v = ContinuityCheckService::normalizeVerdict([
+            'confidence'    => 'medium',
+            'show_id'       => '41',
+            'media_type_id' => 'Clean',
+            'file_date'     => '2024-10-27',
+            'file_time'     => '1155',
+        ]);
+        $this->assertSame('MEDIUM', $v['confidence']);
+        $this->assertSame(41, $v['show_id']);
+        $this->assertNull($v['media_type_id']);
+        $this->assertSame('Clean', $v['media_type']);
+        $this->assertSame('20241027', $v['file_date']);
+        $this->assertSame('1155', $v['file_time']);
+    }
+
+    public function test_verdict_incomplete_when_proposal_fields_omitted(): void
+    {
+        $proposal = [
+            'show_id'       => null,
+            'file_date'     => '20241027',
+            'file_time'     => '1155',
+            'media_type_id' => 1,
+        ];
+        $this->assertTrue(ContinuityCheckService::verdictIncomplete([
+            'agree'      => false,
+            'confidence' => 'HIGH',
+            'show_id'    => 41,
+        ], $proposal));
+        $this->assertFalse(ContinuityCheckService::verdictIncomplete([
+            'agree'         => false,
+            'confidence'    => 'HIGH',
+            'show_id'       => 41,
+            'file_date'     => '20241027',
+            'file_time'     => '1155',
+            'media_type_id' => 1,
+        ], $proposal));
+    }
+
+    public function test_complete_verdict_from_proposal_fills_gaps(): void
+    {
+        $done = ContinuityCheckService::completeVerdictFromProposal([
+            'agree'   => false,
+            'show_id' => 41,
+            'reason'  => 'wrong show',
+        ], [
+            'file_date'     => '20241027',
+            'file_time'     => '1155',
+            'media_type_id' => 1,
+            'show_id'       => null,
+        ]);
+        $v = $done['verdict'];
+        $this->assertSame('MEDIUM', $v['confidence']);
+        $this->assertSame('20241027', $v['file_date']);
+        $this->assertSame('1155', $v['file_time']);
+        $this->assertSame(1, $v['media_type_id']);
+        $this->assertSame(41, $v['show_id']);
+        $this->assertContains('file_date', $done['filled']);
+        $this->assertStringContainsString('filled:', (string) $v['reason']);
+    }
+
+    public function test_lean_schedule_prefers_matching_day(): void
+    {
+        $schedule = [];
+        for ($i = 1; $i <= 50; $i++) {
+            $schedule[] = [
+                'show_id'   => $i,
+                'show_abbr' => 'S' . $i,
+                'title'     => 'Show ' . $i,
+                'start'     => '11:00',
+                'end'       => '12:00',
+                'days'      => $i === 7 ? 64 : 31, // one Sunday row
+                'from'      => '2024-01-01',
+                'to'        => null,
+            ];
+        }
+        $lean = ContinuityCheckService::leanSchedule($schedule, '20241027', '1155', 10);
+        $this->assertCount(10, $lean);
+        $this->assertSame(7, (int) $lean[0]['show_id']);
+    }
+
     /** @return array{0: array<int, array{id: int, abbreviation: string, name: string, folder_name: string}>, 1: array<string, int>} */
     private function mediaTypeFixtures(): array
     {

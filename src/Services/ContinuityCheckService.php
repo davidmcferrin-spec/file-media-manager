@@ -172,6 +172,8 @@ final class ContinuityCheckService
                 $batchMs = (int) round((microtime(true) - $started) * 1000);
                 $perMs = (int) max(1, (int) round($batchMs / max(1, count($chunk))));
 
+                /** @var list<array{pending: array<string, mixed>, response: array<string, mixed>, ms: int}> $needRepair */
+                $needRepair = [];
                 foreach ($chunk as $j => $p) {
                     $response = $responses[$j] ?? [
                         'verdict'          => null,
@@ -184,13 +186,32 @@ final class ContinuityCheckService
                         $this->reachable = false;
                         $this->reachableCheckedAt = microtime(true);
                     }
+
+                    $proposal = is_array($p['seed_packet']['proposal'] ?? null)
+                        ? $p['seed_packet']['proposal']
+                        : [];
+                    $verdict = is_array($response['verdict'] ?? null)
+                        ? self::normalizeVerdict($response['verdict'])
+                        : null;
+                    if (
+                        $verdict !== null
+                        && self::verdictIncomplete($verdict, $proposal)
+                    ) {
+                        $needRepair[] = [
+                            'pending'  => $p,
+                            'response' => $response + ['verdict' => $verdict],
+                            'ms'       => $perMs,
+                        ];
+                        continue;
+                    }
+
                     $out[$p['index']] = $this->settleAsk(
                         $p['result'],
                         $p['path'],
                         $p['filename'],
                         $p['file_id'],
                         [
-                            'verdict'         => $response['verdict'],
+                            'verdict'         => $verdict,
                             'seed_packet'     => $p['seed_packet'],
                             'raw_content'     => $response['raw_content'],
                             'http_status'     => $response['http_status'],
@@ -198,6 +219,78 @@ final class ContinuityCheckService
                         ],
                         $perMs
                     );
+                }
+
+                if ($needRepair !== []) {
+                    $repairStarted = microtime(true);
+                    $repairRequests = [];
+                    foreach ($needRepair as $item) {
+                        $prior = $item['response']['verdict'] ?? [];
+                        $repairRequests[] = [
+                            'system' => 'Your previous JSON omitted required fields. Reply with complete JSON only: '
+                                . 'agree, confidence (HIGH|MEDIUM|LOW), show_id, media_type_id, media_type_agree, '
+                                . 'file_date (YYYYMMDD), file_time (HHMM), datetime_agree, reason. '
+                                . 'Mirror proposal file_date/file_time/media_type_id when you do not dispute them. '
+                                . 'Choose show_id and media_type_id only from the catalogs in the user JSON.',
+                            'user'   => (string) json_encode([
+                                'repair'   => true,
+                                'previous' => $prior,
+                                'context'  => json_decode($item['pending']['user'], true),
+                            ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE),
+                        ];
+                    }
+                    $repairResponses = $this->client->completeJsonMany($repairRequests);
+                    $repairBatchMs = (int) round((microtime(true) - $repairStarted) * 1000);
+                    $repairPerMs = (int) max(1, (int) round($repairBatchMs / max(1, count($needRepair))));
+
+                    foreach ($needRepair as $j => $item) {
+                        $p = $item['pending'];
+                        $first = $item['response'];
+                        $second = $repairResponses[$j] ?? [
+                            'verdict'          => null,
+                            'raw_content'      => '',
+                            'http_status'      => null,
+                            'transport_error'  => 'missing repair response',
+                            'transport_failed' => true,
+                        ];
+                        if ($second['verdict'] === null && !empty($second['transport_failed'])) {
+                            $this->reachable = false;
+                            $this->reachableCheckedAt = microtime(true);
+                        }
+
+                        $verdict = null;
+                        if (is_array($second['verdict'] ?? null)) {
+                            $verdict = self::normalizeVerdict($second['verdict']);
+                        } elseif (is_array($first['verdict'] ?? null)) {
+                            $verdict = self::normalizeVerdict($first['verdict']);
+                        }
+
+                        $raw = trim((string) ($first['raw_content'] ?? ''));
+                        $raw2 = trim((string) ($second['raw_content'] ?? ''));
+                        if ($raw2 !== '') {
+                            $raw = $raw === '' ? $raw2 : ($raw . "\n--- repair ---\n" . $raw2);
+                        }
+                        $transport = trim((string) ($second['transport_error'] ?? ''));
+                        if ($transport === '') {
+                            $transport = (string) ($first['transport_error'] ?? '');
+                        }
+                        $httpStatus = $second['http_status'] ?? $first['http_status'] ?? null;
+
+                        $out[$p['index']] = $this->settleAsk(
+                            $p['result'],
+                            $p['path'],
+                            $p['filename'],
+                            $p['file_id'],
+                            [
+                                'verdict'         => $verdict,
+                                'seed_packet'     => $p['seed_packet'],
+                                'raw_content'     => $raw,
+                                'http_status'     => $httpStatus,
+                                'transport_error' => $transport,
+                            ],
+                            $item['ms'] + $repairPerMs
+                        );
+                    }
                 }
             }
         }
@@ -348,6 +441,253 @@ final class ContinuityCheckService
         }
 
         return in_array(strtoupper(trim($ruleConfidence)), ['LOW', 'UNEVALUATED'], true);
+    }
+
+    /**
+     * Coerce common model quirks into the expected verdict shape.
+     *
+     * @param array<string, mixed> $verdict
+     * @return array<string, mixed>
+     */
+    public static function normalizeVerdict(array $verdict): array
+    {
+        $conf = strtoupper(trim((string) ($verdict['confidence'] ?? '')));
+        if (in_array($conf, ['HIGH', 'MEDIUM', 'LOW'], true)) {
+            $verdict['confidence'] = $conf;
+        } else {
+            unset($verdict['confidence']);
+        }
+
+        if (array_key_exists('show_id', $verdict)) {
+            if ($verdict['show_id'] === null || $verdict['show_id'] === '') {
+                $verdict['show_id'] = null;
+            } elseif (is_numeric($verdict['show_id'])) {
+                $id = (int) $verdict['show_id'];
+                $verdict['show_id'] = $id > 0 ? $id : null;
+            } else {
+                $verdict['show_id'] = null;
+            }
+        }
+
+        if (array_key_exists('media_type_id', $verdict)) {
+            if ($verdict['media_type_id'] === null || $verdict['media_type_id'] === '') {
+                $verdict['media_type_id'] = null;
+            } elseif (is_numeric($verdict['media_type_id'])) {
+                $id = (int) $verdict['media_type_id'];
+                $verdict['media_type_id'] = $id > 0 ? $id : null;
+            } else {
+                // Model sometimes returns abbreviation in media_type_id.
+                $verdict['media_type'] = (string) $verdict['media_type_id'];
+                $verdict['media_type_id'] = null;
+            }
+        }
+
+        if (isset($verdict['file_date']) && $verdict['file_date'] !== null && $verdict['file_date'] !== '') {
+            $norm = ProposalPathBuilder::normalizeDateInput((string) $verdict['file_date']);
+            $verdict['file_date'] = $norm;
+        } elseif (array_key_exists('file_date', $verdict)) {
+            $verdict['file_date'] = null;
+        }
+
+        if (isset($verdict['file_time']) && $verdict['file_time'] !== null && $verdict['file_time'] !== '') {
+            $verdict['file_time'] = DateNormalizer::normalizeTime((string) $verdict['file_time']);
+        } elseif (array_key_exists('file_time', $verdict)) {
+            $verdict['file_time'] = null;
+        }
+
+        return $verdict;
+    }
+
+    /**
+     * True when the model omitted required proposal fields (triggers one repair retry).
+     *
+     * @param array<string, mixed> $verdict
+     * @param array<string, mixed> $proposal
+     */
+    public static function verdictIncomplete(array $verdict, array $proposal): bool
+    {
+        $conf = strtoupper(trim((string) ($verdict['confidence'] ?? '')));
+        if (!in_array($conf, ['HIGH', 'MEDIUM', 'LOW'], true)) {
+            return true;
+        }
+
+        $propDate = trim((string) ($proposal['file_date'] ?? ''));
+        $propTime = trim((string) ($proposal['file_time'] ?? ''));
+        $propTypeId = $proposal['media_type_id'] ?? null;
+        $propShowId = $proposal['show_id'] ?? null;
+
+        $engDate = trim((string) ($verdict['file_date'] ?? ''));
+        $engTime = trim((string) ($verdict['file_time'] ?? ''));
+        $engType = $verdict['media_type_id'] ?? null;
+        if (($engType === null || $engType === '') && trim((string) ($verdict['media_type'] ?? '')) === '') {
+            $engType = null;
+        }
+        $engShow = $verdict['show_id'] ?? null;
+
+        if ($propDate !== '' && $engDate === '') {
+            return true;
+        }
+        if ($propTime !== '' && $engTime === '') {
+            return true;
+        }
+        if ($propTypeId !== null && $propTypeId !== '' && ($engType === null || $engType === '')) {
+            return true;
+        }
+
+        $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($agree === false && ($engShow === null || $engShow === '' || (int) $engShow <= 0)) {
+            return true;
+        }
+        if (
+            $agree === true
+            && $propShowId !== null
+            && $propShowId !== ''
+            && ($engShow === null || $engShow === '' || (int) $engShow <= 0)
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Fill null model fields from the rule proposal after normalize/retry.
+     * Date/time/type are mirrored whenever the proposal has them; show only when agree≠false.
+     *
+     * @param array<string, mixed> $verdict
+     * @param array<string, mixed> $proposal
+     * @return array{verdict: array<string, mixed>, filled: list<string>}
+     */
+    public static function completeVerdictFromProposal(array $verdict, array $proposal): array
+    {
+        $filled = [];
+        $conf = strtoupper(trim((string) ($verdict['confidence'] ?? '')));
+        if (!in_array($conf, ['HIGH', 'MEDIUM', 'LOW'], true)) {
+            $verdict['confidence'] = 'MEDIUM';
+            $filled[] = 'confidence';
+        }
+
+        $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        if (
+            ($verdict['file_date'] ?? null) === null
+            || $verdict['file_date'] === ''
+        ) {
+            $propDate = trim((string) ($proposal['file_date'] ?? ''));
+            if ($propDate !== '') {
+                $norm = ProposalPathBuilder::normalizeDateInput($propDate);
+                if ($norm !== null) {
+                    $verdict['file_date'] = $norm;
+                    $filled[] = 'file_date';
+                }
+            }
+        }
+
+        if (
+            ($verdict['file_time'] ?? null) === null
+            || $verdict['file_time'] === ''
+        ) {
+            $propTime = trim((string) ($proposal['file_time'] ?? ''));
+            if ($propTime !== '') {
+                $norm = DateNormalizer::normalizeTime($propTime);
+                if ($norm !== null) {
+                    $verdict['file_time'] = $norm;
+                    $filled[] = 'file_time';
+                }
+            }
+        }
+
+        $hasType = isset($verdict['media_type_id']) && is_numeric($verdict['media_type_id'])
+            && (int) $verdict['media_type_id'] > 0;
+        if (!$hasType && trim((string) ($verdict['media_type'] ?? '')) === '') {
+            if (isset($proposal['media_type_id']) && is_numeric($proposal['media_type_id'])) {
+                $verdict['media_type_id'] = (int) $proposal['media_type_id'];
+                $filled[] = 'media_type_id';
+            } elseif (trim((string) ($proposal['media_type'] ?? '')) !== '') {
+                $verdict['media_type'] = (string) $proposal['media_type'];
+                $filled[] = 'media_type';
+            }
+        }
+
+        $hasShow = isset($verdict['show_id']) && is_numeric($verdict['show_id'])
+            && (int) $verdict['show_id'] > 0;
+        if (!$hasShow && $agree !== false && isset($proposal['show_id']) && is_numeric($proposal['show_id'])) {
+            $sid = (int) $proposal['show_id'];
+            if ($sid > 0) {
+                $verdict['show_id'] = $sid;
+                $filled[] = 'show_id';
+            }
+        }
+
+        if ($filled !== []) {
+            $note = 'filled:' . implode(',', $filled);
+            $reason = trim((string) ($verdict['reason'] ?? ''));
+            $verdict['reason'] = $reason === '' ? $note : ($reason . ' [' . $note . ']');
+        }
+
+        return ['verdict' => $verdict, 'filled' => $filled];
+    }
+
+    /**
+     * Prefer schedule rows matching the air day / nearby hour (keeps the prompt small).
+     *
+     * @param list<array<string, mixed>> $schedule
+     * @return list<array<string, mixed>>
+     */
+    public static function leanSchedule(array $schedule, ?string $dateYmd, ?string $timeHhmm, int $limit = 36): array
+    {
+        if (count($schedule) <= $limit) {
+            return $schedule;
+        }
+
+        $dayBit = 0;
+        if ($dateYmd !== null && DateNormalizer::isValidDate($dateYmd)) {
+            $dayBit = ScheduleTimeParser::dayBitFromDate($dateYmd);
+        }
+        $targetMin = DateNormalizer::timeToMinutes($timeHhmm) ?? (12 * 60);
+
+        $scored = [];
+        foreach ($schedule as $idx => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $score = 0;
+            $days = (int) ($row['days'] ?? 0);
+            if ($dayBit > 0 && ($days & $dayBit) !== 0) {
+                $score += 20;
+            }
+            $start = (string) ($row['start'] ?? '');
+            if (preg_match('/^(\d{2}):(\d{2})/', $start, $m) === 1) {
+                $startMin = ((int) $m[1] * 60) + (int) $m[2];
+                $dist = abs($startMin - $targetMin);
+                $score += max(0, 12 - (int) floor($dist / 60));
+            }
+            // Prefer rows effective on the air date when known.
+            if ($dateYmd !== null && DateNormalizer::isValidDate($dateYmd)) {
+                $from = (string) ($row['from'] ?? '');
+                $to = $row['to'] ?? null;
+                $iso = substr($dateYmd, 0, 4) . '-' . substr($dateYmd, 4, 2) . '-' . substr($dateYmd, 6, 2);
+                if ($from !== '' && $from <= $iso && ($to === null || $to === '' || (string) $to >= $iso)) {
+                    $score += 8;
+                }
+            }
+            $scored[] = ['score' => $score, 'idx' => $idx, 'row' => $row];
+        }
+
+        usort($scored, static function (array $a, array $b): int {
+            if ($a['score'] !== $b['score']) {
+                return $b['score'] <=> $a['score'];
+            }
+
+            return $a['idx'] <=> $b['idx'];
+        });
+
+        $out = [];
+        foreach (array_slice($scored, 0, $limit) as $item) {
+            $out[] = $item['row'];
+        }
+
+        return $out;
     }
 
     /**
@@ -666,25 +1006,26 @@ final class ContinuityCheckService
     ): array {
         $shows = $this->catalog();
         $mediaTypes = $this->mediaTypeList();
-        $schedule = $this->scheduleCatalog();
+        $scheduleFull = $this->scheduleCatalog();
+        $schedule = self::leanSchedule($scheduleFull, $result->fileDate, $result->fileTime, 36);
         $atAirTime = $this->timelineFor($result->fileDate, $result->fileTime);
         $examples = $this->approvedExemplars();
 
         $system = <<<'PROMPT'
 You are a broadcast archive continuity reviewer for NewsNation media files.
 Act like a human editor: read the original filename and path, then propose the correct show, air date/time, and media type. The application will build the policy filename from your fields.
-Also say whether the rule-based proposal looks consistent (agree) using the dictionary, full program schedule (past and current), and approved examples.
+Also say whether the rule-based proposal looks consistent (agree) using the dictionary, schedule, and approved examples.
 Rules:
-- ALWAYS return your best show_id, file_date, file_time, and media_type_id when you can extract them — do not leave them null just because you agree with the rule proposal. Mirror the rule values in those fields when they are correct.
+- ALWAYS return confidence, show_id, file_date, file_time, and media_type_id. Never leave date/time/type null when proposal has them or the filename/path clearly has them — mirror proposal values when you do not dispute them.
 - Choose show_id ONLY from the provided shows list, or null if truly unknown.
-- Choose media_type_id ONLY from the provided media_types list, or null if truly unknown.
-- schedule[] is the full active Timeline: past eras and current. schedule.to null means the show block is still current (has not ended).
-- Prefer schedule alignment when date/time are present. at_air_time[] highlights rows matching the proposal date/time when known.
+- Choose media_type_id ONLY from the provided media_types list (numeric id), or null if truly unknown.
+- schedule[] is a focused slice of the Timeline (day/hour relevant). schedule.to null means still current.
+- Prefer at_air_time[] / nearby_slots[] when present; otherwise use schedule[] + path/filename tokens.
 - Path folders like PGM/Program/Clean/GISO are strong media-type evidence — prefer them over weak filename tokens.
 - Short or ambiguous path tokens for show identity are weaker — do not over-trust them.
 - Never invent show abbreviations, media type abbreviations, or filenames outside the catalogs.
 - file_date must be YYYYMMDD or null. file_time must be HHMM (24h Eastern) or null.
-- datetime_agree is true when your file_date/file_time (or the rule proposal when you mirror it) look correct for the filename/path.
+- datetime_agree is true when your file_date/file_time look correct for the filename/path.
 - media_type_agree is true when your media_type_id looks correct for the filename/path.
 - agree is true when the rule proposal's show (and overall mapping) matches your judgment.
 - Respond with JSON only, no prose:
@@ -706,13 +1047,14 @@ PROMPT;
                 'confidence'        => $result->confidence,
                 'signals'           => $result->signals,
             ],
-            'shows'        => $shows,
-            'media_types'  => $mediaTypes,
-            'schedule'     => $schedule,
-            'timeline'     => $atAirTime, // backward-compatible alias for Lab
-            'at_air_time'  => $atAirTime,
-            'examples'     => $examples,
-            'system'       => $system,
+            'shows'            => $shows,
+            'media_types'      => $mediaTypes,
+            'schedule'         => $schedule,
+            'schedule_full_count' => count($scheduleFull),
+            'timeline'         => $atAirTime, // backward-compatible alias for Lab
+            'at_air_time'      => $atAirTime,
+            'examples'         => $examples,
+            'system'           => $system,
         ];
 
         $userPayload = [
@@ -724,15 +1066,18 @@ PROMPT;
                     'id'             => $s['id'],
                     'abbreviation'   => $s['abbreviation'],
                     'canonical_name' => $s['canonical_name'],
-                    'aliases'        => array_slice($s['aliases'] ?? [], 0, 8),
+                    'aliases'        => array_slice($s['aliases'] ?? [], 0, 6),
                 ];
             }, $shows),
             'media_types' => $mediaTypes,
             'schedule'    => $schedule,
             'at_air_time' => $atAirTime,
+            'nearby_slots' => $atAirTime,
             'schedule_notes' => [
                 'to_null_means_current' => true,
                 'days_bitmask'          => 'Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 Sat=32 Sun=64',
+                'schedule_is_focused_slice' => true,
+                'schedule_full_count'       => count($scheduleFull),
             ],
             'examples' => array_map(static function (array $ex): array {
                 return [
@@ -814,6 +1159,14 @@ PROMPT;
             return $result;
         }
 
+        $verdict = self::normalizeVerdict($verdict);
+        $proposal = is_array($asked['seed_packet']['proposal'] ?? null)
+            ? $asked['seed_packet']['proposal']
+            : [];
+        $completed = self::completeVerdictFromProposal($verdict, $proposal);
+        $verdict = $completed['verdict'];
+        $filledFromProposal = $completed['filled'];
+
         $adjusted = $this->applyVerdict($result, $verdict, $originalFilename);
         $merged = self::mergeVerdict($result->confidence, $verdict);
         $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict, $result->confidence);
@@ -843,7 +1196,7 @@ PROMPT;
             }
         }
 
-        // Model filename from model-stated parts only (never mirror rules).
+        // Model filename from engine fields (including proposal-filled gaps after repair).
         $modelFolder = $mt['engine_abbr'];
         if ($mt['engine_id'] !== null) {
             [$typesById] = $this->mediaTypeIndexes();
@@ -862,6 +1215,11 @@ PROMPT;
             ProposalPathBuilder::guestFromProposed($result->proposedFilename)
         );
 
+        $engineReason = trim((string) ($verdict['reason'] ?? ''));
+        if ($filledFromProposal !== [] && !str_contains($engineReason, 'filled:')) {
+            $engineReason = trim($engineReason . ' [filled:' . implode(',', $filledFromProposal) . ']');
+        }
+
         $this->safeLog($baseLog + [
             'engine_agree'              => $agree,
             'engine_confidence'         => isset($verdict['confidence']) ? strtoupper((string) $verdict['confidence']) : null,
@@ -871,7 +1229,7 @@ PROMPT;
             'engine_media_type_id'      => $mt['engine_id'],
             'engine_media_type_abbr'    => $mt['engine_abbr'],
             'engine_proposed_filename'  => $engineProposed,
-            'engine_reason'             => trim((string) ($verdict['reason'] ?? '')),
+            'engine_reason'             => $engineReason,
             'final_confidence'          => $adjusted->confidence,
             'final_show_id'             => $adjusted->showId,
             'final_show_abbr'           => $adjusted->showAbbreviation,
@@ -1132,9 +1490,32 @@ PROMPT;
         if ($dayBit === 0) {
             return [];
         }
-        $rows = $this->schedule->matchAt($dateYmd, $minutes, $dayBit);
+
+        $rawRows = $this->schedule->matchAt($dateYmd, $minutes, $dayBit);
+        // Exact hour empty — pull nearby same-day slots so the model still gets schedule hints.
+        if ($rawRows === []) {
+            $seen = [];
+            foreach ([-180, -120, -60, 60, 120, 180, 240, -240] as $delta) {
+                $probe = $minutes + $delta;
+                if ($probe < 0 || $probe >= 24 * 60) {
+                    continue;
+                }
+                foreach ($this->schedule->matchAt($dateYmd, $probe, $dayBit) as $row) {
+                    $key = (int) ($row['show_id'] ?? 0) . '|' . (string) ($row['hour_start_et'] ?? '');
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $rawRows[] = $row;
+                    if (count($rawRows) >= 8) {
+                        break 2;
+                    }
+                }
+            }
+        }
+
         $out = [];
-        foreach ($rows as $row) {
+        foreach ($rawRows as $row) {
             $to = $row['effective_to'] ?? null;
             $out[] = [
                 'show_id'   => (int) $row['show_id'],

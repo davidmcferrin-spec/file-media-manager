@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.22.1] — 2026-08-01
+
+### Changed
+
+- Continuity **repairs incomplete Ollama JSON** once (missing confidence / date / time / type / show), then fills remaining gaps from the rule proposal so Model Lab columns and filenames are populated
+- Continuity seed uses a **focused schedule slice** (day/hour scored) plus nearby air-time slots when the exact hour has no Timeline match
+
 ## [0.22.0] — 2026-08-01
 
 ### Changed
