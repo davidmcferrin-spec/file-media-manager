@@ -16,6 +16,7 @@ final class DatabaseWipeService
         'glue_queue',
         'caption_extract_jobs',
         'split_audio_jobs',
+        'thumbnail_jobs',
         'split_queue',
         'schedule_expected_gaps',
         'files',

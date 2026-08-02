@@ -22,7 +22,7 @@ UNIT="${UNIT%.service}"
 
 FULL_CONTROL=0
 case "${UNIT}" in
-  media-manager-scan|media-manager-caption-extract|media-manager-split-audio)
+  media-manager-scan|media-manager-caption-extract|media-manager-split-audio|media-manager-thumbnail)
     FULL_CONTROL=1
     ;;
   apache2|postgresql)

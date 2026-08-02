@@ -13,7 +13,7 @@ only after human approval via a web-based review queue.
 - FFmpeg + FFprobe (metadata, thumbnails, previews, glue concat, caption extract)
 - Apache 2.4 on Debian 13
 - Session-based auth (bcrypt local + optional LDAP)
-- systemd: `media-manager-scan`, `media-manager-caption-extract`
+- systemd: `media-manager-scan`, `media-manager-caption-extract`, `media-manager-split-audio`, `media-manager-thumbnail`
 
 ## Architecture
 ```
@@ -32,8 +32,10 @@ CHANGELOG.md            Release notes (shown on /versions)
 scripts/migrate.php     Versioned PostgreSQL migration runner
 scripts/scan_worker.php              Long-running scan queue daemon
 scripts/caption_extract_worker.php   Long-running CC extract daemon
+scripts/thumbnail_worker.php         Long-running Catalog thumbnail daemon
 scripts/scan.php                     One-shot scan (CLI / legacy spawn)
 scripts/caption_extract.php          One-shot caption job (CLI / legacy spawn)
+scripts/thumbnail.php                One-shot thumbnail job (CLI / legacy spawn)
 deploy/systemd/         Unit files (installed by setup.sh)
 deploy/sbin/            media-manager-svc allowlisted systemctl/journalctl helper
 deploy/sudoers/         www-data NOPASSWD drop-in for Services UI
@@ -64,7 +66,8 @@ storage/logs/           Application + worker logs
 ## Key Rules
 - NOTHING moves on disk without file status = APPROVED + explicit execute action
 - Every disk operation is written to audit_log before AND after execution
-- All thumbnails/previews generated on-demand (not at scan time)
+- Thumbnails: background worker (`media-manager-thumbnail`); Catalog serves placeholder until ready
+- Video previews still generated on-demand in the web request (heavier; separate from thumbs)
 - Files at or above the split flag duration (Settings → Processing; default 2 hours)
   are flagged needs_split = true; multi-hour schedule spans also flag
 - Split workbench suggest: captions (SRT silence gaps) or audio (FFmpeg silencedetect;
@@ -74,8 +77,8 @@ storage/logs/           Application + worker logs
 - Bootstrap vendored under public/vendor/ — no external requests
 - No inline SQL — use Repository classes
 - No framework — vanilla PHP, PSR-4 autoloading
-- Background Scan + Caption extract + Split audio: web enqueues only; systemd
-  workers poll (`WORKER_MODE=daemon`). Do not SIGKILL the daemon PID on cancel —
+- Background Scan + Caption extract + Split audio + Thumbnails: web enqueues only;
+  systemd workers poll (`WORKER_MODE=daemon`). Do not SIGKILL the daemon PID on cancel —
   use cooperative `cancel_requested` (aborts Continuity HTTP mid-flight).
   UI Force stop may SIGTERM the job worker PID; systemd restarts the idle daemon.
   Local/dev may set `WORKER_MODE=spawn`.
@@ -86,10 +89,12 @@ storage/logs/           Application + worker logs
 | media-manager-scan | scan_jobs PENDING/PAUSED/FAILED/orphaned RUNNING |
 | media-manager-caption-extract | caption_extract_jobs same statuses |
 | media-manager-split-audio | split_audio_jobs (levels / suggest) |
+| media-manager-thumbnail | thumbnail_jobs (Catalog JPEG frames) |
 
 Logs: `journalctl -u <unit> -f` and `storage/logs/*-worker.log`.
 Per caption job: `storage/logs/caption-extract-{id}.log`.
 Per split-audio job: `storage/logs/split-audio-{id}.log`.
+Per thumbnail job: `storage/logs/thumbnail-{id}.log`.
 Env: `WORKER_MODE`, `WORKER_POLL_SECONDS`, `CAPTION_EXTRACT_TIMEOUT_SECONDS`.
 
 Admin → **Services** (`/services`): live unit status + journal tail + start/stop/restart/enable/disable

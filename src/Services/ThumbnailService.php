@@ -13,6 +13,7 @@ final class ThumbnailService
     private string $ffmpegBin;
     private int $offsetSeconds;
     private int $defaultWidth;
+    private int $largeWidth;
     private int $quality;
 
     public function __construct(
@@ -23,6 +24,7 @@ final class ThumbnailService
         $this->ffmpegBin     = (string) env('FFMPEG_BIN', '/usr/bin/ffmpeg');
         $this->offsetSeconds = (int) ($settings->get('thumbnail_offset_seconds') ?? env('THUMBNAIL_OFFSET_SECONDS', 50));
         $this->defaultWidth  = (int) env('THUMBNAIL_WIDTH', 320);
+        $this->largeWidth    = (int) env('PREVIEW_WIDTH', 420);
         $this->quality       = (int) env('THUMBNAIL_QUALITY', 5);
     }
 
@@ -31,11 +33,19 @@ final class ThumbnailService
         return $this->cache->thumbnailPath($fileId);
     }
 
-    public function ensureThumbnail(int $fileId, ?int $width = null): string
+    /** Cached path only — never runs FFmpeg. */
+    public function resolve(int $fileId, bool $large = false): ?string
     {
-        $width ??= $this->defaultWidth;
-        $large = $width > $this->defaultWidth;
+        return $this->cache->resolveThumbnailPath($fileId, $large);
+    }
 
+    /**
+     * Run FFmpeg and write the thumbnail (worker path).
+     * Prefer resolve() + ThumbnailJobService from HTTP.
+     */
+    public function generate(int $fileId, bool $large = false): string
+    {
+        $width = $large ? $this->largeWidth : $this->defaultWidth;
         $existing = $this->cache->resolveThumbnailPath($fileId, $large);
         if ($existing !== null) {
             return $existing;
@@ -81,5 +91,16 @@ final class ThumbnailService
         }
 
         return $dest;
+    }
+
+    /**
+     * @deprecated Prefer resolve() from HTTP and generate() from the worker.
+     * Kept for any legacy callers — still synchronous FFmpeg.
+     */
+    public function ensureThumbnail(int $fileId, ?int $width = null): string
+    {
+        $large = $width !== null && $width > $this->defaultWidth;
+
+        return $this->generate($fileId, $large);
     }
 }

@@ -808,6 +808,13 @@ final class ScanService
             ]);
             $this->continuity->attachFileId($path, $fileId);
 
+            // Warm Catalog thumbs in background — never FFmpeg in the scan process.
+            try {
+                (new ThumbnailJobService())->enqueueIfNeeded($fileId, false, (int) ($job['created_by'] ?? 0) ?: null, false);
+            } catch (\Throwable $e) {
+                error_log('[scan] Thumbnail enqueue failed: ' . $e->getMessage());
+            }
+
             if ($result->needsSplit) {
                 $this->pendingSplitPrepIds[] = $fileId;
             }

@@ -462,6 +462,9 @@ require dirname(__DIR__) . '/shows/_nav.php';
                         data-meta="<?php echo View::e(json_encode(View::mediaMetaPayload($f), JSON_THROW_ON_ERROR)); ?>">
                   <img src="/queue/thumbnail/<?php echo (int) $f['id']; ?>"
                        alt="" width="72" height="40"
+                       class="mm-thumb"
+                       data-file-id="<?php echo (int) $f['id']; ?>"
+                       <?php if (empty($f['thumbnail_path'])): ?>data-pending="1"<?php endif; ?>
                        style="object-fit:cover;border-radius:4px;background:#111"
                        loading="lazy">
                 </button>
@@ -538,6 +541,9 @@ require dirname(__DIR__) . '/shows/_nav.php';
                     data-title="<?php echo View::e($f['original_filename'] ?? ''); ?>"
                     data-meta="<?php echo View::e(json_encode(View::mediaMetaPayload($f), JSON_THROW_ON_ERROR)); ?>">
               <img src="/queue/thumbnail/<?php echo (int) $f['id']; ?>" alt="" width="72" height="40"
+                   class="mm-thumb"
+                   data-file-id="<?php echo (int) $f['id']; ?>"
+                   <?php if (empty($f['thumbnail_path'])): ?>data-pending="1"<?php endif; ?>
                    style="object-fit:cover;border-radius:4px;background:#111" loading="lazy">
             </button>
           </td>
@@ -666,6 +672,8 @@ require dirname(__DIR__) . '/shows/_nav.php';
 </div>
 
 <?php ob_start(); ?>
+<script src="/js/thumb-poll.js"></script>
+<script>ThumbPoll.start(4000);</script>
 <script>
 (function () {
     var bs = window.bootstrap;
@@ -716,7 +724,14 @@ require dirname(__DIR__) . '/shows/_nav.php';
             if (!currentId) return;
             resetVideo();
             if (titleEl) titleEl.textContent = btn.getAttribute('data-title') || 'Preview';
-            if (img) img.src = '/queue/thumbnail/' + currentId + '?size=large&t=' + Date.now();
+            if (img) {
+                img.classList.add('mm-thumb');
+                img.setAttribute('data-file-id', String(currentId));
+                img.setAttribute('data-size', 'large');
+                img.setAttribute('data-pending', '1');
+                img.src = '/queue/thumbnail/' + currentId + '?size=large&t=' + Date.now();
+                if (window.ThumbPoll) ThumbPoll.tick();
+            }
             try { renderMeta(JSON.parse(btn.getAttribute('data-meta') || 'null')); }
             catch (e) { renderMeta(null); }
             modal.show();

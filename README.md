@@ -75,6 +75,7 @@ sudo ./setup.sh
 - `media-manager-scan.service`
 - `media-manager-caption-extract.service`
 - `media-manager-split-audio.service`
+- `media-manager-thumbnail.service`
 
 For local development without systemd:
 
@@ -87,7 +88,7 @@ php scripts/test.php
 
 **Dev scan mode:** Scanner page → “Dev mode” uses `example_file_trees/` without a NAS mount.
 
-## Background workers (Scan + CC extract + Split audio)
+## Background workers (Scan + CC extract + Split audio + Thumbnails)
 
 These are **true daemons** — no CLI babysitting. The web UI only enqueues jobs (`PENDING`); workers poll and process.
 
@@ -96,15 +97,17 @@ These are **true daemons** — no CLI babysitting. The web UI only enqueues jobs
 | `media-manager-scan` | `scripts/scan_worker.php` | Scan jobs (pending / paused / failed / orphaned) |
 | `media-manager-caption-extract` | `scripts/caption_extract_worker.php` | Caption extract jobs |
 | `media-manager-split-audio` | `scripts/split_audio_worker.php` | Split audio levels / suggest jobs |
+| `media-manager-thumbnail` | `scripts/thumbnail_worker.php` | Catalog thumbnail JPEG generation |
 
-**Admin → Services** (`/services`) shows running status, start/stop/restart/enable/disable for the three workers, Apache/PostgreSQL restart, and a live journal tail (like `journalctl -f`). Privileged commands go through `/usr/local/sbin/media-manager-svc` with a sudoers drop-in installed by `setup.sh`.
+**Admin → Services** (`/services`) shows running status, start/stop/restart/enable/disable for the app workers, Apache/PostgreSQL restart, and a live journal tail (like `journalctl -f`). Privileged commands go through `/usr/local/sbin/media-manager-svc` with a sudoers drop-in installed by `setup.sh`.
 
 ```bash
 # Status / logs (CLI)
-systemctl status media-manager-scan media-manager-caption-extract media-manager-split-audio
+systemctl status media-manager-scan media-manager-caption-extract media-manager-split-audio media-manager-thumbnail
 journalctl -u media-manager-scan -f
 journalctl -u media-manager-caption-extract -f
 journalctl -u media-manager-split-audio -f
+journalctl -u media-manager-thumbnail -f
 
 # Also written under the app:
 #   storage/logs/scan-worker.log
@@ -112,6 +115,8 @@ journalctl -u media-manager-split-audio -f
 #   storage/logs/caption-extract-{jobId}.log   (per-job detail)
 #   storage/logs/split-audio-worker.log
 #   storage/logs/split-audio-{jobId}.log
+#   storage/logs/thumbnail-worker.log
+#   storage/logs/thumbnail-{jobId}.log
 #   storage/logs/scan-{jobId}.log             (legacy one-shot spawn)
 ```
 

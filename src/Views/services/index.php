@@ -247,6 +247,7 @@ visudo -cf /etc/sudoers.d/media-manager</pre>
         <option value="media-manager-scan">Scan worker</option>
         <option value="media-manager-caption-extract">Caption extract worker</option>
         <option value="media-manager-split-audio">Split audio worker</option>
+        <option value="media-manager-thumbnail">Thumbnail worker</option>
         <option value="apache2">Apache</option>
         <option value="postgresql">PostgreSQL</option>
         <?php endif; ?>

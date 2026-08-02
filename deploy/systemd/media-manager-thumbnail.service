@@ -1,0 +1,31 @@
+[Unit]
+Description=Media Manager Catalog thumbnail queue worker
+Documentation=file:///var/www/media-manager/README.md
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/media-manager
+ExecStart=/usr/bin/php8.4 /var/www/media-manager/scripts/thumbnail_worker.php
+Restart=always
+RestartSec=5
+Nice=10
+
+# Worker loop: storage/logs/thumbnail-worker.log
+# Per job: storage/logs/thumbnail-{id}.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-manager-thumbnail
+
+# FFmpeg frame extract from NAS
+TimeoutStopSec=120
+KillMode=mixed
+KillSignal=SIGTERM
+
+Environment=WORKER_MODE=daemon
+
+[Install]
+WantedBy=multi-user.target

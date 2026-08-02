@@ -14,6 +14,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.27.0] — 2026-08-02
+
+### Added
+
+- **Thumbnail worker** (`media-manager-thumbnail`): Catalog thumbs generated off Apache via `thumbnail_jobs` queue
+- Catalog/Gaps show a “Loading…” placeholder and poll until the JPEG is ready; Scan enqueues thumbs without blocking
+
+### Changed
+
+- `/queue/thumbnail/{id}` never runs FFmpeg in the web request (cache hit or placeholder + enqueue only)
+
 ## [0.26.1] — 2026-08-01
 
 ### Changed

@@ -32,6 +32,12 @@ final class SystemdServiceManager
             'actions' => ['start', 'stop', 'restart', 'enable', 'disable'],
         ],
         [
+            'id'      => 'media-manager-thumbnail',
+            'label'   => 'Thumbnail worker',
+            'group'   => 'workers',
+            'actions' => ['start', 'stop', 'restart', 'enable', 'disable'],
+        ],
+        [
             'id'      => 'apache2',
             'label'   => 'Apache',
             'group'   => 'infrastructure',

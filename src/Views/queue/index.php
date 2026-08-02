@@ -288,7 +288,10 @@ $queueBatchable = Auth::isEditor() && (
                     data-meta="<?php echo View::e(json_encode(View::mediaMetaPayload($item), JSON_THROW_ON_ERROR)); ?>"
                     title="Preview thumbnail, video proxy, and FFprobe details">
               <img src="/queue/thumbnail/<?php echo (int) $item['id']; ?>"
-                   alt="" width="80" height="45" class="rounded queue-thumb-img"
+                   alt="" width="80" height="45"
+                   class="rounded queue-thumb-img mm-thumb"
+                   data-file-id="<?php echo (int) $item['id']; ?>"
+                   <?php if (empty($item['thumbnail_path'])): ?>data-pending="1"<?php endif; ?>
                    style="object-fit:cover;background:var(--form-bg);cursor:pointer"
                    loading="lazy"
                    onerror="this.classList.add('d-none');var f=this.parentElement.querySelector('.queue-thumb-fallback');if(f)f.classList.remove('d-none');">
@@ -718,7 +721,7 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
       </div>
       <div class="modal-body p-2 text-center">
         <div id="media-preview-stage">
-          <img id="media-preview-image" src="" alt="" class="img-fluid rounded"
+          <img id="media-preview-image" src="" alt="" class="img-fluid rounded mm-thumb"
                style="max-height:55vh;cursor:pointer" title="Click to play video preview">
           <p class="path-text mt-2 mb-0" style="font-size:0.75rem">
             Click image to load <?php echo $previewDurationMin; ?>-minute preview (with audio).
@@ -812,6 +815,8 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
 </style>
 
 <?php ob_start(); ?>
+<script src="/js/thumb-poll.js"></script>
+<script>ThumbPoll.start(4000);</script>
 <script>
 (function () {
     var checkAll = document.getElementById('check-all');
@@ -1187,8 +1192,12 @@ $suggestHint = $suggestSignals !== [] ? implode(' · ', array_slice($suggestSign
             } catch (e) {
                 renderMetaSummary({});
             }
+            img.setAttribute('data-file-id', fileId);
+            img.setAttribute('data-size', 'large');
+            img.setAttribute('data-pending', '1');
             img.src = '/queue/thumbnail/' + fileId + '?size=large&_=' + Date.now();
             img.classList.remove('d-none');
+            if (window.ThumbPoll) ThumbPoll.tick();
             modal.show();
         }
 

@@ -335,7 +335,7 @@ sudo -u www-data php8.4 -r "
 " || warn "Could not persist continuity setting (non-fatal)."
 
 # ── 13. Background workers (systemd) ──────────────────────────
-info "Installing scan + caption extract + split audio systemd workers..."
+info "Installing scan + caption extract + split audio + thumbnail systemd workers..."
 ensure_env_key "WORKER_MODE" "daemon"
 ensure_env_key "WORKER_POLL_SECONDS" "5"
 
@@ -344,7 +344,7 @@ if [[ -z "${PHP_BIN}" ]]; then
     warn "PHP binary not found — skip systemd workers."
 elif command -v systemctl >/dev/null 2>&1; then
     UNIT_DIR="/etc/systemd/system"
-    for unit in media-manager-scan media-manager-caption-extract media-manager-split-audio; do
+    for unit in media-manager-scan media-manager-caption-extract media-manager-split-audio media-manager-thumbnail; do
         src="${WEB_ROOT}/deploy/systemd/${unit}.service"
         if [[ -f "${src}" ]]; then
             # Rewrite paths/PHP binary for this install
@@ -412,9 +412,10 @@ fi
 echo ""
 echo -e "  Edit ${CYAN}${ENV_FILE}${NC} to configure NAS mount paths"
 echo -e "  and other settings before first use."
-echo -e "  Workers:  ${CYAN}media-manager-scan${NC} + ${CYAN}media-manager-caption-extract${NC} + ${CYAN}media-manager-split-audio${NC}"
+echo -e "  Workers:  ${CYAN}media-manager-scan${NC} + ${CYAN}media-manager-caption-extract${NC} + ${CYAN}media-manager-split-audio${NC} + ${CYAN}media-manager-thumbnail${NC}"
 echo -e "  Services: ${CYAN}/services${NC} (Admin menu) — status, start/stop, live journal"
 echo -e "  Logs:     journalctl -u media-manager-scan -f"
 echo -e "            journalctl -u media-manager-caption-extract -f"
+echo -e "            journalctl -u media-manager-thumbnail -f"
 echo -e "  Broadcast continuity check runs quietly during Scan/Reclassify."
 echo ""
