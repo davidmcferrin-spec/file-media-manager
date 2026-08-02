@@ -14,6 +14,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.22.0] — 2026-08-01
+
+### Changed
+
+- Continuity engine is a **proposer**: Ollama must return show / date / time / media type (mirror rules when they are correct); app builds the Model filename from those fields
+- Final adopts model parts when rules are **LOW / UNEVALUATED** or the model **disagrees** (strong HIGH/MEDIUM rule hits still win on conflict)
+- Continuity Lab Model column shows **engine-stated values only** (no longer mirrors Rules when the model left fields null)
+
 ## [0.21.4] — 2026-08-01
 
 ### Changed

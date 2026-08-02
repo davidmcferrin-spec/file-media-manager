@@ -78,31 +78,18 @@ $showAbbrById = $showAbbrById ?? [];
         if ($engineShow === '' && $engineShowId > 0) {
             $engineShow = trim((string) ($showAbbrById[$engineShowId] ?? ''));
         }
-        // Model agreed with no alternate show_id → same as rules.
-        if ($engineShow === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleShow !== '') {
-            $engineShow = $ruleShow;
-        }
+        // Model column shows engine-stated values only (no Rules mirroring).
         $engineShowForName = $engineShow;
         if ($engineShow === '' && $engineShowId > 0) {
             $engineShow = '#' . $engineShowId;
         }
-        // Same fill for type/date when model agreed but left fields null.
-        if ($engineType === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleType !== '') {
-            $engineType = $ruleType;
-        }
         $engineDt = trim($engineDate . ' ' . $engineTime);
         $ruleDt = trim($ruleDate . ' ' . $ruleTime);
         $finalDt = trim($finalDate . ' ' . $finalTime);
-        if ($engineDt === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleDt !== '') {
-            $engineDt = $ruleDt;
-        }
 
         $ruleConf = trim((string) ($row['rule_confidence'] ?? ''));
         $engineConf = trim((string) ($row['engine_confidence'] ?? ''));
         $finalConf = trim((string) ($row['final_confidence'] ?? ''));
-        if ($engineConf === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleConf !== '') {
-            $engineConf = $ruleConf;
-        }
 
         $seedPretty = '';
         if (is_array($seed)) {
@@ -128,21 +115,16 @@ $showAbbrById = $showAbbrById ?? [];
         $ruleName = trim((string) ($row['rule_proposed_filename'] ?? ($seedProposal['proposed_filename'] ?? '')));
         $finalName = trim((string) ($row['final_proposed_filename'] ?? ''));
         $modelName = trim((string) ($row['engine_proposed_filename'] ?? ''));
-        $agreed = $row['engine_agree'] !== null && !empty($row['engine_agree']);
         if ($modelName === '') {
-            $modelDateForName = $engineDate !== '' ? $engineDate : ($agreed ? $ruleDate : '');
-            $modelTimeForName = $engineTime !== '' ? $engineTime : ($agreed ? $ruleTime : '');
+            // Reconstruct only from model-stated parts (older rows before engine_proposed_filename).
             $built = ContinuityCheckService::buildProposedFilename(
                 $originalName !== '' ? $originalName : 'file.bin',
                 $engineShowForName !== '' ? $engineShowForName : null,
-                $modelDateForName !== '' ? $modelDateForName : null,
-                $modelTimeForName !== '' ? $modelTimeForName : null,
+                $engineDate !== '' ? $engineDate : null,
+                $engineTime !== '' ? $engineTime : null,
                 $engineType !== '' ? $engineType : null
             );
             $modelName = $built ?? '';
-            if ($modelName === '' && $agreed && $ruleName !== '') {
-                $modelName = $ruleName;
-            }
         }
         if ($finalName === '' && $ruleName !== '') {
             $finalName = $ruleName;

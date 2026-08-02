@@ -220,7 +220,7 @@ final class ContinuityCheckClient
             || $this->packNameMatches($this->model, $probe['packs']);
 
         $response = $this->completeJson(
-            'Reply with JSON only: {"agree":true,"confidence":"HIGH","show_id":null,"reason":"lab-self-test"}',
+            'Reply with JSON only: {"agree":true,"confidence":"HIGH","show_id":1,"media_type_id":1,"media_type_agree":true,"file_date":"20240115","file_time":"1900","datetime_agree":true,"reason":"lab-self-test"}',
             '{"ping":true}'
         );
 

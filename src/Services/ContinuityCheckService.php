@@ -13,7 +13,8 @@ use MediaManager\Repositories\SystemRepository;
 
 /**
  * Second-pass broadcast continuity check layered on pattern classification.
- * Refines confidence, show, date/time, and media type using the local continuity engine.
+ * The local engine proposes show / date / time / media type like a human reviewer;
+ * those parts rebuild the policy filename. Weak or disputed rule hits adopt the proposal.
  */
 final class ContinuityCheckService
 {
@@ -335,7 +336,23 @@ final class ContinuityCheckService
     }
 
     /**
-     * Merge engine date/time with rule values. Fills gaps; keeps rule when both disagree.
+     * Prefer the model's proposed parts when rules are weak or the model disputes them.
+     *
+     * @param array<string, mixed> $verdict
+     */
+    public static function preferEngineProposal(string $ruleConfidence, array $verdict): bool
+    {
+        $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($agree === false) {
+            return true;
+        }
+
+        return in_array(strtoupper(trim($ruleConfidence)), ['LOW', 'UNEVALUATED'], true);
+    }
+
+    /**
+     * Merge engine date/time with rule values.
+     * Fills gaps; adopts model on weak/disputed rules; keeps strong rule hits on conflict.
      *
      * @param array<string, mixed> $verdict
      * @return array{
@@ -347,8 +364,12 @@ final class ContinuityCheckService
      *   changed: bool
      * }
      */
-    public static function mergeDateTime(?string $ruleDate, ?string $ruleTime, array $verdict): array
-    {
+    public static function mergeDateTime(
+        ?string $ruleDate,
+        ?string $ruleTime,
+        array $verdict,
+        string $ruleConfidence = 'MEDIUM'
+    ): array {
         $engineDate = null;
         if (isset($verdict['file_date']) && $verdict['file_date'] !== null && $verdict['file_date'] !== '') {
             $engineDate = ProposalPathBuilder::normalizeDateInput((string) $verdict['file_date']);
@@ -371,6 +392,9 @@ final class ContinuityCheckService
         $finalTime = $ruleTime;
         $signals = [];
         $changed = false;
+        $preferEngine = self::preferEngineProposal($ruleConfidence, $verdict);
+        $dtAgree = filter_var($verdict['datetime_agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $adoptOnConflict = $preferEngine || $dtAgree === false;
 
         if ($finalDate === null && $engineDate !== null) {
             $finalDate = $engineDate;
@@ -381,7 +405,13 @@ final class ContinuityCheckService
             && $engineDate !== null
             && $finalDate !== $engineDate
         ) {
-            $signals[] = 'continuity:date conflict';
+            if ($adoptOnConflict) {
+                $finalDate = $engineDate;
+                $signals[] = 'continuity:date adopted';
+                $changed = true;
+            } else {
+                $signals[] = 'continuity:date conflict';
+            }
         }
 
         if ($finalTime === null && $engineTime !== null) {
@@ -393,10 +423,15 @@ final class ContinuityCheckService
             && $engineTime !== null
             && $finalTime !== $engineTime
         ) {
-            $signals[] = 'continuity:time conflict';
+            if ($adoptOnConflict) {
+                $finalTime = $engineTime;
+                $signals[] = 'continuity:time adopted';
+                $changed = true;
+            } else {
+                $signals[] = 'continuity:time conflict';
+            }
         }
 
-        $dtAgree = filter_var($verdict['datetime_agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
         if ($dtAgree === false) {
             $signals[] = 'continuity:datetime disputed';
         } elseif ($dtAgree === true) {
@@ -414,7 +449,8 @@ final class ContinuityCheckService
     }
 
     /**
-     * Merge engine media type with rule values. Fills gaps; keeps rule when both disagree.
+     * Merge engine media type with rule values.
+     * Fills gaps; adopts model on weak/disputed rules; keeps strong rule hits on conflict.
      *
      * @param array<string, mixed> $verdict
      * @param array<int, array{id: int, abbreviation: string, name: string, folder_name: string}> $typesById
@@ -435,7 +471,8 @@ final class ContinuityCheckService
         ?string $ruleAbbr,
         array $verdict,
         array $typesById,
-        array $idsByAbbr
+        array $idsByAbbr,
+        string $ruleConfidence = 'MEDIUM'
     ): array {
         $engineId = null;
         if (isset($verdict['media_type_id']) && is_numeric($verdict['media_type_id'])) {
@@ -463,6 +500,9 @@ final class ContinuityCheckService
         $finalId = $ruleId;
         $signals = [];
         $changed = false;
+        $preferEngine = self::preferEngineProposal($ruleConfidence, $verdict);
+        $mtAgree = filter_var($verdict['media_type_agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        $adoptOnConflict = $preferEngine || $mtAgree === false;
 
         if ($finalId === null && $engineId !== null) {
             $finalId = $engineId;
@@ -473,10 +513,15 @@ final class ContinuityCheckService
             && $engineId !== null
             && $finalId !== $engineId
         ) {
-            $signals[] = 'continuity:media type conflict';
+            if ($adoptOnConflict) {
+                $finalId = $engineId;
+                $signals[] = 'continuity:media type adopted';
+                $changed = true;
+            } else {
+                $signals[] = 'continuity:media type conflict';
+            }
         }
 
-        $mtAgree = filter_var($verdict['media_type_agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
         if ($mtAgree === false) {
             $signals[] = 'continuity:media type disputed';
         } elseif ($mtAgree === true) {
@@ -551,13 +596,22 @@ final class ContinuityCheckService
             default => 'UNEVALUATED',
         };
 
+        $ruleConf = strtoupper(trim($ruleConfidence));
+
         if ($agree === true) {
             // Never raise above the pattern score; confirm only.
-            // Unevaluated pattern score: adopt the engine's assessed level.
-            if (strtoupper($ruleConfidence) === 'UNEVALUATED') {
+            // Weak rule hits: adopt the model's proposed show_id when present.
+            if ($ruleConf === 'UNEVALUATED') {
                 return [
                     'confidence'    => $engineConf,
-                    'adopt_show_id' => null,
+                    'adopt_show_id' => $adoptShowId,
+                    'signal'        => 'continuity:confirmed',
+                ];
+            }
+            if ($ruleConf === 'LOW') {
+                return [
+                    'confidence'    => $fromRank(min($rank('LOW'), $rank($engineConf))),
+                    'adopt_show_id' => $adoptShowId,
                     'signal'        => 'continuity:confirmed',
                 ];
             }
@@ -571,7 +625,7 @@ final class ContinuityCheckService
 
         if ($agree === false) {
             // Disputed mappings drop hard — especially false HIGHs.
-            $final = strtoupper($ruleConfidence) === 'UNEVALUATED' ? 'UNEVALUATED' : 'LOW';
+            $final = $ruleConf === 'UNEVALUATED' ? 'UNEVALUATED' : 'LOW';
 
             return [
                 'confidence'    => $final,
@@ -580,10 +634,12 @@ final class ContinuityCheckService
             ];
         }
 
-        // Uncertain / missing agree — blunt HIGH only
+        // Uncertain / missing agree — blunt HIGH; adopt show when rules are weak.
+        $adoptOnReview = in_array($ruleConf, ['LOW', 'UNEVALUATED'], true) ? $adoptShowId : null;
+
         return [
-            'confidence'    => $ruleConfidence === 'HIGH' ? 'MEDIUM' : $ruleConfidence,
-            'adopt_show_id' => null,
+            'confidence'    => $ruleConf === 'HIGH' ? 'MEDIUM' : $ruleConfidence,
+            'adopt_show_id' => $adoptOnReview,
             'signal'        => 'continuity:review',
         ];
     }
@@ -615,22 +671,22 @@ final class ContinuityCheckService
         $examples = $this->approvedExemplars();
 
         $system = <<<'PROMPT'
-You are a broadcast archive continuity checker for NewsNation media files.
-Decide whether the proposed show mapping is consistent with the dictionary, full program schedule (past and current), and approved examples.
-Also extract air date/time and media type (Clean vs Program, etc.) from the original filename/path when possible.
+You are a broadcast archive continuity reviewer for NewsNation media files.
+Act like a human editor: read the original filename and path, then propose the correct show, air date/time, and media type. The application will build the policy filename from your fields.
+Also say whether the rule-based proposal looks consistent (agree) using the dictionary, full program schedule (past and current), and approved examples.
 Rules:
-- Choose show_id ONLY from the provided shows list, or null.
-- Choose media_type_id ONLY from the provided media_types list, or null.
+- ALWAYS return your best show_id, file_date, file_time, and media_type_id when you can extract them — do not leave them null just because you agree with the rule proposal. Mirror the rule values in those fields when they are correct.
+- Choose show_id ONLY from the provided shows list, or null if truly unknown.
+- Choose media_type_id ONLY from the provided media_types list, or null if truly unknown.
 - schedule[] is the full active Timeline: past eras and current. schedule.to null means the show block is still current (has not ended).
 - Prefer schedule alignment when date/time are present. at_air_time[] highlights rows matching the proposal date/time when known.
 - Path folders like PGM/Program/Clean/GISO are strong media-type evidence — prefer them over weak filename tokens.
 - Short or ambiguous path tokens for show identity are weaker — do not over-trust them.
-- Never invent show abbreviations, media type abbreviations, or filenames.
+- Never invent show abbreviations, media type abbreviations, or filenames outside the catalogs.
 - file_date must be YYYYMMDD or null. file_time must be HHMM (24h Eastern) or null.
-- datetime_agree is true when proposed file_date/file_time look correct for the filename/path.
-- If proposal date/time are missing but filename clearly has them, fill file_date/file_time.
-- media_type_agree is true when proposed media type looks correct for the filename/path.
-- If proposal media type is missing or conflicts with a clear path folder (e.g. PGM), set media_type_id from media_types.
+- datetime_agree is true when your file_date/file_time (or the rule proposal when you mirror it) look correct for the filename/path.
+- media_type_agree is true when your media_type_id looks correct for the filename/path.
+- agree is true when the rule proposal's show (and overall mapping) matches your judgment.
 - Respond with JSON only, no prose:
 {"agree":true|false,"confidence":"HIGH"|"MEDIUM"|"LOW","show_id":null|number,"media_type_id":null|number,"media_type_agree":true|false,"file_date":null|string,"file_time":null|string,"datetime_agree":true|false,"reason":"short"}
 PROMPT;
@@ -760,7 +816,7 @@ PROMPT;
 
         $adjusted = $this->applyVerdict($result, $verdict, $originalFilename);
         $merged = self::mergeVerdict($result->confidence, $verdict);
-        $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict);
+        $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict, $result->confidence);
         $mt = $this->mergeMediaTypeFor($result, $verdict);
         $agree = filter_var($verdict['agree'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
         $outcome = match ($merged['signal']) {
@@ -771,8 +827,11 @@ PROMPT;
 
         $engineShowId = isset($verdict['show_id']) && is_numeric($verdict['show_id'])
             ? (int) $verdict['show_id'] : null;
+        if ($engineShowId !== null && $engineShowId <= 0) {
+            $engineShowId = null;
+        }
         $engineShowAbbr = null;
-        if ($engineShowId !== null && $engineShowId > 0) {
+        if ($engineShowId !== null) {
             foreach ($this->catalog() as $showRow) {
                 if ((int) ($showRow['id'] ?? 0) === $engineShowId) {
                     $engineShowAbbr = (string) ($showRow['abbreviation'] ?? '');
@@ -784,47 +843,24 @@ PROMPT;
             }
         }
 
-        $agreeYes = $agree === true;
-        $modelShow = $engineShowAbbr ?? ($agreeYes ? $result->showAbbreviation : null);
-        $modelDate = $dt['engine_date'] ?? ($agreeYes ? $result->fileDate : null);
-        $modelTime = $dt['engine_time'] ?? ($agreeYes ? $result->fileTime : null);
-        $modelType = $mt['engine_abbr'] ?? ($agreeYes ? $result->mediaTypeAbbreviation : null);
-        $modelFolder = $modelType;
+        // Model filename from model-stated parts only (never mirror rules).
+        $modelFolder = $mt['engine_abbr'];
         if ($mt['engine_id'] !== null) {
             [$typesById] = $this->mediaTypeIndexes();
             $typeRow = $typesById[(int) $mt['engine_id']] ?? null;
             if (is_array($typeRow) && trim((string) ($typeRow['folder_name'] ?? '')) !== '') {
                 $modelFolder = (string) $typeRow['folder_name'];
             }
-        } elseif ($agreeYes && $result->mediaTypeAbbreviation !== null) {
-            [$typesById] = $this->mediaTypeIndexes();
-            if ($result->mediaTypeId !== null && isset($typesById[$result->mediaTypeId])) {
-                $modelFolder = (string) ($typesById[$result->mediaTypeId]['folder_name']
-                    ?? $result->mediaTypeAbbreviation);
-            }
         }
-
-        $engineProposed = null;
-        $engineSentParts = $engineShowAbbr !== null
-            || $dt['engine_date'] !== null
-            || $dt['engine_time'] !== null
-            || $mt['engine_abbr'] !== null;
-        if ($agreeYes && !$engineSentParts) {
-            $engineProposed = $result->proposedFilename;
-        } else {
-            $engineProposed = self::buildProposedFilename(
-                $originalFilename,
-                $modelShow,
-                $modelDate,
-                $modelTime,
-                $modelType,
-                $modelFolder,
-                ProposalPathBuilder::guestFromProposed($result->proposedFilename)
-            );
-            if ($engineProposed === null && $agreeYes) {
-                $engineProposed = $result->proposedFilename;
-            }
-        }
+        $engineProposed = self::buildProposedFilename(
+            $originalFilename,
+            $engineShowAbbr,
+            $dt['engine_date'],
+            $dt['engine_time'],
+            $mt['engine_abbr'],
+            $modelFolder,
+            ProposalPathBuilder::guestFromProposed($result->proposedFilename)
+        );
 
         $this->safeLog($baseLog + [
             'engine_agree'              => $agree,
@@ -860,7 +896,7 @@ PROMPT;
         string $originalFilename
     ): ClassifierResult {
         $merged = self::mergeVerdict($result->confidence, $verdict);
-        $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict);
+        $dt = self::mergeDateTime($result->fileDate, $result->fileTime, $verdict, $result->confidence);
         $mt = $this->mergeMediaTypeFor($result, $verdict);
         $signals = $result->signals;
         $signals[] = $merged['signal'];
@@ -878,7 +914,9 @@ PROMPT;
         // Disputed datetime/media type on a HIGH show match — blunt confidence one step.
         if (
             (in_array('continuity:datetime disputed', $dt['signals'], true)
-                || in_array('continuity:date conflict', $dt['signals'], true))
+                || in_array('continuity:date conflict', $dt['signals'], true)
+                || in_array('continuity:date adopted', $dt['signals'], true)
+                || in_array('continuity:time adopted', $dt['signals'], true))
             && $merged['confidence'] === 'HIGH'
         ) {
             $merged['confidence'] = 'MEDIUM';
@@ -886,7 +924,8 @@ PROMPT;
         }
         if (
             (in_array('continuity:media type disputed', $mt['signals'], true)
-                || in_array('continuity:media type conflict', $mt['signals'], true))
+                || in_array('continuity:media type conflict', $mt['signals'], true)
+                || in_array('continuity:media type adopted', $mt['signals'], true))
             && $merged['confidence'] === 'HIGH'
         ) {
             $merged['confidence'] = 'MEDIUM';
@@ -913,6 +952,15 @@ PROMPT;
                 $signals[] = 'continuity:show adjusted';
                 $needsRebuild = true;
             }
+        } elseif (
+            $adoptId !== null
+            && $adoptId === $result->showId
+            && ($result->proposedFilename === null || $result->proposedFilename === '')
+            && $fileDate !== null
+            && $mediaTypeAbbr !== null
+        ) {
+            // Weak rules had the show but no built name — rebuild from model/final parts.
+            $needsRebuild = true;
         }
 
         if (
@@ -981,7 +1029,8 @@ PROMPT;
             $result->mediaTypeAbbreviation,
             $verdict,
             $typesById,
-            $idsByAbbr
+            $idsByAbbr,
+            $result->confidence
         );
     }
 

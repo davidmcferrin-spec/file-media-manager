@@ -155,7 +155,7 @@ final class ContinuityCheckLogRepository extends BaseRepository
                     final_media_type_id, final_media_type_abbr,
                     engine_agree, engine_confidence, engine_show_id, engine_reason,
                     signal, original_path, original_filename,
-                    rule_proposed_filename, final_proposed_filename, rule_signals,
+                    rule_proposed_filename, engine_proposed_filename, final_proposed_filename, rule_signals,
                     http_status, transport_error,
                     LEFT(COALESCE(engine_raw, \'\'), 2000) AS engine_raw,
                     LEFT(COALESCE(seed_packet::text, \'\'), 4000) AS seed_packet_json,
