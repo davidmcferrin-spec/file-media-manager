@@ -111,9 +111,12 @@ final class ContinuityCheckService
      *   original_filename: string,
      *   file_id?: ?int
      * }> $items
+     * @param (callable(): bool)|null $shouldAbort Cooperative cancel (e.g. scan cancel_requested)
      * @return list<ClassifierResult>
+     *
+     * @throws ContinuityCheckAbortedException
      */
-    public function refineBatch(array $items): array
+    public function refineBatch(array $items, ?callable $shouldAbort = null): array
     {
         if ($items === []) {
             return [];
@@ -124,6 +127,8 @@ final class ContinuityCheckService
         $pending = [];
 
         foreach ($items as $i => $item) {
+            $this->throwIfAborted($shouldAbort);
+
             $result = $item['result'];
             $path = (string) $item['original_path'];
             $filename = (string) $item['original_filename'];
@@ -160,12 +165,15 @@ final class ContinuityCheckService
         if ($pending !== []) {
             $chunkSize = self::concurrency();
             foreach (array_chunk($pending, $chunkSize) as $chunk) {
+                $this->throwIfAborted($shouldAbort);
+
                 $started = microtime(true);
                 $httpRequests = array_map(static fn (array $p): array => [
                     'system' => $p['system'],
                     'user'   => $p['user'],
                 ], $chunk);
-                $responses = $this->client->completeJsonMany($httpRequests);
+                $responses = $this->client->completeJsonMany($httpRequests, $shouldAbort);
+                $this->throwIfResponsesAborted($responses, $shouldAbort);
                 $batchMs = (int) round((microtime(true) - $started) * 1000);
                 $perMs = (int) max(1, (int) round($batchMs / max(1, count($chunk))));
 
@@ -219,6 +227,8 @@ final class ContinuityCheckService
                 }
 
                 if ($needRepair !== []) {
+                    $this->throwIfAborted($shouldAbort);
+
                     $repairStarted = microtime(true);
                     $repairRequests = [];
                     foreach ($needRepair as $item) {
@@ -238,7 +248,8 @@ final class ContinuityCheckService
                             ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE),
                         ];
                     }
-                    $repairResponses = $this->client->completeJsonMany($repairRequests);
+                    $repairResponses = $this->client->completeJsonMany($repairRequests, $shouldAbort);
+                    $this->throwIfResponsesAborted($repairResponses, $shouldAbort);
                     $repairBatchMs = (int) round((microtime(true) - $repairStarted) * 1000);
                     $repairPerMs = (int) max(1, (int) round($repairBatchMs / max(1, count($needRepair))));
 
@@ -297,6 +308,28 @@ final class ContinuityCheckService
         ksort($out);
 
         return array_values($out);
+    }
+
+    /** @param (callable(): bool)|null $shouldAbort */
+    private function throwIfAborted(?callable $shouldAbort): void
+    {
+        if ($shouldAbort !== null && $shouldAbort()) {
+            throw new ContinuityCheckAbortedException('Continuity aborted by cancel request');
+        }
+    }
+
+    /**
+     * @param list<array<string, mixed>> $responses
+     * @param (callable(): bool)|null $shouldAbort
+     */
+    private function throwIfResponsesAborted(array $responses, ?callable $shouldAbort): void
+    {
+        foreach ($responses as $response) {
+            if (!empty($response['aborted'])) {
+                throw new ContinuityCheckAbortedException('Continuity HTTP aborted by cancel request');
+            }
+        }
+        $this->throwIfAborted($shouldAbort);
     }
 
     /** Attach Catalog file id to the latest continuity row for a path (after first insert). */

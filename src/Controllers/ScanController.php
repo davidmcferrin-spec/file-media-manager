@@ -214,11 +214,15 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
         exit;
     }
 
+    $force       = !empty($_POST['force']);
     $killed      = false;
     $pid         = null;
     $stopOutcome = null;
-    // In daemon mode never SIGKILL the long-running worker — cooperative cancel only.
-    if ($status === 'RUNNING' && \MediaManager\Support\WorkerMode::shouldSpawn()) {
+
+    // Soft stop: cooperative cancel (aborts Continuity HTTP mid-flight).
+    // Force stop: SIGTERM the job worker PID, then mark paused/cancelled.
+    // Safe in daemon mode — systemd restarts the idle scanner; the job is marked stopped.
+    if ($status === 'RUNNING' && ($force || \MediaManager\Support\WorkerMode::shouldSpawn())) {
         $pid = $scanJobs->getWorkerPid($jobId);
         if ($pid !== null && $pid > 0) {
             $killed = kill_scan_worker($pid);
@@ -233,26 +237,38 @@ if ($method === 'POST' && $uri === '/scan/cancel') {
         Auth::id(),
         $user['email'] ?? '',
         $_SERVER['REMOTE_ADDR'] ?? '',
-        'SCAN_CANCEL_REQUESTED',
+        $force ? 'SCAN_FORCE_STOP' : 'SCAN_CANCEL_REQUESTED',
         'scan_job',
         $jobId,
         null,
         null,
-        ['previous_status' => $status, 'worker_pid' => $pid ?? null, 'killed' => $killed, 'outcome' => $stopOutcome ?? null]
+        [
+            'previous_status' => $status,
+            'worker_pid'      => $pid ?? null,
+            'killed'          => $killed,
+            'force'           => $force,
+            'outcome'         => $stopOutcome ?? null,
+        ]
     );
 
     $message = match ($status) {
         'PENDING' => 'Scan job #' . $jobId . ' cancelled.',
         'RUNNING' => match ($stopOutcome ?? null) {
-            'PAUSED'  => 'Scan job #' . $jobId . ' paused. Click Resume when ready.',
+            'PAUSED'    => 'Scan job #' . $jobId . ' paused. Click Resume when ready.',
             'CANCELLED' => 'Scan job #' . $jobId . ' stopped.',
-            default   => $killed
-                ? 'Scan job #' . $jobId . ' stopped.'
-                : 'Stop requested for scan job #' . $jobId . '. The worker will halt after the current file.',
+            default     => $force
+                ? (
+                    $killed
+                        ? 'Force-stopped scan job #' . $jobId . '.'
+                        : 'Force stop requested for scan #' . $jobId
+                            . ' but the worker PID was not reachable — cooperative stop is still set.'
+                )
+                : 'Stop requested for scan #' . $jobId
+                    . '. Aborting Continuity requests — should halt within a few seconds.',
         },
         default => 'Scan job #' . $jobId . ' updated.',
     };
-    Session::flash('success', $message);
+    Session::flash($force && !$killed && $status === 'RUNNING' ? 'error' : 'success', $message);
     header('Location: /scan/' . $jobId);
     exit;
 }
@@ -529,10 +545,13 @@ if ($method === 'GET' && $uri === '/scan/list-status') {
             'CANCELLED' => 'warning',
             default     => 'secondary',
         };
+        $cancelRequested = !empty($job['cancel_requested']);
         $jobsOut[] = [
             'id'               => $jobId,
             'status'           => $statusStr,
-            'status_badge'     => $badge,
+            'status_label'     => ($statusStr === 'RUNNING' && $cancelRequested) ? 'STOPPING' : $statusStr,
+            'status_badge'     => ($statusStr === 'RUNNING' && $cancelRequested) ? 'warning' : $badge,
+            'cancel_requested' => $cancelRequested,
             'worker_orphan'    => $orphan,
             'processed_files'  => $done,
             'total_files'      => $total,

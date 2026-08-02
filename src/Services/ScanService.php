@@ -182,7 +182,17 @@ final class ScanService
                         'file_id'           => $item['file_id'] ?? null,
                     ];
                 }
-                $refined = $this->continuity->refineBatch($batch);
+                try {
+                    $refined = $this->continuity->refineBatch(
+                        $batch,
+                        fn (): bool => $this->scanJobs->isCancelRequested($jobId)
+                    );
+                } catch (ContinuityCheckAbortedException) {
+                    // Drop uncommitted Continuity batch; mark job paused/cancelled.
+                    $continuityPending = [];
+                    $this->abortIfCancelled($jobId);
+                    throw new ScanCancelledException("Scan job {$jobId} was stopped during continuity.");
+                }
                 foreach ($continuityPending as $i => $item) {
                     $result = $refined[$i] ?? $item['result'];
                     try {
@@ -470,7 +480,7 @@ final class ScanService
                     ]);
                     $lastProgress = $now;
 
-                    if ($entriesSeen % 1000 === 0) {
+                    if ($entriesSeen % 250 === 0) {
                         $this->abortIfCancelled($jobId);
                     }
                 }

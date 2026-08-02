@@ -152,16 +152,19 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
               <td class="path-text"><?php echo View::e($job['subpath'] ?: '—'); ?></td>
               <td class="scan-job-status">
                 <?php
-                $badge  = match ($status) {
-                    'COMPLETED' => 'success',
-                    'RUNNING'   => 'primary',
-                    'PAUSED'    => 'info',
-                    'FAILED'    => 'danger',
-                    'CANCELLED' => 'warning',
-                    default     => 'secondary',
+                $stopping = $status === 'RUNNING' && !empty($job['cancel_requested']);
+                $badge  = match (true) {
+                    $stopping               => 'warning',
+                    $status === 'COMPLETED' => 'success',
+                    $status === 'RUNNING'   => 'primary',
+                    $status === 'PAUSED'    => 'info',
+                    $status === 'FAILED'    => 'danger',
+                    $status === 'CANCELLED' => 'warning',
+                    default                 => 'secondary',
                 };
+                $statusLabel = $stopping ? 'STOPPING' : $status;
                 ?>
-                <span class="badge bg-<?php echo $badge; ?> scan-status-badge"><?php echo View::e($status); ?></span>
+                <span class="badge bg-<?php echo $badge; ?> scan-status-badge"><?php echo View::e($statusLabel); ?></span>
                 <span class="scan-orphan-badge"><?php if ($orphanRow): ?>
                 <span class="badge bg-warning text-dark" title="Worker process not running">hung</span>
                 <?php endif; ?></span>
@@ -194,10 +197,19 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
                 <?php endif; ?>
                 <?php if ($canStopRow && !$orphanRow): ?>
                 <form method="post" action="/scan/cancel" class="d-inline"
-                      onsubmit="return confirm('Stop scan #<?php echo (int) $job['id']; ?>?');">
+                      onsubmit="return confirm('Stop scan #<?php echo (int) $job['id']; ?>? Continuity aborts immediately.');">
                   <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
                   <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
-                  <button type="submit" class="btn btn-outline-danger btn-xs">Stop</button>
+                  <button type="submit" class="btn btn-outline-danger btn-xs">
+                    <?php echo !empty($job['cancel_requested']) ? 'Stopping…' : 'Stop'; ?>
+                  </button>
+                </form>
+                <form method="post" action="/scan/cancel" class="d-inline"
+                      onsubmit="return confirm('Force-stop scan #<?php echo (int) $job['id']; ?> (SIGTERM worker)?');">
+                  <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+                  <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+                  <input type="hidden" name="force" value="1">
+                  <button type="submit" class="btn btn-danger btn-xs">Force</button>
                 </form>
                 <?php endif; ?>
                 <?php if ($canDeleteRow): ?>
@@ -258,7 +270,7 @@ foreach ($recentJobs as $j) {
         var badge = row.querySelector('.scan-status-badge');
         if (badge) {
           badge.className = 'badge bg-' + (job.status_badge || 'secondary') + ' scan-status-badge';
-          badge.textContent = job.status || '';
+          badge.textContent = job.status_label || job.status || '';
         }
         var orphan = row.querySelector('.scan-orphan-badge');
         if (orphan) {

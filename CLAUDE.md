@@ -76,7 +76,9 @@ storage/logs/           Application + worker logs
 - No framework — vanilla PHP, PSR-4 autoloading
 - Background Scan + Caption extract + Split audio: web enqueues only; systemd
   workers poll (`WORKER_MODE=daemon`). Do not SIGKILL the daemon PID on cancel —
-  use cooperative `cancel_requested`. Local/dev may set `WORKER_MODE=spawn`.
+  use cooperative `cancel_requested` (aborts Continuity HTTP mid-flight).
+  UI Force stop may SIGTERM the job worker PID; systemd restarts the idle daemon.
+  Local/dev may set `WORKER_MODE=spawn`.
 
 ## Background workers
 | Unit | Drains |

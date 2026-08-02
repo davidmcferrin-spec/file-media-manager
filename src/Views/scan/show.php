@@ -51,10 +51,19 @@ $timing = $timing ?? [
   <div class="d-flex gap-2 flex-wrap">
     <?php if ($canStop): ?>
     <form method="post" action="/scan/cancel" class="d-inline"
-          onsubmit="return confirm('Stop this scan? Files already queued will remain in the review queue.');">
+          onsubmit="return confirm('Stop this scan? Continuity requests abort immediately. Files already queued stay in the review queue.');">
       <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
       <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
-      <button type="submit" class="btn btn-outline-danger btn-sm">Stop Scan</button>
+      <button type="submit" class="btn btn-outline-danger btn-sm">
+        <?php echo !empty($job['cancel_requested']) ? 'Stopping…' : 'Stop Scan'; ?>
+      </button>
+    </form>
+    <form method="post" action="/scan/cancel" class="d-inline"
+          onsubmit="return confirm('Force-stop scan #<?php echo (int) $job['id']; ?>?\n\nSends SIGTERM to the worker process. Use if Stop is stuck. Partial progress is paused when possible.');">
+      <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+      <input type="hidden" name="id" value="<?php echo (int) $job['id']; ?>">
+      <input type="hidden" name="force" value="1">
+      <button type="submit" class="btn btn-danger btn-sm">Force stop</button>
     </form>
     <?php endif; ?>
     <?php if ($canResume): ?>
@@ -137,7 +146,15 @@ $scanLive = $status === 'RUNNING' || ($status === 'PENDING' && empty($job['cance
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Status</div>
-        <div id="scan-status-value" class="stat-value" style="font-size:1.4rem"><?php echo View::e($status); ?></div>
+        <div id="scan-status-value" class="stat-value" style="font-size:1.4rem">
+          <?php
+          if ($status === 'RUNNING' && !empty($job['cancel_requested'])) {
+              echo 'STOPPING';
+          } else {
+              echo View::e($status);
+          }
+          ?>
+        </div>
       </div>
     </div>
   </div>
@@ -234,7 +251,7 @@ $scanLive = $status === 'RUNNING' || ($status === 'PENDING' && empty($job['cance
     </div>
     <p id="scan-progress-hint" class="mb-0 mt-2" style="font-size:0.78rem;color:var(--text-soft)">
       <?php if (!empty($job['cancel_requested'])): ?>
-      Stop requested — scan will halt shortly.
+      Stopping… aborting Continuity / waiting for the worker to park the job. Use <strong>Force stop</strong> if this hangs.
       <?php else: ?>
       Elapsed <?php echo View::e((string) $timing['elapsed_label']); ?> · live update 5s
       <?php endif; ?>
@@ -358,7 +375,10 @@ $scanLive = $status === 'RUNNING' || ($status === 'PENDING' && empty($job['cance
       var conf = data.confidence || {};
       var live = data.status === 'RUNNING' || (data.status === 'PENDING' && !data.cancel_requested);
 
-      LivePoll.setText('scan-status-value', data.status || '');
+      var statusLabel = (data.status === 'RUNNING' && data.cancel_requested)
+        ? 'STOPPING'
+        : (data.status || '');
+      LivePoll.setText('scan-status-value', statusLabel);
       LivePoll.setText('scan-queued-value', fmt(data.total_queued));
       LivePoll.setText('scan-conf-high', String(conf.HIGH || 0));
       LivePoll.setText('scan-conf-medium', String(conf.MEDIUM || 0));
@@ -382,9 +402,11 @@ $scanLive = $status === 'RUNNING' || ($status === 'PENDING' && empty($job['cance
       }
 
       if (live) {
-        var label = (data.status === 'PENDING' ? 'Waiting to start…' : 'Processing…')
-          + ' · ETA ' + (timing.eta_label || '—')
-          + ' · ' + (timing.rate_label || '—');
+        var label = data.cancel_requested
+          ? ('Stopping… · ' + (timing.elapsed_label || '—'))
+          : ((data.status === 'PENDING' ? 'Waiting to start…' : 'Processing…')
+            + ' · ETA ' + (timing.eta_label || '—')
+            + ' · ' + (timing.rate_label || '—'));
         LivePoll.setText('scan-progress-status', label);
         LivePoll.setText(
           'scan-progress-counts',
@@ -394,7 +416,7 @@ $scanLive = $status === 'RUNNING' || ($status === 'PENDING' && empty($job['cance
         LivePoll.setText(
           'scan-progress-hint',
           data.cancel_requested
-            ? 'Stop requested — scan will halt shortly.'
+            ? 'Stopping… aborting Continuity / waiting for the worker to park the job. Use Force stop if this hangs.'
             : ('Elapsed ' + (timing.elapsed_label || '—') + ' · live update 5s')
         );
       }

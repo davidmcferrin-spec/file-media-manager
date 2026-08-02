@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.26.1] — 2026-08-01
+
+### Changed
+
+- Scan **Stop** aborts in-flight Continuity (Ollama) HTTP within ~250ms instead of waiting out the full decide timeout
+- Scan UI shows **STOPPING** while `cancel_requested` is set; **Force stop** SIGTERMs the job worker PID (works in daemon mode)
+
 ## [0.26.0] — 2026-08-01
 
 ### Added

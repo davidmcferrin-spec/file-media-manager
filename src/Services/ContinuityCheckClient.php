@@ -267,29 +267,43 @@ final class ContinuityCheckClient
      * Run multiple chat completions concurrently (curl_multi).
      * Order of results matches the input order.
      *
+     * When $shouldAbort returns true, in-flight handles are closed immediately and
+     * unfinished slots are marked aborted (transport_error = "aborted").
+     *
      * @param list<array{system: string, user: string}> $requests
+     * @param (callable(): bool)|null $shouldAbort
      * @return list<array{
      *   verdict: ?array<string, mixed>,
      *   raw_content: string,
      *   http_status: ?int,
      *   transport_error: string,
-     *   transport_failed: bool
+     *   transport_failed: bool,
+     *   aborted?: bool
      * }>
      */
-    public function completeJsonMany(array $requests): array
+    public function completeJsonMany(array $requests, ?callable $shouldAbort = null): array
     {
         if ($requests === []) {
             return [];
         }
 
-        if (count($requests) === 1) {
+        // Fast path only when cancel cannot interrupt a blocking curl_exec.
+        if (count($requests) === 1 && $shouldAbort === null) {
             return [$this->executeOne($requests[0]['system'], $requests[0]['user'])];
+        }
+
+        if ($shouldAbort !== null && $shouldAbort()) {
+            return array_fill(0, count($requests), $this->abortedTransport());
         }
 
         $mh = curl_multi_init();
         if ($mh === false) {
             $out = [];
             foreach ($requests as $req) {
+                if ($shouldAbort !== null && $shouldAbort()) {
+                    $out[] = $this->abortedTransport();
+                    continue;
+                }
                 $out[] = $this->executeOne($req['system'], $req['user']);
             }
 
@@ -301,6 +315,10 @@ final class ContinuityCheckClient
         $results = array_fill(0, count($requests), null);
 
         foreach ($requests as $i => $req) {
+            if ($shouldAbort !== null && $shouldAbort()) {
+                $results[$i] = $this->abortedTransport();
+                continue;
+            }
             $built = $this->buildChatHandle((string) $req['system'], (string) $req['user']);
             if ($built['error'] !== '') {
                 $results[$i] = $this->emptyTransport($built['error']);
@@ -315,16 +333,28 @@ final class ContinuityCheckClient
             curl_multi_add_handle($mh, $ch);
         }
 
+        $aborted = false;
         if ($handles !== []) {
             $running = 0;
             do {
+                if ($shouldAbort !== null && $shouldAbort()) {
+                    $aborted = true;
+                    break;
+                }
                 $status = curl_multi_exec($mh, $running);
                 if ($running > 0) {
-                    curl_multi_select($mh, 1.0);
+                    // Short select so cancel is noticed within ~250ms.
+                    curl_multi_select($mh, 0.25);
                 }
             } while ($running > 0 && $status === CURLM_OK);
 
             foreach ($handles as $i => $ch) {
+                if ($aborted) {
+                    curl_multi_remove_handle($mh, $ch);
+                    curl_close($ch);
+                    $results[$i] = $this->abortedTransport();
+                    continue;
+                }
                 $raw = curl_multi_getcontent($ch);
                 $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 $curlErr = curl_error($ch);
@@ -545,6 +575,28 @@ final class ContinuityCheckClient
             'http_status'      => null,
             'transport_error'  => $error,
             'transport_failed' => true,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   verdict: null,
+     *   raw_content: string,
+     *   http_status: null,
+     *   transport_error: string,
+     *   transport_failed: true,
+     *   aborted: true
+     * }
+     */
+    private function abortedTransport(): array
+    {
+        return [
+            'verdict'          => null,
+            'raw_content'      => '',
+            'http_status'      => null,
+            'transport_error'  => 'aborted',
+            'transport_failed' => true,
+            'aborted'          => true,
         ];
     }
 
