@@ -102,11 +102,19 @@ match (true) {
     $uri === '/scan' || str_starts_with($uri, '/scan/')
         => require dirname(__DIR__) . '/src/Controllers/ScanController.php',
 
-    // Dictionary (admin only)
+    // Unified shows workspace (admin only)
+    $uri === '/shows' || str_starts_with($uri, '/shows/')
+        => require dirname(__DIR__) . '/src/Controllers/ShowWorkspaceController.php',
+
+    // Broadcast eras — network on-air windows (admin only)
+    $uri === '/eras' || str_starts_with($uri, '/eras/')
+        => require dirname(__DIR__) . '/src/Controllers/BroadcastEraController.php',
+
+    // Dictionary (legacy URL → redirect in controller; keep for old bookmarks)
     $uri === '/dictionary' || str_starts_with($uri, '/dictionary/')
         => require dirname(__DIR__) . '/src/Controllers/DictionaryController.php',
 
-    // Program schedule (admin only)
+    // Program schedule / Timeline ops (admin only)
     $uri === '/schedule' || str_starts_with($uri, '/schedule/')
         => require dirname(__DIR__) . '/src/Controllers/ProgramScheduleController.php',
 

@@ -47,7 +47,14 @@ $showAbbrById = $showAbbrById ?? [];
         } else {
             $seed = null;
         }
-        $seedProposal = is_array($seed) && is_array($seed['proposal'] ?? null) ? $seed['proposal'] : [];
+        $seedProposal = [];
+        if (is_array($seed)) {
+            if (is_array($seed['catalog_proposal'] ?? null)) {
+                $seedProposal = $seed['catalog_proposal'];
+            } elseif (is_array($seed['proposal'] ?? null)) {
+                $seedProposal = $seed['proposal'];
+            }
+        }
         // Fallback date/time from seed for rows logged before dedicated columns.
         $ruleDate = trim((string) ($row['rule_file_date'] ?? ($seedProposal['file_date'] ?? '')));
         $ruleTime = trim((string) ($row['rule_file_time'] ?? ($seedProposal['file_time'] ?? '')));
@@ -98,10 +105,31 @@ $showAbbrById = $showAbbrById ?? [];
         $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
         $transportErr = trim((string) ($row['transport_error'] ?? ''));
         $hasArtifacts = $seedPretty !== '' || $engineRaw !== '' || $transportErr !== '';
+        $artifactsBundle = '';
+        if ($hasArtifacts) {
+            $engineReplyOut = $engineRaw !== '' ? $engineRaw : null;
+            if ($engineRaw !== '') {
+                $decodedReply = json_decode($engineRaw, true);
+                if (is_array($decodedReply)) {
+                    $engineReplyOut = $decodedReply;
+                }
+            }
+            $artifactsBundle = (string) json_encode([
+                'decision_id'     => $rowId,
+                'outcome'         => $outcome,
+                'http_status'     => $row['http_status'] ?? null,
+                'transport_error' => $transportErr !== '' ? $transportErr : null,
+                'seed_packet'     => is_array($seed) ? $seed : null,
+                'engine_reply'    => $engineReplyOut,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        }
         $scheduleCount = is_array($seed) && is_array($seed['schedule'] ?? null) ? count($seed['schedule']) : 0;
+        $daySlotCount = is_array($seed) && is_array($seed['day_slots'] ?? null)
+            ? count($seed['day_slots'])
+            : (is_array($seed) && is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0);
         $atAirCount = is_array($seed) && is_array($seed['at_air_time'] ?? null)
             ? count($seed['at_air_time'])
-            : (is_array($seed) && is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0);
+            : 0;
         $exampleCount = is_array($seed) && is_array($seed['examples'] ?? null) ? count($seed['examples']) : 0;
         $showCount = is_array($seed) && is_array($seed['shows'] ?? null) ? count($seed['shows']) : 0;
         $catalogHref = $fileId > 0
@@ -202,13 +230,23 @@ $showAbbrById = $showAbbrById ?? [];
           <td colspan="9" class="p-0 border-0">
             <div class="collapse" id="art-<?php echo $rowId; ?>">
               <div class="p-3" style="background:var(--hover-bg);border-top:1px solid var(--bs-border-color)">
-                <div class="d-flex flex-wrap gap-3 mb-2 path-text" style="font-size:0.75rem">
-                  <span>Shows seeded: <strong><?php echo (int) $showCount; ?></strong></span>
-                  <span>Schedule rows: <strong><?php echo (int) $scheduleCount; ?></strong></span>
-                  <span>At air time: <strong><?php echo (int) $atAirCount; ?></strong></span>
-                  <span>Approved examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
-                  <?php if ($row['http_status'] !== null): ?>
-                  <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                  <div class="d-flex flex-wrap gap-3 path-text" style="font-size:0.75rem">
+                    <span>Shows: <strong><?php echo (int) $showCount; ?></strong></span>
+                    <span>Schedule (full): <strong><?php echo (int) $scheduleCount; ?></strong></span>
+                    <span>Day slots: <strong><?php echo (int) $daySlotCount; ?></strong></span>
+                    <span>At air time: <strong><?php echo (int) $atAirCount; ?></strong></span>
+                    <span>Examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
+                    <?php if ($row['http_status'] !== null): ?>
+                    <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
+                    <?php endif; ?>
+                  </div>
+                  <?php if ($artifactsBundle !== ''): ?>
+                  <button type="button" class="btn btn-outline-secondary btn-xs continuity-copy-btn"
+                          data-copy-target="art-bundle-<?php echo $rowId; ?>">
+                    Copy JSON
+                  </button>
+                  <textarea id="art-bundle-<?php echo $rowId; ?>" class="d-none" readonly><?php echo View::e($artifactsBundle); ?></textarea>
                   <?php endif; ?>
                 </div>
                 <div class="mb-3 p-2 rounded" style="background:rgba(0,0,0,0.18);font-size:0.78rem">

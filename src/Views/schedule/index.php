@@ -38,13 +38,17 @@ $formEntry = $editEntry ?? [
     'active'         => true,
 ];
 $formMask = (int) ($formEntry['days_of_week'] ?? 31);
-?>
 
-<?php
 $workflowStepId = 'timeline';
 require dirname(__DIR__) . '/partials/workflow_step.php';
 require dirname(__DIR__) . '/shows/_nav.php';
 ?>
+
+<div class="alert alert-secondary py-2 mb-3" style="font-size:0.85rem">
+  Day-to-day show slots live on the <a href="/shows">unified Show page</a>.
+  Define network coverage on <a href="/eras">Broadcast eras</a>.
+  This Timeline page is for <strong>import</strong>, cross-show browse, and <strong>hygiene / ready for Scan</strong>.
+</div>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
@@ -52,7 +56,7 @@ require dirname(__DIR__) . '/shows/_nav.php';
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
       <?php if ($filterShow !== null): ?>
       Hourly blocks for
-      <a href="/dictionary?edit=<?php echo (int) $filterShow['id']; ?>">
+      <a href="/shows/<?php echo (int) $filterShow['id']; ?>">
         <?php echo View::e($filterShow['canonical_name']); ?>
       </a>
       (<code><?php echo View::e($filterShow['abbreviation']); ?></code>) —

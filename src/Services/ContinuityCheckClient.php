@@ -389,7 +389,7 @@ final class ContinuityCheckClient
             'keep_alive' => $this->keepAlivePayload(),
             'options'    => [
                 'temperature' => 0,
-                'num_predict' => 512,
+                'num_predict' => 768,
             ],
             'messages' => [
                 ['role' => 'system', 'content' => $systemPrompt],

@@ -16,8 +16,9 @@ final class ProgramScheduleRepository extends BaseRepository
             'INSERT INTO program_schedule_entries (
                 show_id, source_row_id, title, hour_start_et, hour_end_et,
                 days_of_week, effective_from, effective_to,
-                era_name, anchor_names, show_type, network_brand, notes, active
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                era_name, anchor_names, show_type, network_brand, notes, active,
+                broadcast_era_id
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              RETURNING id'
         );
         $stmt->execute([
@@ -35,6 +36,7 @@ final class ProgramScheduleRepository extends BaseRepository
             $data['network_brand'] ?? '',
             $data['notes'] ?? '',
             $this->pgBool((bool) ($data['active'] ?? true)),
+            $data['broadcast_era_id'] ?? null,
         ]);
 
         return (int) $stmt->fetchColumn();
@@ -151,7 +153,8 @@ final class ProgramScheduleRepository extends BaseRepository
                 show_type = ?,
                 network_brand = ?,
                 notes = ?,
-                active = ?
+                active = ?,
+                broadcast_era_id = ?
              WHERE id = ?'
         );
 
@@ -169,6 +172,7 @@ final class ProgramScheduleRepository extends BaseRepository
             $data['network_brand'] ?? '',
             $data['notes'] ?? '',
             $this->pgBool((bool) ($data['active'] ?? true)),
+            $data['broadcast_era_id'] ?? null,
             $id,
         ]);
     }
@@ -178,6 +182,52 @@ final class ProgramScheduleRepository extends BaseRepository
         $stmt = $this->db()->prepare('DELETE FROM program_schedule_entries WHERE id = ?');
 
         return $stmt->execute([$id]);
+    }
+
+    /** Distinct show ids with schedule rows linked to or overlapping an era. */
+    /** @return list<int> */
+    public function showIdsForEra(int $eraId, string $fromIso, ?string $toIso): array
+    {
+        $sql = 'SELECT DISTINCT show_id FROM program_schedule_entries
+                WHERE active IS TRUE
+                  AND (
+                    broadcast_era_id = ?
+                    OR (
+                      effective_from <= COALESCE(?::date, DATE \'9999-12-31\')
+                      AND (effective_to IS NULL OR effective_to >= ?::date)
+                    )
+                  )';
+        $stmt = $this->db()->prepare($sql);
+        $toBound = $toIso ?? '9999-12-31';
+        $stmt->execute([$eraId, $toBound, $fromIso]);
+        $rows = $stmt->fetchAll();
+        $ids = [];
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                $ids[] = (int) $row['show_id'];
+            }
+        }
+
+        return $ids;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listForEra(int $eraId, int $limit = 500): array
+    {
+        $stmt = $this->db()->prepare(
+            'SELECT pse.*, sh.abbreviation AS show_abbr, sh.canonical_name AS show_name
+             FROM program_schedule_entries pse
+             JOIN shows sh ON sh.id = pse.show_id
+             WHERE pse.broadcast_era_id = ?
+             ORDER BY pse.hour_start_et ASC, sh.abbreviation ASC
+             LIMIT ?'
+        );
+        $stmt->bindValue(1, $eraId, \PDO::PARAM_INT);
+        $stmt->bindValue(2, $limit, \PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
     }
 
     /** @return array<int, int> show_id => entry count */

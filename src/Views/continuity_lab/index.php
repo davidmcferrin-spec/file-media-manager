@@ -337,6 +337,39 @@ $queryBase = array_filter([
   </div>
 </div>
 
+<script>
+(function () {
+  document.addEventListener('click', function (ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest('.continuity-copy-btn') : null;
+    if (!btn) return;
+    var targetId = btn.getAttribute('data-copy-target');
+    var src = targetId ? document.getElementById(targetId) : null;
+    if (!src) return;
+    var text = 'value' in src ? String(src.value || '') : String(src.textContent || '');
+    var label = btn.getAttribute('data-label') || btn.textContent || 'Copy JSON';
+    btn.setAttribute('data-label', label.trim());
+    function done(ok) {
+      btn.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(function () { btn.textContent = btn.getAttribute('data-label') || 'Copy JSON'; }, 1500);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }).catch(function () { done(false); });
+      return;
+    }
+    try {
+      var wasHidden = src.classList.contains('d-none');
+      if (wasHidden) src.classList.remove('d-none');
+      src.focus();
+      src.select();
+      done(document.execCommand('copy'));
+      if (wasHidden) src.classList.add('d-none');
+    } catch (e) {
+      done(false);
+    }
+  });
+})();
+</script>
+
 <?php if ($live): ?>
 <script src="/js/live-poll.js"></script>
 <script>

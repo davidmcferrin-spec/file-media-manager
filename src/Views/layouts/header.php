@@ -553,13 +553,14 @@ code, .path-text kbd {
         </li>
         <?php if (Auth::isAdmin()): ?>
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle<?php echo navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>"
+          <a class="nav-link dropdown-toggle<?php echo navActive('/shows', $currentPath) . navActive('/eras', $currentPath) . navActive('/dictionary', $currentPath) . navActive('/schedule', $currentPath) . navActive('/legacy-map', $currentPath); ?>"
              href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
             Setup
           </a>
           <ul class="dropdown-menu">
-            <li><a class="dropdown-item" href="/dictionary">1. Shows</a></li>
-            <li><a class="dropdown-item" href="/schedule">2. Timeline</a></li>
+            <li><a class="dropdown-item" href="/eras">1. Eras</a></li>
+            <li><a class="dropdown-item" href="/shows">2. Shows</a></li>
+            <li><a class="dropdown-item" href="/schedule">3. Timeline</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="/legacy-map">Legacy Map</a></li>
           </ul>

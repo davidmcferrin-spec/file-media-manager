@@ -16,6 +16,13 @@ Auth::requireAdmin();
 $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
+// Unified show workspace replaced the dictionary list/edit page.
+if ($method === 'GET' && ($uri === '/dictionary' || $uri === '/dictionary/')) {
+    $editId = isset($_GET['edit']) ? (int) $_GET['edit'] : 0;
+    header('Location: ' . ($editId > 0 ? '/shows/' . $editId : '/shows'), true, 302);
+    exit;
+}
+
 $showRepo = new ShowRepository();
 $scheduleRepo = new ProgramScheduleRepository();
 $audit    = new AuditRepository();

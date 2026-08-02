@@ -14,6 +14,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.25.0] — 2026-08-01
+
+### Changed
+
+- Continuity seeds Ollama with the **full** show dictionary (all aliases), **full** Timeline, complete **day_slots** for the air date, `at_air_time`, and a rich **catalog_proposal** (scan/rules determination)
+- Prompt asks for an independent recommendation plus confidence / agree-conflict vs catalog; model show is adopted when catalog has no show
+- Continuity also runs for no-show LOW/UNEVALUATED rows (still skips policy exact matches)
+
+## [0.24.1] — 2026-08-01
+
+### Added
+
+- Continuity Lab Artifacts: **Copy JSON** copies seed packet + model reply (and meta) in one clipboard payload
+
+## [0.24.0] — 2026-08-01
+
+### Added
+
+- **Gaps calendar** (`/show-audit`): year → month → week → day drill-down with color-coded coverage; default landing is **2025 year** view
+- **Show runway** on Gaps: one show’s scheduled hours for the year with gap status
+- Accept expected gaps with optional **hour range** (breaking news / specials) from day view or Accepted gaps tab
+
+### Changed
+
+- Gaps overview tables replaced by calendar navigation; duplicates / unmatched / schedule hygiene remain as secondary tabs
+
+## [0.23.0] — 2026-08-01
+
+### Added
+
+- **Broadcast eras** (`/eras`): network on-air windows by date range; adopt shows into an era (creates Timeline slots); Gaps skips hours outside era windows when an era covers the date
+- **Unified Show page** (`/shows`, `/shows/{id}`): identity, aliases, schedule slots, and merge on one screen
+
+### Changed
+
+- Setup nav: **Eras → Shows → Timeline**; `/dictionary` redirects to `/shows`
+- Timeline page focused on import / hygiene / cross-show browse (slot editing prefers the Show page)
+
 ## [0.22.1] — 2026-08-01
 
 ### Changed

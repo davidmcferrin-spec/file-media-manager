@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 use MediaManager\Auth\Auth;
 
-/** @var string $showsTab 'dictionary'|'schedule'|'legacy-map'|'show-audit' */
-$showsTab = $showsTab ?? 'dictionary';
+/** @var string $showsTab 'shows'|'eras'|'schedule'|'legacy-map'|'show-audit'|'dictionary' */
+$showsTab = $showsTab ?? 'shows';
+if ($showsTab === 'dictionary') {
+    $showsTab = 'shows';
+}
 ?>
 <ul class="nav page-tabs mb-4 flex-wrap" role="tablist">
   <li class="nav-item">
@@ -15,9 +18,14 @@ $showsTab = $showsTab ?? 'dictionary';
   </li>
   <?php if (Auth::isAdmin()): ?>
   <li class="nav-item">
-    <a class="page-tab<?php echo $showsTab === 'dictionary' ? ' active' : ''; ?>"
-       href="/dictionary"
-       <?php echo $showsTab === 'dictionary' ? 'aria-current="page"' : ''; ?>>Shows</a>
+    <a class="page-tab<?php echo $showsTab === 'eras' ? ' active' : ''; ?>"
+       href="/eras"
+       <?php echo $showsTab === 'eras' ? 'aria-current="page"' : ''; ?>>Eras</a>
+  </li>
+  <li class="nav-item">
+    <a class="page-tab<?php echo $showsTab === 'shows' ? ' active' : ''; ?>"
+       href="/shows"
+       <?php echo $showsTab === 'shows' ? 'aria-current="page"' : ''; ?>>Shows</a>
   </li>
   <li class="nav-item">
     <a class="page-tab<?php echo $showsTab === 'schedule' ? ' active' : ''; ?>"

@@ -10,6 +10,7 @@ use MediaManager\Repositories\ProgramScheduleRepository;
 
 /**
  * Compare Timeline schedule expected hourly slots against Program/Clean inventory.
+ * When broadcast eras define on-air windows for a date, hours outside those windows are skipped.
  */
 final class CompletenessService
 {
@@ -23,6 +24,7 @@ final class CompletenessService
         private readonly CompletenessRepository $files = new CompletenessRepository(),
         private readonly ExpectedGapRepository $gaps = new ExpectedGapRepository(),
         private readonly ScheduleLookupService $lookup = new ScheduleLookupService(),
+        private readonly BroadcastEraService $eras = new BroadcastEraService(),
     ) {
     }
 
@@ -47,7 +49,8 @@ final class CompletenessService
         string $mode = 'either',
         string $grain = 'hourly',
         ?int $showId = null,
-        ?string $statusFilter = null
+        ?string $statusFilter = null,
+        bool $includeSlots = true
     ): array {
         $mode = in_array($mode, ['program', 'clean', 'either', 'both'], true) ? $mode : 'either';
         $grain = in_array($grain, ['hourly', 'daily', 'show'], true) ? $grain : 'hourly';
@@ -90,8 +93,8 @@ final class CompletenessService
                 'clean_status'    => $cleanStatus['status'],
                 'program_note'    => $programStatus['note'],
                 'clean_note'      => $cleanStatus['note'],
-                'program_files'   => $programFiles,
-                'clean_files'     => $cleanFiles,
+                'program_files'   => $includeSlots ? $programFiles : [],
+                'clean_files'     => $includeSlots ? $cleanFiles : [],
                 'status'          => $rollStatus['status'],
                 'note'            => $rollStatus['note'],
                 'expected_gap'    => $rollStatus['status'] === 'expected_gap',
@@ -100,11 +103,13 @@ final class CompletenessService
 
             $allSlots[] = $row;
 
-            if (count($programFiles) > 1) {
-                $duplicates[] = $this->duplicateGroup($row, 'program', $programFiles);
-            }
-            if (count($cleanFiles) > 1) {
-                $duplicates[] = $this->duplicateGroup($row, 'clean', $cleanFiles);
+            if ($includeSlots) {
+                if (count($programFiles) > 1) {
+                    $duplicates[] = $this->duplicateGroup($row, 'program', $programFiles);
+                }
+                if (count($cleanFiles) > 1) {
+                    $duplicates[] = $this->duplicateGroup($row, 'clean', $cleanFiles);
+                }
             }
         }
 
@@ -113,8 +118,9 @@ final class CompletenessService
         $metrics['expected_slots'] = count($expected);
         $metrics['open_ended_schedule'] = $this->schedule->countOpenEnded();
 
-        $slots = $allSlots;
-        if ($statusFilter !== null && $statusFilter !== '') {
+        $dayRollups = $this->rollupByDay($allSlots);
+        $slots = $includeSlots ? $allSlots : [];
+        if ($includeSlots && $statusFilter !== null && $statusFilter !== '') {
             $slots = array_values(array_filter(
                 $allSlots,
                 static fn (array $row): bool => $row['status'] === $statusFilter
@@ -131,9 +137,373 @@ final class CompletenessService
             'duplicates'     => $duplicates,
             'expected_gaps'  => $gapRows,
             'show_rollups'   => $this->rollupByShow($allSlots),
-            'day_rollups'    => $this->rollupByDay($allSlots),
+            'day_rollups'    => $dayRollups,
+            'month_rollups'  => $this->rollupByMonth($dayRollups),
             'unmatched_count'=> $metrics['unmatched'],
         ];
+    }
+
+    /**
+     * Year overview: month tiles + day map without shipping every hourly slot.
+     *
+     * @return array<string, mixed>
+     */
+    public function calendarYear(int $year, string $mode = 'either', ?int $showId = null): array
+    {
+        $fromYmd = sprintf('%04d0101', $year);
+        $toYmd = sprintf('%04d1231', $year);
+        $report = $this->audit($fromYmd, $toYmd, $mode, 'daily', $showId, null, false);
+        $report['year'] = $year;
+        $report['month_tiles'] = $this->buildMonthTiles($year, $report['month_rollups'], $report['day_rollups']);
+
+        return $report;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $dayRollups
+     * @return list<array<string, mixed>>
+     */
+    public function rollupByMonth(array $dayRollups): array
+    {
+        $map = [];
+        foreach ($dayRollups as $day) {
+            $ymd = (string) $day['air_date'];
+            if (strlen($ymd) < 6) {
+                continue;
+            }
+            $ym = substr($ymd, 0, 6);
+            if (!isset($map[$ym])) {
+                $map[$ym] = [
+                    'year_month'   => $ym,
+                    'year'         => (int) substr($ym, 0, 4),
+                    'month'        => (int) substr($ym, 4, 2),
+                    'label'        => \DateTimeImmutable::createFromFormat('Ymd', $ym . '01')
+                        ?->format('M') ?? $ym,
+                    'expected'     => 0,
+                    'confirmed'    => 0,
+                    'needs_split'  => 0,
+                    'needs_review' => 0,
+                    'duplicate'    => 0,
+                    'missing'      => 0,
+                    'expected_gap' => 0,
+                    'filled'       => 0,
+                    'unfilled'     => 0,
+                ];
+            }
+            foreach (['expected', 'confirmed', 'needs_split', 'needs_review', 'duplicate', 'missing', 'expected_gap', 'filled', 'unfilled'] as $k) {
+                $map[$ym][$k] += (int) ($day[$k] ?? 0);
+            }
+        }
+        ksort($map);
+
+        return array_values($map);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $monthRollups
+     * @param list<array<string, mixed>> $dayRollups
+     * @return list<array<string, mixed>>
+     */
+    public function buildMonthTiles(int $year, array $monthRollups, array $dayRollups): array
+    {
+        $byMonth = [];
+        foreach ($monthRollups as $row) {
+            $byMonth[(int) $row['month']] = $row;
+        }
+        $daysByMonth = [];
+        foreach ($dayRollups as $day) {
+            $ymd = (string) $day['air_date'];
+            if (strlen($ymd) < 6 || (int) substr($ymd, 0, 4) !== $year) {
+                continue;
+            }
+            $m = (int) substr($ymd, 4, 2);
+            $daysByMonth[$m][(int) substr($ymd, 6, 2)] = $day;
+        }
+
+        $tiles = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $row = $byMonth[$m] ?? [
+                'year_month'   => sprintf('%04d%02d', $year, $m),
+                'year'         => $year,
+                'month'        => $m,
+                'label'        => (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $m)))->format('M'),
+                'expected'     => 0,
+                'confirmed'    => 0,
+                'needs_split'  => 0,
+                'needs_review' => 0,
+                'duplicate'    => 0,
+                'missing'      => 0,
+                'expected_gap' => 0,
+                'filled'       => 0,
+                'unfilled'     => 0,
+            ];
+            $row['tone'] = self::rollupTone($row);
+            $row['brief'] = self::rollupBrief($row);
+            $row['pct_filled'] = self::fillPercent($row);
+            $row['days'] = $daysByMonth[$m] ?? [];
+            $tiles[] = $row;
+        }
+
+        return $tiles;
+    }
+
+    /**
+     * Build a Mon–Sun week grid of slot cells keyed by hour.
+     *
+     * @param list<array<string, mixed>> $slots
+     * @return array{
+     *   week_start: string,
+     *   week_end: string,
+     *   days: list<array{iso: string, ymd: string, label: string, dow: string}>,
+     *   hours: list<int>,
+     *   cells: array<string, array<string, mixed>>
+     * }
+     */
+    public function buildWeekGrid(string $weekStartIso, array $slots): array
+    {
+        $tz = new \DateTimeZone('America/New_York');
+        $start = \DateTimeImmutable::createFromFormat('Y-m-d', $weekStartIso, $tz);
+        if ($start === false) {
+            throw new \InvalidArgumentException('Invalid week start.');
+        }
+        // Normalize to Monday
+        $dow = (int) $start->format('N'); // 1=Mon … 7=Sun
+        if ($dow !== 1) {
+            $start = $start->modify('-' . ($dow - 1) . ' days');
+        }
+
+        $days = [];
+        for ($i = 0; $i < 7; $i++) {
+            $d = $start->modify("+{$i} days");
+            $days[] = [
+                'iso'   => $d->format('Y-m-d'),
+                'ymd'   => $d->format('Ymd'),
+                'label' => $d->format('M j'),
+                'dow'   => $d->format('D'),
+            ];
+        }
+
+        $hoursUsed = [];
+        $cells = [];
+        foreach ($slots as $slot) {
+            $ymd = (string) $slot['air_date'];
+            $hour = (int) $slot['hour_minutes'];
+            $hoursUsed[$hour] = true;
+            $key = $ymd . '|' . $hour;
+            if (!isset($cells[$key])) {
+                $cells[$key] = [
+                    'air_date'     => $ymd,
+                    'air_date_iso' => (string) $slot['air_date_iso'],
+                    'hour_minutes' => $hour,
+                    'hour_label'   => (string) $slot['hour_label'],
+                    'status'       => (string) $slot['status'],
+                    'slots'        => [],
+                    'count'        => 0,
+                    'missing'      => 0,
+                ];
+            }
+            $cells[$key]['slots'][] = $slot;
+            $cells[$key]['count']++;
+            if ($slot['status'] === 'missing') {
+                $cells[$key]['missing']++;
+            }
+            $cells[$key]['status'] = self::worseStatus(
+                (string) $cells[$key]['status'],
+                (string) $slot['status']
+            );
+            $cells[$key]['tone'] = self::statusTone((string) $cells[$key]['status']);
+        }
+
+        $hours = array_keys($hoursUsed);
+        sort($hours);
+        if ($hours === []) {
+            // Still show a light 6am–midnight band so empty weeks aren't blank
+            $hours = range(6 * 60, 23 * 60, 60);
+        }
+
+        return [
+            'week_start' => $start->format('Y-m-d'),
+            'week_end'   => $start->modify('+6 days')->format('Y-m-d'),
+            'days'       => $days,
+            'hours'      => $hours,
+            'cells'      => $cells,
+        ];
+    }
+
+    /**
+     * Month calendar cells (Sun–Sat grid) with day rollup tones.
+     *
+     * @param list<array<string, mixed>> $dayRollups
+     * @return list<list<?array<string, mixed>>>
+     */
+    public function buildMonthGrid(int $year, int $month, array $dayRollups): array
+    {
+        $byDay = [];
+        foreach ($dayRollups as $day) {
+            $ymd = (string) $day['air_date'];
+            $byDay[$ymd] = $day;
+            $byDay[$ymd]['tone'] = self::rollupTone($day);
+            $byDay[$ymd]['brief'] = self::rollupBrief($day);
+            $byDay[$ymd]['pct_filled'] = self::fillPercent($day);
+        }
+
+        $first = new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month));
+        // Grid starts on Sunday to match common calendar UIs
+        $pad = (int) $first->format('w'); // 0=Sun
+        $cursor = $first->modify("-{$pad} days");
+        $weeks = [];
+        for ($w = 0; $w < 6; $w++) {
+            $row = [];
+            $anyInMonth = false;
+            for ($d = 0; $d < 7; $d++) {
+                $inMonth = (int) $cursor->format('n') === $month;
+                $ymd = $cursor->format('Ymd');
+                if ($inMonth) {
+                    $anyInMonth = true;
+                    $cell = $byDay[$ymd] ?? [
+                        'air_date'     => $ymd,
+                        'air_date_iso' => $cursor->format('Y-m-d'),
+                        'expected'     => 0,
+                        'filled'       => 0,
+                        'unfilled'     => 0,
+                        'missing'      => 0,
+                        'expected_gap' => 0,
+                        'confirmed'    => 0,
+                        'needs_split'  => 0,
+                        'needs_review' => 0,
+                        'duplicate'    => 0,
+                        'tone'         => 'empty',
+                        'brief'        => 'No schedule',
+                        'pct_filled'   => null,
+                    ];
+                    $cell['day_num'] = (int) $cursor->format('j');
+                    $cell['in_month'] = true;
+                    $row[] = $cell;
+                } else {
+                    $row[] = [
+                        'air_date'     => $ymd,
+                        'air_date_iso' => $cursor->format('Y-m-d'),
+                        'day_num'      => (int) $cursor->format('j'),
+                        'in_month'     => false,
+                        'tone'         => 'outside',
+                        'brief'        => '',
+                        'expected'     => 0,
+                    ];
+                }
+                $cursor = $cursor->modify('+1 day');
+            }
+            if (!$anyInMonth && $weeks !== []) {
+                break;
+            }
+            $weeks[] = $row;
+        }
+
+        return $weeks;
+    }
+
+    /** @param array<string, int|string> $row */
+    public static function rollupTone(array $row): string
+    {
+        $expected = (int) ($row['expected'] ?? 0);
+        if ($expected <= 0) {
+            return 'empty';
+        }
+        if ((int) ($row['unfilled'] ?? 0) > 0 || (int) ($row['missing'] ?? 0) > 0) {
+            return 'missing';
+        }
+        if ((int) ($row['duplicate'] ?? 0) > 0) {
+            return 'duplicate';
+        }
+        if ((int) ($row['needs_split'] ?? 0) > 0 || (int) ($row['needs_review'] ?? 0) > 0) {
+            return 'warn';
+        }
+        if ((int) ($row['expected_gap'] ?? 0) > 0
+            && (int) ($row['filled'] ?? 0) === 0) {
+            return 'gap';
+        }
+        if ((int) ($row['expected_gap'] ?? 0) > 0) {
+            return 'mixed-gap';
+        }
+
+        return 'ok';
+    }
+
+    /** @param array<string, int|string> $row */
+    public static function rollupBrief(array $row): string
+    {
+        $expected = (int) ($row['expected'] ?? 0);
+        if ($expected <= 0) {
+            return 'No schedule';
+        }
+        $parts = [];
+        $unfilled = (int) ($row['unfilled'] ?? 0);
+        $filled = (int) ($row['filled'] ?? 0);
+        $gaps = (int) ($row['expected_gap'] ?? 0);
+        $split = (int) ($row['needs_split'] ?? 0);
+        $review = (int) ($row['needs_review'] ?? 0);
+        $dup = (int) ($row['duplicate'] ?? 0);
+        if ($unfilled > 0) {
+            $parts[] = $unfilled . ' missing';
+        }
+        if ($split > 0) {
+            $parts[] = $split . ' split';
+        }
+        if ($review > 0) {
+            $parts[] = $review . ' review';
+        }
+        if ($dup > 0) {
+            $parts[] = $dup . ' dup';
+        }
+        if ($gaps > 0) {
+            $parts[] = $gaps . ' accepted';
+        }
+        if ($parts === []) {
+            return $filled . '/' . $expected . ' filled';
+        }
+
+        return implode(' · ', $parts);
+    }
+
+    /** @param array<string, int|string> $row */
+    public static function fillPercent(array $row): ?int
+    {
+        $expected = (int) ($row['expected'] ?? 0);
+        $gaps = (int) ($row['expected_gap'] ?? 0);
+        $denom = $expected - $gaps;
+        if ($denom <= 0) {
+            return $expected > 0 ? 100 : null;
+        }
+        $filled = (int) ($row['filled'] ?? 0);
+
+        return (int) round(100 * $filled / $denom);
+    }
+
+    public static function statusTone(string $status): string
+    {
+        return match ($status) {
+            'confirmed'    => 'ok',
+            'needs_split', 'needs_review' => 'warn',
+            'duplicate'    => 'duplicate',
+            'expected_gap' => 'gap',
+            'missing'      => 'missing',
+            default        => 'empty',
+        };
+    }
+
+    public static function worseStatus(string $a, string $b): string
+    {
+        $rank = [
+            'confirmed'    => 0,
+            'expected_gap' => 1,
+            'needs_review' => 2,
+            'needs_split'  => 3,
+            'duplicate'    => 4,
+            'missing'      => 5,
+        ];
+        $ra = $rank[$a] ?? -1;
+        $rb = $rank[$b] ?? -1;
+
+        return $rb >= $ra ? $b : $a;
     }
 
     /**
@@ -148,6 +518,7 @@ final class CompletenessService
         }
 
         $entries = $this->schedule->listOverlapping($fromIso, $toIso, $showId);
+        $eraCoverage = $this->eras->coverageIndex($fromIso, $toIso);
         $slots = [];
         $tz = new \DateTimeZone('America/New_York');
         $cursor = \DateTimeImmutable::createFromFormat('Y-m-d', $fromIso, $tz);
@@ -185,6 +556,10 @@ final class CompletenessService
 
                 $hour = (int) (floor($startMin / 60) * 60);
                 while ($hour < $endMin) {
+                    if (!BroadcastEraService::hourAllowed($eraCoverage, $iso, $hour, $dayBit)) {
+                        $hour += 60;
+                        continue;
+                    }
                     $slots[] = [
                         'show_id'       => (int) $entry['show_id'],
                         'show_abbr'     => (string) $entry['show_abbr'],

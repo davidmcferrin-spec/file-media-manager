@@ -13,8 +13,9 @@ use MediaManager\Repositories\SystemRepository;
 
 /**
  * Second-pass broadcast continuity check layered on pattern classification.
- * The local engine proposes show / date / time / media type like a human reviewer;
- * those parts rebuild the policy filename. Weak or disputed rule hits adopt the proposal.
+ * Seeds the engine with the full show dictionary, full Timeline, day slots, and the
+ * scan/catalog proposal; the model returns an independent recommendation plus
+ * agree/conflict. Weak or disputed rule hits (and missing show) adopt the model.
  */
 final class ContinuityCheckService
 {
@@ -80,12 +81,8 @@ final class ContinuityCheckService
         if ($result->policyExactMatch) {
             return false;
         }
-        if ($result->showId === null
-            && in_array($result->confidence, ['LOW', 'UNEVALUATED'], true)
-        ) {
-            return false;
-        }
 
+        // Always ask when enabled (including no-show / LOW) so the model can recommend.
         return $this->engineAvailable();
     }
 
@@ -1006,84 +1003,104 @@ final class ContinuityCheckService
     ): array {
         $shows = $this->catalog();
         $mediaTypes = $this->mediaTypeList();
-        $scheduleFull = $this->scheduleCatalog();
-        $schedule = self::leanSchedule($scheduleFull, $result->fileDate, $result->fileTime, 36);
-        $atAirTime = $this->timelineFor($result->fileDate, $result->fileTime);
+        $schedule = $this->scheduleCatalog();
+        $daySlots = $this->daySlotsFor($result->fileDate);
+        $atAirTime = $this->slotsAtAirTime($daySlots, $result->fileTime);
         $examples = $this->approvedExemplars();
 
         $system = <<<'PROMPT'
 You are a broadcast archive continuity reviewer for NewsNation media files.
-Act like a human editor: read the original filename and path, then propose the correct show, air date/time, and media type. The application will build the policy filename from your fields.
-Also say whether the rule-based proposal looks consistent (agree) using the dictionary, schedule, and approved examples.
+You receive the FULL show dictionary, FULL program schedule (Timeline), every timeslot for the air date, approved examples, and the scan/catalog proposal (what rules already determined).
+Your job:
+1) Form your OWN recommendation for show, air date/time, and media type (as a human editor would).
+2) Score your confidence (HIGH|MEDIUM|LOW).
+3) Compare to catalog_proposal and set agree true/false (conflict when you disagree on show or overall mapping).
+The application builds the policy filename from your fields — do not invent filenames.
 Rules:
-- ALWAYS return confidence, show_id, file_date, file_time, and media_type_id. Never leave date/time/type null when proposal has them or the filename/path clearly has them — mirror proposal values when you do not dispute them.
-- Choose show_id ONLY from the provided shows list, or null if truly unknown.
-- Choose media_type_id ONLY from the provided media_types list (numeric id), or null if truly unknown.
-- schedule[] is a focused slice of the Timeline (day/hour relevant). schedule.to null means still current.
-- Prefer at_air_time[] / nearby_slots[] when present; otherwise use schedule[] + path/filename tokens.
-- Path folders like PGM/Program/Clean/GISO are strong media-type evidence — prefer them over weak filename tokens.
-- Short or ambiguous path tokens for show identity are weaker — do not over-trust them.
-- Never invent show abbreviations, media type abbreviations, or filenames outside the catalogs.
-- file_date must be YYYYMMDD or null. file_time must be HHMM (24h Eastern) or null.
-- datetime_agree is true when your file_date/file_time look correct for the filename/path.
-- media_type_agree is true when your media_type_id looks correct for the filename/path.
-- agree is true when the rule proposal's show (and overall mapping) matches your judgment.
+- ALWAYS return confidence, show_id, file_date, file_time, and media_type_id. Never leave them null when the filename/path or catalogs make them clear. If catalog_proposal is correct, mirror its values and set agree=true.
+- Choose show_id ONLY from shows[].id. Choose media_type_id ONLY from media_types[].id (numeric).
+- Use schedule[] (full Timeline) and day_slots[] (all blocks active on the air date) as the authority for what can air when. schedule.to null means the block is still current.
+- at_air_time[] is the subset of day_slots matching the proposal air time — prefer it when non-empty.
+- Path folders like PGM/Program/Clean/GISO are strong media-type evidence.
+- Path/filename show tokens can be wrong or ambiguous — prefer schedule alignment over weak tokens (e.g. "NOW WEEKEND" is not Morning in America weekday).
+- file_date = YYYYMMDD or null. file_time = HHMM Eastern or null.
+- datetime_agree / media_type_agree reflect whether YOUR date/time and type look correct for the file.
+- reason: short justification (mention schedule match or conflict when relevant).
 - Respond with JSON only, no prose:
 {"agree":true|false,"confidence":"HIGH"|"MEDIUM"|"LOW","show_id":null|number,"media_type_id":null|number,"media_type_agree":true|false,"file_date":null|string,"file_time":null|string,"datetime_agree":true|false,"reason":"short"}
 PROMPT;
 
+        $catalogProposal = [
+            'source'              => 'scan_catalog_rules',
+            'show_id'             => $result->showId,
+            'show_abbreviation'   => $result->showAbbreviation,
+            'media_type_id'       => $result->mediaTypeId,
+            'media_type'          => $result->mediaTypeAbbreviation,
+            'file_date'           => $result->fileDate,
+            'file_time'           => $result->fileTime,
+            'proposed_dir'        => $result->proposedDir,
+            'proposed_filename'   => $result->proposedFilename,
+            'confidence'          => $result->confidence,
+            'policy_exact_match'  => $result->policyExactMatch,
+            'signals'             => $result->signals,
+        ];
+
+        $showsPayload = array_map(static function (array $s): array {
+            $aliases = $s['aliases'] ?? [];
+            if (!is_array($aliases)) {
+                $aliases = [];
+            }
+
+            return [
+                'id'             => $s['id'],
+                'abbreviation'   => $s['abbreviation'],
+                'canonical_name' => $s['canonical_name'],
+                'aliases'        => array_values(array_filter($aliases, 'is_string')),
+            ];
+        }, $shows);
+
         $seedPacket = [
             'original_path'     => $originalPath,
             'original_filename' => $originalFilename,
-            'proposal'          => [
-                'show_id'           => $result->showId,
-                'show_abbreviation' => $result->showAbbreviation,
-                'media_type_id'     => $result->mediaTypeId,
-                'media_type'        => $result->mediaTypeAbbreviation,
-                'file_date'         => $result->fileDate,
-                'file_time'         => $result->fileTime,
-                'proposed_dir'      => $result->proposedDir,
-                'proposed_filename' => $result->proposedFilename,
-                'confidence'        => $result->confidence,
-                'signals'           => $result->signals,
-            ],
-            'shows'            => $shows,
-            'media_types'      => $mediaTypes,
-            'schedule'         => $schedule,
-            'schedule_full_count' => count($scheduleFull),
-            'timeline'         => $atAirTime, // backward-compatible alias for Lab
-            'at_air_time'      => $atAirTime,
-            'examples'         => $examples,
-            'system'           => $system,
+            'catalog_proposal'  => $catalogProposal,
+            'proposal'          => $catalogProposal, // Lab / backward-compatible alias
+            'shows'             => $showsPayload,
+            'media_types'       => $mediaTypes,
+            'schedule'          => $schedule,
+            'schedule_count'    => count($schedule),
+            'day_slots'         => $daySlots,
+            'at_air_time'       => $atAirTime,
+            'timeline'          => $daySlots,
+            'examples'          => $examples,
+            'system'            => $system,
         ];
 
         $userPayload = [
             'original_path'     => $originalPath,
             'original_filename' => $originalFilename,
-            'proposal'          => $seedPacket['proposal'],
-            'shows'             => array_map(static function (array $s): array {
-                return [
-                    'id'             => $s['id'],
-                    'abbreviation'   => $s['abbreviation'],
-                    'canonical_name' => $s['canonical_name'],
-                    'aliases'        => array_slice($s['aliases'] ?? [], 0, 6),
-                ];
-            }, $shows),
-            'media_types' => $mediaTypes,
-            'schedule'    => $schedule,
-            'at_air_time' => $atAirTime,
-            'nearby_slots' => $atAirTime,
-            'schedule_notes' => [
+            'catalog_proposal'  => $catalogProposal,
+            'shows'             => $showsPayload,
+            'media_types'       => $mediaTypes,
+            'schedule'          => $schedule,
+            'day_slots'         => $daySlots,
+            'at_air_time'       => $atAirTime,
+            'schedule_notes'    => [
                 'to_null_means_current' => true,
                 'days_bitmask'          => 'Mon=1 Tue=2 Wed=4 Thu=8 Fri=16 Sat=32 Sun=64',
-                'schedule_is_focused_slice' => true,
-                'schedule_full_count'       => count($scheduleFull),
+                'schedule_is_complete'  => true,
+                'day_slots_is_complete_for_air_date' => true,
+                'schedule_count'        => count($schedule),
+                'day_slots_count'       => count($daySlots),
             ],
             'examples' => array_map(static function (array $ex): array {
                 return [
                     'original_filename'  => $ex['original_filename'] ?? '',
+                    'original_path'      => $ex['original_path'] ?? '',
                     'proposed_filename'  => $ex['proposed_filename'] ?? '',
+                    'proposed_dir'       => $ex['proposed_dir'] ?? null,
+                    'show_id'            => $ex['show_id'] ?? null,
                     'show_abbr'          => $ex['show_abbr'] ?? '',
+                    'media_type_id'      => $ex['media_type_id'] ?? null,
                     'media_type_abbr'    => $ex['media_type_abbr'] ?? null,
                     'file_date'          => $ex['file_date'] ?? null,
                     'file_time'          => $ex['file_time'] ?? null,
@@ -1302,6 +1319,15 @@ PROMPT;
         $needsRebuild = $dt['changed'] || $mt['changed'];
 
         $adoptId = $merged['adopt_show_id'];
+        // Catalog/scan had no show — always take a valid model recommendation.
+        if (($adoptId === null || $adoptId <= 0) && $result->showId === null
+            && isset($verdict['show_id']) && is_numeric($verdict['show_id'])
+        ) {
+            $candidate = (int) $verdict['show_id'];
+            if ($candidate > 0) {
+                $adoptId = $candidate;
+            }
+        }
         if ($adoptId !== null && $adoptId !== $result->showId) {
             $show = $this->shows->findById($adoptId);
             if ($show !== null) {
@@ -1479,52 +1505,85 @@ PROMPT;
         return $this->scheduleCatalog;
     }
 
-    /** @return list<array<string, mixed>> */
-    private function timelineFor(?string $dateYmd, ?string $timeHhmm): array
+    /**
+     * Every active Timeline block that applies on the air date (full day — not truncated).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function daySlotsFor(?string $dateYmd): array
     {
         if ($dateYmd === null || !DateNormalizer::isValidDate($dateYmd)) {
             return [];
         }
-        $minutes = DateNormalizer::timeToMinutes($timeHhmm) ?? (12 * 60);
+        $iso = substr($dateYmd, 0, 4) . '-' . substr($dateYmd, 4, 2) . '-' . substr($dateYmd, 6, 2);
         $dayBit = ScheduleTimeParser::dayBitFromDate($dateYmd);
         if ($dayBit === 0) {
             return [];
         }
 
-        $rawRows = $this->schedule->matchAt($dateYmd, $minutes, $dayBit);
-        // Exact hour empty — pull nearby same-day slots so the model still gets schedule hints.
-        if ($rawRows === []) {
-            $seen = [];
-            foreach ([-180, -120, -60, 60, 120, 180, 240, -240] as $delta) {
-                $probe = $minutes + $delta;
-                if ($probe < 0 || $probe >= 24 * 60) {
-                    continue;
-                }
-                foreach ($this->schedule->matchAt($dateYmd, $probe, $dayBit) as $row) {
-                    $key = (int) ($row['show_id'] ?? 0) . '|' . (string) ($row['hour_start_et'] ?? '');
-                    if (isset($seen[$key])) {
-                        continue;
-                    }
-                    $seen[$key] = true;
-                    $rawRows[] = $row;
-                    if (count($rawRows) >= 8) {
-                        break 2;
-                    }
-                }
+        $out = [];
+        foreach ($this->scheduleCatalog() as $row) {
+            if (!is_array($row)) {
+                continue;
             }
+            $from = (string) ($row['from'] ?? '');
+            $to = $row['to'] ?? null;
+            if ($from !== '' && $iso < $from) {
+                continue;
+            }
+            if ($to !== null && $to !== '' && $iso > (string) $to) {
+                continue;
+            }
+            $days = (int) ($row['days'] ?? 0);
+            if (($days & $dayBit) === 0) {
+                continue;
+            }
+            $out[] = [
+                'show_id'   => (int) ($row['show_id'] ?? 0),
+                'show_abbr' => (string) ($row['show_abbr'] ?? ''),
+                'title'     => (string) ($row['title'] ?? ''),
+                'start'     => (string) ($row['start'] ?? ''),
+                'end'       => (string) ($row['end'] ?? ''),
+                'hour'      => substr((string) ($row['start'] ?? ''), 0, 5),
+                'days'      => $days,
+                'from'      => $from,
+                'to'        => $to !== null && $to !== '' ? (string) $to : null,
+            ];
+        }
+
+        usort($out, static function (array $a, array $b): int {
+            return [$a['start'], $a['show_abbr']] <=> [$b['start'], $b['show_abbr']];
+        });
+
+        return $out;
+    }
+
+    /**
+     * day_slots whose hour range covers the proposal air time (full match list — not capped).
+     *
+     * @param list<array<string, mixed>> $daySlots
+     * @return list<array<string, mixed>>
+     */
+    private function slotsAtAirTime(array $daySlots, ?string $timeHhmm): array
+    {
+        $minutes = DateNormalizer::timeToMinutes($timeHhmm);
+        if ($minutes === null) {
+            return [];
         }
 
         $out = [];
-        foreach ($rawRows as $row) {
-            $to = $row['effective_to'] ?? null;
-            $out[] = [
-                'show_id'   => (int) $row['show_id'],
-                'show_abbr' => (string) ($row['show_abbr'] ?? ''),
-                'title'     => (string) ($row['title'] ?? ''),
-                'hour'      => substr((string) ($row['hour_start_et'] ?? ''), 0, 5),
-                'from'      => substr((string) ($row['effective_from'] ?? ''), 0, 10),
-                'to'        => $to !== null && $to !== '' ? substr((string) $to, 0, 10) : null,
-            ];
+        foreach ($daySlots as $slot) {
+            $start = DateNormalizer::timeToMinutes((string) ($slot['start'] ?? ''));
+            $end = DateNormalizer::timeToMinutes((string) ($slot['end'] ?? ''));
+            if ($start === null || $end === null) {
+                continue;
+            }
+            if ($end === 0 && $start > 0) {
+                $end = 24 * 60;
+            }
+            if ($minutes >= $start && $minutes < $end) {
+                $out[] = $slot;
+            }
         }
 
         return $out;
@@ -1536,7 +1595,8 @@ PROMPT;
         if ($this->exemplars !== null) {
             return $this->exemplars;
         }
-        $this->exemplars = $this->files->continuityExemplars(12);
+        // Max allowed by FileRepository::continuityExemplars (no further app-side truncation).
+        $this->exemplars = $this->files->continuityExemplars(40);
 
         return $this->exemplars;
     }

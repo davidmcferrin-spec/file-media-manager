@@ -29,16 +29,22 @@ $filesRepo    = new CompletenessRepository();
 $systemRepo   = new SystemRepository();
 $audit        = new AuditRepository();
 
+/**
+ * @param array<string, scalar|null> $params
+ */
 function show_audit_redirect(array $params = []): string
 {
     $base = [
-        'from'   => $_POST['return_from'] ?? $_GET['from'] ?? '',
-        'to'     => $_POST['return_to'] ?? $_GET['to'] ?? '',
-        'mode'   => $_POST['return_mode'] ?? $_GET['mode'] ?? '',
-        'grain'  => $_POST['return_grain'] ?? $_GET['grain'] ?? '',
-        'show_id'=> $_POST['return_show_id'] ?? $_GET['show_id'] ?? '',
-        'status' => $_POST['return_status'] ?? $_GET['status'] ?? '',
-        'tab'    => $_POST['return_tab'] ?? $_GET['tab'] ?? '',
+        'tab'     => $_POST['return_tab'] ?? $_GET['tab'] ?? '',
+        'view'    => $_POST['return_view'] ?? $_GET['view'] ?? '',
+        'year'    => $_POST['return_year'] ?? $_GET['year'] ?? '',
+        'month'   => $_POST['return_month'] ?? $_GET['month'] ?? '',
+        'date'    => $_POST['return_date'] ?? $_GET['date'] ?? '',
+        'from'    => $_POST['return_from'] ?? $_GET['from'] ?? '',
+        'to'      => $_POST['return_to'] ?? $_GET['to'] ?? '',
+        'mode'    => $_POST['return_mode'] ?? $_GET['mode'] ?? '',
+        'show_id' => $_POST['return_show_id'] ?? $_GET['show_id'] ?? '',
+        'status'  => $_POST['return_status'] ?? $_GET['status'] ?? '',
     ];
     foreach ($params as $k => $v) {
         $base[$k] = $v;
@@ -53,6 +59,44 @@ function show_audit_redirect(array $params = []): string
     return '/show-audit' . ($query !== [] ? '?' . http_build_query($query) : '');
 }
 
+/**
+ * @return list<string> HH:MM:SS hour starts to flag
+ */
+function show_audit_gap_hours(string $hourStart, string $hourEnd): array
+{
+    $parse = static function (string $hour): ?int {
+        if (preg_match('/^(\d{1,2}):(\d{2})/', $hour, $m) === 1) {
+            return ((int) $m[1]) * 60 + (int) $m[2];
+        }
+        return DateNormalizer::timeToMinutes($hour);
+    };
+
+    $startMin = $parse($hourStart);
+    if ($startMin === null) {
+        return [];
+    }
+    $startHour = (int) (floor($startMin / 60) * 60);
+
+    $endMin = $hourEnd !== '' ? $parse($hourEnd) : null;
+    if ($endMin === null) {
+        return [ScheduleTimeParser::minutesToTime($startHour)];
+    }
+    $endHour = (int) (floor($endMin / 60) * 60);
+    if ($endHour < $startHour) {
+        $endHour = $startHour;
+    }
+
+    $hours = [];
+    for ($h = $startHour; $h <= $endHour; $h += 60) {
+        if ($h >= 24 * 60) {
+            break;
+        }
+        $hours[] = ScheduleTimeParser::minutesToTime($h);
+    }
+
+    return $hours;
+}
+
 if ($method === 'POST') {
     $csrf = $_POST['_csrf'] ?? '';
     if (!Session::validateCsrf($csrf)) {
@@ -65,6 +109,7 @@ if ($method === 'POST') {
         $showId = (int) ($_POST['show_id'] ?? 0);
         $airDate = trim((string) ($_POST['air_date'] ?? ''));
         $hour = trim((string) ($_POST['hour_start_et'] ?? ''));
+        $hourEnd = trim((string) ($_POST['hour_end_et'] ?? ''));
         $lane = strtolower(trim((string) ($_POST['media_lane'] ?? 'both')));
         $reason = trim((string) ($_POST['reason'] ?? ''));
         $notes = trim((string) ($_POST['notes'] ?? ''));
@@ -73,29 +118,26 @@ if ($method === 'POST') {
             $lane = 'both';
         }
 
-        $hourNorm = null;
-        if (preg_match('/^(\d{1,2}):(\d{2})/', $hour, $m) === 1) {
-            $hourNorm = sprintf('%02d:%02d:00', (int) $m[1], (int) $m[2]);
-        } elseif (DateNormalizer::timeToMinutes($hour) !== null) {
-            $mins = DateNormalizer::timeToMinutes($hour);
-            $hourNorm = ScheduleTimeParser::minutesToTime((int) $mins);
-        }
+        $hourList = show_audit_gap_hours($hour, $hourEnd);
 
-        if ($showId <= 0 || $reason === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $airDate) || $hourNorm === null) {
-            Session::flash('error', 'Show, date, hour, and reason are required to flag an expected gap.');
-            header('Location: ' . show_audit_redirect(['tab' => 'gaps']));
+        if ($showId <= 0 || $reason === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $airDate) || $hourList === []) {
+            Session::flash('error', 'Show, date, hour, and reason are required to accept an expected gap.');
+            header('Location: ' . show_audit_redirect(['tab' => 'calendar']));
             exit;
         }
 
-        $id = $gapRepo->upsert([
-            'show_id'       => $showId,
-            'air_date'      => $airDate,
-            'hour_start_et' => $hourNorm,
-            'media_lane'    => $lane,
-            'reason'        => $reason,
-            'notes'         => $notes,
-            'created_by'    => Auth::id(),
-        ]);
+        $ids = [];
+        foreach ($hourList as $hourNorm) {
+            $ids[] = $gapRepo->upsert([
+                'show_id'       => $showId,
+                'air_date'      => $airDate,
+                'hour_start_et' => $hourNorm,
+                'media_lane'    => $lane,
+                'reason'        => $reason,
+                'notes'         => $notes,
+                'created_by'    => Auth::id(),
+            ]);
+        }
 
         $user = Auth::user();
         $audit->record(
@@ -104,20 +146,26 @@ if ($method === 'POST') {
             $_SERVER['REMOTE_ADDR'] ?? '',
             'EXPECTED_GAP_FLAGGED',
             'schedule_expected_gap',
-            $id,
+            $ids[0] ?? 0,
             null,
             null,
             [
                 'show_id' => $showId,
                 'air_date'=> $airDate,
-                'hour'    => $hourNorm,
+                'hours'   => $hourList,
                 'lane'    => $lane,
                 'reason'  => $reason,
             ]
         );
 
-        Session::flash('success', 'Expected gap flagged and excluded from unfilled counts.');
-        header('Location: ' . show_audit_redirect(['tab' => 'gaps']));
+        $n = count($hourList);
+        Session::flash(
+            'success',
+            $n === 1
+                ? 'Expected gap accepted and excluded from unfilled counts.'
+                : $n . ' hourly expected gaps accepted and excluded from unfilled counts.'
+        );
+        header('Location: ' . show_audit_redirect(['tab' => 'calendar']));
         exit;
     }
 
@@ -126,7 +174,7 @@ if ($method === 'POST') {
         $row = $id > 0 ? $gapRepo->findById($id) : null;
         if ($row === null) {
             Session::flash('error', 'Expected gap not found.');
-            header('Location: ' . show_audit_redirect(['tab' => 'gaps']));
+            header('Location: ' . show_audit_redirect(['tab' => 'calendar']));
             exit;
         }
         $gapRepo->delete($id);
@@ -143,7 +191,7 @@ if ($method === 'POST') {
             ['show_id' => (int) $row['show_id'], 'air_date' => $row['air_date']]
         );
         Session::flash('success', 'Expected gap removed — slot will count as unfilled again if still missing.');
-        header('Location: ' . show_audit_redirect(['tab' => 'gaps']));
+        header('Location: ' . show_audit_redirect(['tab' => 'calendar']));
         exit;
     }
 
@@ -184,58 +232,139 @@ if ($method === 'POST') {
 
 // ── GET ──────────────────────────────────────────────────────
 $tz = new \DateTimeZone('America/New_York');
-$today = new \DateTimeImmutable('now', $tz);
-$defaultFrom = $today->modify('-30 days')->format('Ymd');
-$defaultTo = $today->format('Ymd');
 
-$fromRaw = trim((string) ($_GET['from'] ?? ''));
-$toRaw = trim((string) ($_GET['to'] ?? ''));
+$tab = trim((string) ($_GET['tab'] ?? 'calendar'));
+// Legacy tab names
+if (in_array($tab, ['overview', 'gaps'], true)) {
+    $tab = 'calendar';
+}
+if (!in_array($tab, ['calendar', 'duplicates', 'unmatched', 'schedule', 'accepted'], true)) {
+    $tab = 'calendar';
+}
 
-if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fromRaw) === 1) {
-    $fromYmd = str_replace('-', '', $fromRaw);
-} elseif (DateNormalizer::isValidDate($fromRaw)) {
-    $fromYmd = $fromRaw;
+$view = strtolower(trim((string) ($_GET['view'] ?? 'year')));
+if (!in_array($view, ['year', 'month', 'week', 'day', 'show'], true)) {
+    $view = 'year';
+}
+
+$year = (int) ($_GET['year'] ?? 2025);
+if ($year < 2000 || $year > 2100) {
+    $year = 2025;
+}
+$month = (int) ($_GET['month'] ?? 1);
+if ($month < 1 || $month > 12) {
+    $month = 1;
+}
+
+$dateRaw = trim((string) ($_GET['date'] ?? ''));
+$focusDate = null;
+if (in_array($view, ['year', 'show'], true)) {
+    // Year selector is authoritative for year / show runway
+    $focusDate = \DateTimeImmutable::createFromFormat('Y-m-d', sprintf('%04d-01-01', $year), $tz);
+} elseif ($view === 'month') {
+    $focusDate = \DateTimeImmutable::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', $year, $month), $tz);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateRaw) === 1) {
+        $fromDate = \DateTimeImmutable::createFromFormat('Y-m-d', $dateRaw, $tz);
+        if ($fromDate !== false && (int) $fromDate->format('Y') === $year && (int) $fromDate->format('n') === $month) {
+            $focusDate = $fromDate;
+        }
+    }
+} elseif (preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateRaw) === 1) {
+    $focusDate = \DateTimeImmutable::createFromFormat('Y-m-d', $dateRaw, $tz);
+}
+
+if ($focusDate === false || $focusDate === null) {
+    $focusDate = \DateTimeImmutable::createFromFormat('Y-m-d', '2025-01-01', $tz);
+}
+if ($focusDate === false) {
+    $focusDate = new \DateTimeImmutable('2025-01-01', $tz);
+}
+
+if (!in_array($view, ['year', 'show'], true)) {
+    $year = (int) $focusDate->format('Y');
+    $month = (int) $focusDate->format('n');
 } else {
-    $fromYmd = $defaultFrom;
+    $month = 1;
 }
-
-if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $toRaw) === 1) {
-    $toYmd = str_replace('-', '', $toRaw);
-} elseif (DateNormalizer::isValidDate($toRaw)) {
-    $toYmd = $toRaw;
-} else {
-    $toYmd = $defaultTo;
-}
-
-if ($fromYmd > $toYmd) {
-    [$fromYmd, $toYmd] = [$toYmd, $fromYmd];
-}
-
-// Cap range to 92 days to keep audits responsive
-$fromDt = \DateTimeImmutable::createFromFormat('Ymd', $fromYmd, $tz);
-$toDt = \DateTimeImmutable::createFromFormat('Ymd', $toYmd, $tz);
-if ($fromDt !== false && $toDt !== false && $fromDt->diff($toDt)->days > 92) {
-    $toYmd = $fromDt->modify('+92 days')->format('Ymd');
-    Session::flash('error', 'Date range capped at 92 days for performance.');
-}
+$dateIso = $focusDate->format('Y-m-d');
 
 $mode   = strtolower(trim((string) ($_GET['mode'] ?? 'either')));
-$grain  = strtolower(trim((string) ($_GET['grain'] ?? 'hourly')));
 $showId = isset($_GET['show_id']) ? (int) $_GET['show_id'] : 0;
 $status = trim((string) ($_GET['status'] ?? ''));
-$tab    = trim((string) ($_GET['tab'] ?? 'overview'));
-if (!in_array($tab, ['overview', 'gaps', 'duplicates', 'unmatched', 'schedule'], true)) {
-    $tab = 'overview';
+
+// Resolve audit range from calendar view
+$weekStart = $focusDate;
+$dow = (int) $focusDate->format('N');
+if ($dow !== 1) {
+    $weekStart = $focusDate->modify('-' . ($dow - 1) . ' days');
 }
 
-$report = $service->audit(
-    $fromYmd,
-    $toYmd,
-    $mode,
-    $grain,
-    $showId > 0 ? $showId : null,
-    $status !== '' ? $status : null
-);
+if ($view === 'year' || ($tab === 'calendar' && $view === 'year')) {
+    $fromYmd = sprintf('%04d0101', $year);
+    $toYmd = sprintf('%04d1231', $year);
+} elseif ($view === 'month') {
+    $monthStart = \DateTimeImmutable::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', $year, $month), $tz);
+    $fromYmd = $monthStart->format('Ymd');
+    $toYmd = $monthStart->modify('last day of this month')->format('Ymd');
+} elseif ($view === 'week') {
+    $fromYmd = $weekStart->format('Ymd');
+    $toYmd = $weekStart->modify('+6 days')->format('Ymd');
+} elseif ($view === 'day') {
+    $fromYmd = $focusDate->format('Ymd');
+    $toYmd = $fromYmd;
+} else { // show runway — full year for selected show
+    $fromYmd = sprintf('%04d0101', $year);
+    $toYmd = sprintf('%04d1231', $year);
+}
+
+// Secondary tabs may still pass from/to
+if ($tab !== 'calendar') {
+    $fromRaw = trim((string) ($_GET['from'] ?? ''));
+    $toRaw = trim((string) ($_GET['to'] ?? ''));
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fromRaw) === 1) {
+        $fromYmd = str_replace('-', '', $fromRaw);
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $toRaw) === 1) {
+        $toYmd = str_replace('-', '', $toRaw);
+    }
+    if ($fromYmd > $toYmd) {
+        [$fromYmd, $toYmd] = [$toYmd, $fromYmd];
+    }
+    $fromDt = \DateTimeImmutable::createFromFormat('Ymd', $fromYmd, $tz);
+    $toDt = \DateTimeImmutable::createFromFormat('Ymd', $toYmd, $tz);
+    if ($fromDt !== false && $toDt !== false && $fromDt->diff($toDt)->days > 366) {
+        $toYmd = $fromDt->modify('+366 days')->format('Ymd');
+        Session::flash('error', 'Date range capped at 366 days for performance.');
+    }
+}
+
+$includeSlots = true;
+if ($tab === 'calendar' && ($view === 'year' || ($view === 'show' && $showId <= 0))) {
+    $includeSlots = false;
+}
+
+if ($tab === 'calendar' && $view === 'year') {
+    $report = $service->calendarYear($year, $mode, $showId > 0 ? $showId : null);
+} else {
+    $report = $service->audit(
+        $fromYmd,
+        $toYmd,
+        $mode,
+        'hourly',
+        $showId > 0 ? $showId : null,
+        $status !== '' ? $status : null,
+        $includeSlots
+    );
+}
+
+$monthGrid = [];
+$weekGrid = null;
+if ($tab === 'calendar' && $view === 'month') {
+    $monthGrid = $service->buildMonthGrid($year, $month, $report['day_rollups']);
+}
+if ($tab === 'calendar' && $view === 'week') {
+    $weekGrid = $service->buildWeekGrid($weekStart->format('Y-m-d'), $report['slots']);
+}
 
 $unmatchedSearch = trim((string) ($_GET['uq'] ?? ''));
 $unmatchedPage = max(1, (int) ($_GET['upage'] ?? 1));

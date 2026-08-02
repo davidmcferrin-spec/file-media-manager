@@ -115,7 +115,7 @@ for app workers (Apache/PostgreSQL: status + restart/reload only). Privileged op
 - Convention: patch = fixes; minor = features; major = breaking/behavior changes
 
 ## User workflow (IA)
-- Setup: Shows → Timeline (admin)
+- Setup: Eras (network windows) → Shows (identity + slots) → Timeline import/hygiene (admin)
 - Queues dropdown: Catalog, Glue; admin also Scan, Captions, Split, Execute
 - Ingest: Scan (worker processes queue)
 - Review loop: Catalog ↔ Gaps; Captions / Glue / Split as needed
