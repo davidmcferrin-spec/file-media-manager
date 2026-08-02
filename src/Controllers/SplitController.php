@@ -178,13 +178,20 @@ if ($method === 'POST') {
             'file_id'        => $fileId,
             'caption_job_id' => $prep['caption_job_id'],
             'audio_job_id'   => $prep['audio_job_id'],
+            'audio_kind'     => $prep['audio_kind'],
             'source'         => 'split_create',
         ]);
+        $audioFlash = '';
+        if (!empty($prep['audio_job_id'])) {
+            $audioFlash = ($prep['audio_kind'] ?? '') === 'suggest'
+                ? '; audio suggest queued'
+                : '; audio levels queued';
+        }
         Session::flash(
             'success',
             'File added to split queue'
             . ($prep['needs_caption'] ? '; caption extract queued' : '')
-            . ($prep['audio_job_id'] ? '; audio levels queued' : '')
+            . $audioFlash
             . '.'
         );
         header('Location: /split/' . $id);

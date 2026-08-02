@@ -13,8 +13,9 @@ use PDOException;
 
 /**
  * When a file is marked for split: ensure split queue row, caption extract
- * (if no usable SRT), and audio levels job. Audio claim order prioritizes
- * files without usable captions.
+ * (if no usable SRT), and one audio analysis job. Without usable captions
+ * queues suggest (silence → segments + seeded levels); with captions queues
+ * levels only. Audio claim order prioritizes files without srt_path.
  */
 final class SplitPrepService
 {
@@ -47,7 +48,9 @@ final class SplitPrepService
      *   split_queued: int,
      *   caption_job_id: ?int,
      *   caption_files: int,
-     *   audio_jobs: int
+     *   audio_jobs: int,
+     *   audio_levels_jobs: int,
+     *   audio_suggest_jobs: int
      * }
      */
     public function onMarkedForSplitMany(array $fileIds, int $userId, bool $spawnWorkers = true): array
@@ -60,6 +63,8 @@ final class SplitPrepService
         $splitQueued = 0;
         $captionIds = [];
         $audioJobs = 0;
+        $audioLevelsJobs = 0;
+        $audioSuggestJobs = 0;
         $lastAudioJobId = null;
 
         foreach ($ids as $fileId) {
@@ -75,6 +80,12 @@ final class SplitPrepService
             if (!empty($result['audio_job_id'])) {
                 $audioJobs++;
                 $lastAudioJobId = (int) $result['audio_job_id'];
+                $kind = (string) ($result['audio_kind'] ?? '');
+                if ($kind === SplitAudioJobRepository::KIND_SUGGEST) {
+                    $audioSuggestJobs++;
+                } elseif ($kind === SplitAudioJobRepository::KIND_LEVELS) {
+                    $audioLevelsJobs++;
+                }
             }
         }
 
@@ -88,10 +99,12 @@ final class SplitPrepService
         }
 
         return [
-            'split_queued'   => $splitQueued,
-            'caption_job_id' => $captionJobId,
-            'caption_files'  => count($captionIds),
-            'audio_jobs'     => $audioJobs,
+            'split_queued'       => $splitQueued,
+            'caption_job_id'     => $captionJobId,
+            'caption_files'      => count($captionIds),
+            'audio_jobs'         => $audioJobs,
+            'audio_levels_jobs'  => $audioLevelsJobs,
+            'audio_suggest_jobs' => $audioSuggestJobs,
         ];
     }
 
@@ -101,7 +114,8 @@ final class SplitPrepService
      *   split_created: bool,
      *   needs_caption: bool,
      *   caption_job_id: ?int,
-     *   audio_job_id: ?int
+     *   audio_job_id: ?int,
+     *   audio_kind: ?string
      * }
      */
     public function onMarkedForSplit(int $fileId, int $userId, bool $spawnWorkers = true): array
@@ -114,6 +128,7 @@ final class SplitPrepService
                 'needs_caption'  => false,
                 'caption_job_id' => null,
                 'audio_job_id'   => null,
+                'audio_kind'     => null,
             ];
         }
 
@@ -144,6 +159,12 @@ final class SplitPrepService
             $captionJobId = $this->enqueueCaptionExtract([$fileId], $userId, true);
         }
 
+        // One active audio job per file: suggest when no usable SRT (fills
+        // segments + seeds levels); levels-only when captions already exist.
+        $audioKind = $needsCaption
+            ? SplitAudioJobRepository::KIND_SUGGEST
+            : SplitAudioJobRepository::KIND_LEVELS;
+
         $audioJobId = null;
         if (
             $splitQueueId !== null
@@ -154,7 +175,7 @@ final class SplitPrepService
                 $audioJobId = $this->audioJobs->create(
                     $splitQueueId,
                     $fileId,
-                    SplitAudioJobRepository::KIND_LEVELS,
+                    $audioKind,
                     $userId
                 );
                 if ($spawnWorkers) {
@@ -164,6 +185,7 @@ final class SplitPrepService
                 if (!$this->audioJobs->isUniqueViolation($e)) {
                     error_log('[split-prep] audio queue file #' . $fileId . ': ' . $e->getMessage());
                 }
+                $audioJobId = null;
             }
         }
 
@@ -173,6 +195,7 @@ final class SplitPrepService
             'needs_caption'  => $needsCaption,
             'caption_job_id' => $captionJobId,
             'audio_job_id'   => $audioJobId,
+            'audio_kind'     => $audioJobId !== null ? $audioKind : null,
         ];
     }
 

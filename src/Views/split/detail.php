@@ -796,13 +796,21 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
           <div class="sw-seg-body">
             <div class="row g-2 align-items-end">
               <div class="col-sm-3">
-                <label class="form-label mb-1">Mark In <span class="sw-meta">(show)</span></label>
+                <div class="d-flex justify-content-between align-items-center gap-1 mb-1">
+                  <label class="form-label mb-0">Mark In <span class="sw-meta">(show)</span></label>
+                  <button type="button" class="btn btn-outline-secondary btn-xs seg-jump-in"
+                          title="Jump to 3 seconds before Mark In">In −3s</button>
+                </div>
                 <input type="text" class="form-control form-control-sm seg-tc-start" inputmode="decimal"
                        value="<?php echo View::e($formatTc($start)); ?>" placeholder="00:00:00.000" autocomplete="off">
                 <input type="hidden" name="segment_start[]" class="seg-start" value="<?php echo View::e((string) $start); ?>">
               </div>
               <div class="col-sm-3">
-                <label class="form-label mb-1">Mark Out <span class="sw-meta">(show)</span></label>
+                <div class="d-flex justify-content-between align-items-center gap-1 mb-1">
+                  <label class="form-label mb-0">Mark Out <span class="sw-meta">(show)</span></label>
+                  <button type="button" class="btn btn-outline-secondary btn-xs seg-jump-out"
+                          title="Jump to 3 seconds before Mark Out">Out −3s</button>
+                </div>
                 <input type="text" class="form-control form-control-sm seg-tc-end" inputmode="decimal"
                        value="<?php echo View::e($formatTc($end)); ?>" placeholder="00:00:00.000" autocomplete="off">
                 <input type="hidden" name="segment_end[]" class="seg-end" value="<?php echo View::e((string) $end); ?>">
@@ -914,13 +922,21 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
     <div class="sw-seg-body">
       <div class="row g-2 align-items-end">
         <div class="col-sm-3">
-          <label class="form-label mb-1">Mark In <span class="sw-meta">(show)</span></label>
+          <div class="d-flex justify-content-between align-items-center gap-1 mb-1">
+            <label class="form-label mb-0">Mark In <span class="sw-meta">(show)</span></label>
+            <button type="button" class="btn btn-outline-secondary btn-xs seg-jump-in"
+                    title="Jump to 3 seconds before Mark In">In −3s</button>
+          </div>
           <input type="text" class="form-control form-control-sm seg-tc-start" inputmode="decimal"
                  value="00:00:00.000" placeholder="00:00:00.000" autocomplete="off">
           <input type="hidden" name="segment_start[]" class="seg-start" value="0">
         </div>
         <div class="col-sm-3">
-          <label class="form-label mb-1">Mark Out <span class="sw-meta">(show)</span></label>
+          <div class="d-flex justify-content-between align-items-center gap-1 mb-1">
+            <label class="form-label mb-0">Mark Out <span class="sw-meta">(show)</span></label>
+            <button type="button" class="btn btn-outline-secondary btn-xs seg-jump-out"
+                    title="Jump to 3 seconds before Mark Out">Out −3s</button>
+          </div>
           <input type="text" class="form-control form-control-sm seg-tc-end" inputmode="decimal"
                  value="00:00:00.000" placeholder="00:00:00.000" autocomplete="off">
           <input type="hidden" name="segment_end[]" class="seg-end" value="0">
@@ -1467,6 +1483,27 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
         setActiveRow(row);
     });
 
+    var markPreviewLeadSec = 3;
+
+    function jumpToMarkPreview(row, which) {
+        syncRow(row);
+        setActiveRow(row);
+        var mark = which === 'out'
+            ? (parseFloat(row.querySelector('.seg-end').value) || 0)
+            : (parseFloat(row.querySelector('.seg-start').value) || 0);
+        var at = Math.max(0, mark - markPreviewLeadSec);
+        playStatus.textContent = (which === 'out' ? 'Out' : 'In') + ' preview @ '
+            + secondsToTc(at) + ' (−' + markPreviewLeadSec + 's → '
+            + secondsToTc(mark) + ')';
+        if (playSupported) {
+            playheadSec = at;
+            updatePlayheadUi();
+            btnPlay.click();
+            return;
+        }
+        loadFrame(at, true);
+    }
+
     list.addEventListener('click', function (e) {
         var row = e.target.closest('.segment-row');
         if (!row) return;
@@ -1476,6 +1513,13 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
             row.remove();
             renumber();
             setActiveRow(list.querySelector('.segment-row'));
+            return;
+        }
+        var jumpBtn = e.target.closest('.seg-jump-in, .seg-jump-out');
+        if (jumpBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            jumpToMarkPreview(row, jumpBtn.classList.contains('seg-jump-out') ? 'out' : 'in');
             return;
         }
         setActiveRow(row);

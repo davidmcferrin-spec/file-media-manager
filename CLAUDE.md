@@ -70,6 +70,8 @@ storage/logs/           Application + worker logs
 - Video previews still generated on-demand in the web request (heavier; separate from thumbs)
 - Files at or above the split flag duration (Settings → Processing; default 2 hours)
   are flagged needs_split = true; multi-hour schedule spans also flag
+- Split prep (scan / Catalog): split queue + caption extract if no usable SRT;
+  audio **suggest** if no SRT, else audio **levels** (one active job per file)
 - Split workbench suggest: captions (SRT silence gaps) or audio (FFmpeg silencedetect;
   long quiet = program gaps; short dips = ads; continuous multi-hour → schedule hours)
 - Split workbench audio lane: Quiet/Low/Dialog/Hot blocks from cached RMS map

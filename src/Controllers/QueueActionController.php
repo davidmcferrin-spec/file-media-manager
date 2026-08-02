@@ -345,6 +345,7 @@ if ($uri === '/queue/edit') {
                 'split_queue_id' => $prep['split_queue_id'],
                 'caption_job_id' => $prep['caption_job_id'],
                 'audio_job_id'   => $prep['audio_job_id'],
+                'audio_kind'     => $prep['audio_kind'],
             ]
         );
     } elseif ($wasSplit && !$needsSplit) {
@@ -363,7 +364,10 @@ if ($uri === '/queue/edit') {
 
     $message = 'Proposed path updated.';
     if (!$wasSplit && $needsSplit) {
-        $message .= ' Split prep queued (caption extract if needed + audio levels).';
+        $audioBit = ($prep['audio_kind'] ?? '') === 'suggest'
+            ? 'audio suggest'
+            : 'audio levels';
+        $message .= ' Split prep queued (caption extract if needed + ' . $audioBit . ').';
     }
     if ($removedJobs !== []) {
         $message .= ' ' . count($removedJobs) . ' active split job(s) removed.';
@@ -612,20 +616,36 @@ if ($uri === '/queue/add-split') {
                 $file['original_path'],
                 null,
                 [
-                    'file_id'        => $id,
-                    'caption_files'  => $prep['caption_files'],
-                    'audio_jobs'     => $prep['audio_jobs'],
-                    'source'         => 'queue_add_split',
+                    'file_id'            => $id,
+                    'caption_files'      => $prep['caption_files'],
+                    'audio_jobs'         => $prep['audio_jobs'],
+                    'audio_levels_jobs'  => $prep['audio_levels_jobs'],
+                    'audio_suggest_jobs' => $prep['audio_suggest_jobs'],
+                    'source'             => 'queue_add_split',
                 ]
             );
         }
+    }
+
+    $audioFlash = '';
+    if (($prep['audio_suggest_jobs'] ?? 0) > 0 || ($prep['audio_levels_jobs'] ?? 0) > 0) {
+        $parts = [];
+        if (($prep['audio_suggest_jobs'] ?? 0) > 0) {
+            $parts[] = 'audio suggest for ' . $prep['audio_suggest_jobs'];
+        }
+        if (($prep['audio_levels_jobs'] ?? 0) > 0) {
+            $parts[] = 'audio levels for ' . $prep['audio_levels_jobs'];
+        }
+        $audioFlash = '; ' . implode(', ', $parts);
+    } elseif (($prep['audio_jobs'] ?? 0) > 0) {
+        $audioFlash = '; audio analysis for ' . $prep['audio_jobs'];
     }
 
     Session::flash(
         'success',
         count($eligible) . ' file(s) prepared for split'
         . ($prep['caption_files'] > 0 ? '; caption extract for ' . $prep['caption_files'] : '')
-        . ($prep['audio_jobs'] > 0 ? '; audio levels for ' . $prep['audio_jobs'] : '')
+        . $audioFlash
         . '.'
     );
     redirect_queue();

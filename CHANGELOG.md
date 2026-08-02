@@ -14,6 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.28.2] — 2026-08-02
+
+### Changed
+
+- Split prep (scan `needs_split`, Catalog Add to Split, edit flag): queues **audio suggest** when there is no usable SRT (fills segments + seeds levels); still queues **audio levels** when captions already exist
+
+## [0.28.1] — 2026-08-02
+
+### Added
+
+- Split workbench segment cards: **In −3s** / **Out −3s** jump to 3 seconds before each mark and play so cuts can be verified
+
 ## [0.28.0] — 2026-08-02
 
 ### Added

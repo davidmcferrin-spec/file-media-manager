@@ -287,10 +287,12 @@ final class ScanService
             $glueUpdated = (new GlueGroupService($this->files))->applyForScanJob($jobId);
 
             $splitPrep = [
-                'split_queued'   => 0,
-                'caption_job_id' => null,
-                'caption_files'  => 0,
-                'audio_jobs'     => 0,
+                'split_queued'       => 0,
+                'caption_job_id'     => null,
+                'caption_files'      => 0,
+                'audio_jobs'         => 0,
+                'audio_levels_jobs'  => 0,
+                'audio_suggest_jobs' => 0,
             ];
             if ($this->pendingSplitPrepIds !== []) {
                 $this->progress('split_prep', [
