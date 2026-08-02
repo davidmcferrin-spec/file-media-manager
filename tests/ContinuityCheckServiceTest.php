@@ -181,6 +181,13 @@ final class ContinuityCheckServiceTest extends TestCase
             'confidence' => 'HIGH',
             'show_id'    => 41,
         ], $proposal));
+        $this->assertTrue(ContinuityCheckService::verdictIncomplete([
+            'agree'         => false,
+            'confidence'    => 'HIGH',
+            'show_id'       => 41,
+            'file_date'     => '20241027',
+            'media_type_id' => 1,
+        ], $proposal), 'missing file_time is incomplete');
         $this->assertFalse(ContinuityCheckService::verdictIncomplete([
             'agree'         => false,
             'confidence'    => 'HIGH',
@@ -211,6 +218,24 @@ final class ContinuityCheckServiceTest extends TestCase
         $this->assertSame(41, $v['show_id']);
         $this->assertContains('file_date', $done['filled']);
         $this->assertStringContainsString('filled:', (string) $v['reason']);
+    }
+
+    public function test_complete_verdict_fills_datetime_from_filename(): void
+    {
+        $done = ContinuityCheckService::completeVerdictFromProposal(
+            [
+                'agree'      => true,
+                'confidence' => 'MEDIUM',
+                'show_id'    => 3,
+            ],
+            [],
+            'CUOMO CLEAN_20221004_1850.ts'
+        );
+        $v = $done['verdict'];
+        $this->assertSame('20221004', $v['file_date']);
+        $this->assertSame('1850', $v['file_time']);
+        $this->assertContains('file_date:filename', $done['filled']);
+        $this->assertContains('file_time:filename', $done['filled']);
     }
 
     public function test_lean_schedule_prefers_matching_day(): void

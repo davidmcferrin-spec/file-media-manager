@@ -9,8 +9,11 @@ namespace MediaManager\Services;
  */
 final class FileDateTimeResolver
 {
-    /** @return array{date: ?string, time: ?string, signals: list<string>, datetime_confidence: string} */
-    public static function resolve(string $filename, ?array $ffprobe): array
+    /**
+     * @param list<string> $pathSegments Directory segments under the mount (filename removed)
+     * @return array{date: ?string, time: ?string, signals: list<string>, datetime_confidence: string}
+     */
+    public static function resolve(string $filename, ?array $ffprobe, array $pathSegments = []): array
     {
         $signals = [];
         $fromFile = DateNormalizer::fromFilename($filename);
@@ -18,6 +21,18 @@ final class FileDateTimeResolver
         $fileTime = $fromFile['time'];
         if ($fromFile['signal'] !== null) {
             $signals[] = $fromFile['signal'];
+        }
+
+        // Path can supply a missing date (or a full day) when the filename is sparse.
+        $fromPath = DateNormalizer::fromPathSegments($pathSegments);
+        if ($fromPath['signal'] !== null) {
+            $signals[] = $fromPath['signal'];
+        }
+        if ($fileDate === null && $fromPath['date'] !== null) {
+            $fileDate = $fromPath['date'];
+        }
+        if ($fileTime === null && $fromPath['time'] !== null) {
+            $fileTime = $fromPath['time'];
         }
 
         $probeDate = null;
@@ -38,7 +53,7 @@ final class FileDateTimeResolver
             $time = $probeTime;
             $signals[] = 'datetime:time from ffprobe (preferred)';
         } elseif ($fileTime !== null) {
-            $signals[] = 'datetime:time from filename (LOW)';
+            $signals[] = 'datetime:time from filename/path (LOW)';
         }
 
         if ($probeDate !== null && $fileDate === null) {
@@ -47,7 +62,7 @@ final class FileDateTimeResolver
         } elseif ($fileDate !== null) {
             $date = $fileDate;
             if ($probeDate !== null && $probeDate !== $fileDate) {
-                $signals[] = 'datetime:date filename vs ffprobe disagree — using filename (LOW)';
+                $signals[] = 'datetime:date filename/path vs ffprobe disagree — using filename/path (LOW)';
             }
         }
 
@@ -74,10 +89,10 @@ final class FileDateTimeResolver
         }
 
         return [
-            'date'                 => $date,
-            'time'                 => $time,
-            'signals'              => $signals,
-            'datetime_confidence'  => $confidence,
+            'date'                => $date,
+            'time'                => $time,
+            'signals'             => $signals,
+            'datetime_confidence' => $confidence,
         ];
     }
 

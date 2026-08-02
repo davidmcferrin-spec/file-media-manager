@@ -14,31 +14,88 @@ final class DateNormalizer
     {
         $base = pathinfo($filename, PATHINFO_FILENAME);
 
-        // Primary: _YYYYMMDD_HHMM or _YYYYMMDD_HHMMSS...
-        if (preg_match('/_(\d{8})_(\d{4,8})(?:[^0-9]|$)/', $base, $m) === 1) {
+        return self::fromToken($base);
+    }
+
+    /**
+     * Parse date/time tokens from a filename stem or path segment.
+     *
+     * @return array{date: ?string, time: ?string, signal: ?string}
+     */
+    public static function fromToken(string $base): array
+    {
+        $base = trim($base);
+        if ($base === '') {
+            return ['date' => null, 'time' => null, 'signal' => null];
+        }
+
+        // Primary: _YYYYMMDD_HHMM or space/hyphen separators (time 4–8 digits).
+        if (preg_match('/(?:^|[^0-9])(\d{8})[_\-\s]+(\d{4,8})(?:[^0-9]|$)/', $base, $m) === 1) {
             $time = self::normalizeTime($m[2]);
             if (self::isValidDate($m[1]) && $time !== null) {
                 return [
                     'date'   => $m[1],
                     'time'   => $time,
-                    'signal' => 'filename:_YYYYMMDD_HHMM',
+                    'signal' => 'filename:YYYYMMDD_HHMM',
                 ];
             }
         }
 
-        // Embedded: CLEAN2022-10-03 or 2022-10-03
-        if (preg_match('/(\d{4})-(\d{2})-(\d{2})/', $base, $m) === 1) {
+        // Contiguous YYYYMMDDHHMM (12 digits) — common in encoder dumps.
+        if (preg_match('/(?:^|[^0-9])(\d{8})(\d{4})(?:\d{0,4})?(?:[^0-9]|$)/', $base, $m) === 1) {
+            $time = self::normalizeTime($m[2]);
+            if (self::isValidDate($m[1]) && $time !== null) {
+                return [
+                    'date'   => $m[1],
+                    'time'   => $time,
+                    'signal' => 'filename:YYYYMMDDHHMM',
+                ];
+            }
+        }
+
+        // ISO date with optional time: 2022-10-03_1850 / 2022-10-03 18:50 / 2022.10.03-1850
+        if (preg_match(
+            '/(\d{4})[-.\/](\d{2})[-.\/](\d{2})(?:[_\-\sT]+(\d{1,2})[:.]?(\d{2})(?:[:.]?\d{2})?)?/',
+            $base,
+            $m
+        ) === 1) {
             $date = $m[1] . $m[2] . $m[3];
             if (self::isValidDate($date)) {
+                $time = null;
+                if (isset($m[4], $m[5]) && $m[4] !== '' && $m[5] !== '') {
+                    $time = self::normalizeTime(sprintf('%02d%s', (int) $m[4], $m[5]));
+                }
+
                 return [
                     'date'   => $date,
-                    'time'   => null,
-                    'signal' => 'filename:YYYY-MM-DD',
+                    'time'   => $time,
+                    'signal' => $time !== null ? 'filename:YYYY-MM-DD_HHMM' : 'filename:YYYY-MM-DD',
                 ];
             }
         }
 
-        // Standalone 8-digit date
+        // US-style MM-DD-YYYY or MM/DD/YYYY with optional time.
+        if (preg_match(
+            '/(?:^|[^0-9])(\d{1,2})[-.\/](\d{1,2})[-.\/](\d{4})(?:[_\-\s]+(\d{1,2})[:.]?(\d{2}))?/',
+            $base,
+            $m
+        ) === 1) {
+            $date = sprintf('%04d%02d%02d', (int) $m[3], (int) $m[1], (int) $m[2]);
+            if (self::isValidDate($date)) {
+                $time = null;
+                if (isset($m[4], $m[5]) && $m[4] !== '' && $m[5] !== '') {
+                    $time = self::normalizeTime(sprintf('%02d%s', (int) $m[4], $m[5]));
+                }
+
+                return [
+                    'date'   => $date,
+                    'time'   => $time,
+                    'signal' => $time !== null ? 'filename:MM-DD-YYYY_HHMM' : 'filename:MM-DD-YYYY',
+                ];
+            }
+        }
+
+        // Standalone 8-digit date (no time).
         if (preg_match('/(?:^|[^0-9])(\d{8})(?:[^0-9]|$)/', $base, $m) === 1) {
             if (self::isValidDate($m[1])) {
                 return [
@@ -49,23 +106,65 @@ final class DateNormalizer
             }
         }
 
+        // Time alone near broadcast-looking HHMM (only when preceded by show-ish tokens) — skip;
+        // bare times are too ambiguous without a date.
+
         return ['date' => null, 'time' => null, 'signal' => null];
     }
 
-    /** @return array{date: ?string, time: ?string, signal: ?string} */
+    /**
+     * Extract date (and optional time) from path folders: …/YYYY/MM/DD/… or …/YYYY/MM/….
+     *
+     * @param list<string> $segments Directory segments (filename already removed)
+     * @return array{date: ?string, time: ?string, signal: ?string}
+     */
     public static function fromPathSegments(array $segments): array
     {
-        // Expect .../SHOW/YYYY/MM/TYPE/...
-        if (count($segments) >= 3) {
-            $year  = $segments[count($segments) - 3] ?? '';
-            $month = $segments[count($segments) - 2] ?? '';
+        $n = count($segments);
+        for ($i = 0; $i < $n; $i++) {
+            $token = (string) $segments[$i];
+            $parsed = self::fromToken($token);
+            if ($parsed['date'] !== null) {
+                return [
+                    'date'   => $parsed['date'],
+                    'time'   => $parsed['time'],
+                    'signal' => 'path:' . ($parsed['signal'] ?? 'token'),
+                ];
+            }
+        }
+
+        // …/YYYY/MM/DD/…
+        for ($i = 0; $i <= $n - 3; $i++) {
+            $year = (string) ($segments[$i] ?? '');
+            $month = (string) ($segments[$i + 1] ?? '');
+            $day = (string) ($segments[$i + 2] ?? '');
+            if (
+                preg_match('/^\d{4}$/', $year) === 1
+                && preg_match('/^\d{2}$/', $month) === 1
+                && preg_match('/^\d{2}$/', $day) === 1
+            ) {
+                $date = $year . $month . $day;
+                if (self::isValidDate($date)) {
+                    return [
+                        'date'   => $date,
+                        'time'   => null,
+                        'signal' => 'path:YYYY/MM/DD',
+                    ];
+                }
+            }
+        }
+
+        // …/YYYY/MM/… (day defaulted to 01)
+        for ($i = 0; $i <= $n - 2; $i++) {
+            $year = (string) ($segments[$i] ?? '');
+            $month = (string) ($segments[$i + 1] ?? '');
             if (preg_match('/^\d{4}$/', $year) === 1 && preg_match('/^\d{2}$/', $month) === 1) {
                 $date = $year . $month . '01';
                 if (self::isValidDate($date)) {
                     return [
-                        'date'   => null,
+                        'date'   => $date,
                         'time'   => null,
-                        'signal' => 'path:year/month hint only',
+                        'signal' => 'path:YYYY/MM (day defaulted to 01)',
                     ];
                 }
             }
@@ -152,21 +251,9 @@ final class DateNormalizer
             return $date;
         }
 
-        // segments relative: show/year/month/type/file
-        if (count($segments) >= 3) {
-            $yearIdx = count($segments) - 3;
-            $year    = $segments[$yearIdx] ?? '';
-            $month   = $segments[$yearIdx + 1] ?? '';
-            $day     = '01';
-            if (preg_match('/^\d{4}$/', $year) === 1 && preg_match('/^\d{2}$/', $month) === 1) {
-                $candidate = $year . $month . $day;
-                if (self::isValidDate($candidate)) {
-                    return $candidate;
-                }
-            }
-        }
+        $fromPath = self::fromPathSegments($segments);
 
-        return null;
+        return $fromPath['date'];
     }
 
     public static function yearMonthFromPath(array $segments): ?array

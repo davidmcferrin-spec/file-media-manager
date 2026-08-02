@@ -14,6 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.26.0] — 2026-08-01
+
+### Added
+
+- Continuity Lab **Artifacts modal** with decision tree, seed, reply, and **Copy JSON** in the footer (replaces inline collapse)
+
+### Changed
+
+- Rule date/time parsing covers more legacy patterns (spaces, contiguous `YYYYMMDDHHMM`, ISO+time, US dates, path `YYYY/MM/DD`)
+- Continuity model prompt + repair require `file_date` / `file_time`; gaps filled from proposal or filename parse
+- Continuity Lab Date/Time column normalizes values and falls back to seed / engine reply when log columns are empty
+
 ## [0.25.0] — 2026-08-01
 
 ### Changed

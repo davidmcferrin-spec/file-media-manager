@@ -227,6 +227,8 @@ final class ContinuityCheckService
                             'system' => 'Your previous JSON omitted required fields. Reply with complete JSON only: '
                                 . 'agree, confidence (HIGH|MEDIUM|LOW), show_id, media_type_id, media_type_agree, '
                                 . 'file_date (YYYYMMDD), file_time (HHMM), datetime_agree, reason. '
+                                . 'ALWAYS include file_date and file_time — extract from original_filename/path digits, '
+                                . 'catalog_proposal, or schedule; never leave them null when any clue exists. '
                                 . 'Mirror proposal file_date/file_time/media_type_id when you do not dispute them. '
                                 . 'Choose show_id and media_type_id only from the catalogs in the user JSON.',
                             'user'   => (string) json_encode([
@@ -508,8 +510,6 @@ final class ContinuityCheckService
             return true;
         }
 
-        $propDate = trim((string) ($proposal['file_date'] ?? ''));
-        $propTime = trim((string) ($proposal['file_time'] ?? ''));
         $propTypeId = $proposal['media_type_id'] ?? null;
         $propShowId = $proposal['show_id'] ?? null;
 
@@ -521,10 +521,8 @@ final class ContinuityCheckService
         }
         $engShow = $verdict['show_id'] ?? null;
 
-        if ($propDate !== '' && $engDate === '') {
-            return true;
-        }
-        if ($propTime !== '' && $engTime === '') {
+        // Model must always attempt date/time (null only when truly impossible after repair).
+        if ($engDate === '' || $engTime === '') {
             return true;
         }
         if ($propTypeId !== null && $propTypeId !== '' && ($engType === null || $engType === '')) {
@@ -548,15 +546,18 @@ final class ContinuityCheckService
     }
 
     /**
-     * Fill null model fields from the rule proposal after normalize/retry.
+     * Fill null model fields from the rule proposal (and filename parse) after normalize/retry.
      * Date/time/type are mirrored whenever the proposal has them; show only when agree≠false.
      *
      * @param array<string, mixed> $verdict
      * @param array<string, mixed> $proposal
      * @return array{verdict: array<string, mixed>, filled: list<string>}
      */
-    public static function completeVerdictFromProposal(array $verdict, array $proposal): array
-    {
+    public static function completeVerdictFromProposal(
+        array $verdict,
+        array $proposal,
+        ?string $originalFilename = null
+    ): array {
         $filled = [];
         $conf = strtoupper(trim((string) ($verdict['confidence'] ?? '')));
         if (!in_array($conf, ['HIGH', 'MEDIUM', 'LOW'], true)) {
@@ -591,6 +592,25 @@ final class ContinuityCheckService
                     $verdict['file_time'] = $norm;
                     $filled[] = 'file_time';
                 }
+            }
+        }
+
+        // Last resort: parse digits from the original filename so Lab still shows a Model date/time.
+        if ($originalFilename !== null && $originalFilename !== '') {
+            $parsed = DateNormalizer::fromFilename($originalFilename);
+            if (
+                (($verdict['file_date'] ?? null) === null || $verdict['file_date'] === '')
+                && $parsed['date'] !== null
+            ) {
+                $verdict['file_date'] = $parsed['date'];
+                $filled[] = 'file_date:filename';
+            }
+            if (
+                (($verdict['file_time'] ?? null) === null || $verdict['file_time'] === '')
+                && $parsed['time'] !== null
+            ) {
+                $verdict['file_time'] = $parsed['time'];
+                $filled[] = 'file_time:filename';
             }
         }
 
@@ -1017,17 +1037,18 @@ Your job:
 3) Compare to catalog_proposal and set agree true/false (conflict when you disagree on show or overall mapping).
 The application builds the policy filename from your fields — do not invent filenames.
 Rules:
-- ALWAYS return confidence, show_id, file_date, file_time, and media_type_id. Never leave them null when the filename/path or catalogs make them clear. If catalog_proposal is correct, mirror its values and set agree=true.
+- ALWAYS return confidence, show_id, file_date, file_time, and media_type_id.
+- ALWAYS propose file_date (YYYYMMDD) and file_time (HHMM Eastern). Extract digits from original_filename/path (YYYYMMDD_HHMM, YYYY-MM-DD, YYYYMMDDHHMM, folder YYYY/MM/DD). If catalog_proposal has date/time and you do not dispute them, mirror them. Prefer a best-effort estimate from filename, path, schedule, or proposal over null. Null only when no digit or schedule clue exists at all.
+- If catalog_proposal is correct overall, mirror its values and set agree=true.
 - Choose show_id ONLY from shows[].id. Choose media_type_id ONLY from media_types[].id (numeric).
 - Use schedule[] (full Timeline) and day_slots[] (all blocks active on the air date) as the authority for what can air when. schedule.to null means the block is still current.
 - at_air_time[] is the subset of day_slots matching the proposal air time — prefer it when non-empty.
 - Path folders like PGM/Program/Clean/GISO are strong media-type evidence.
 - Path/filename show tokens can be wrong or ambiguous — prefer schedule alignment over weak tokens (e.g. "NOW WEEKEND" is not Morning in America weekday).
-- file_date = YYYYMMDD or null. file_time = HHMM Eastern or null.
 - datetime_agree / media_type_agree reflect whether YOUR date/time and type look correct for the file.
 - reason: short justification (mention schedule match or conflict when relevant).
 - Respond with JSON only, no prose:
-{"agree":true|false,"confidence":"HIGH"|"MEDIUM"|"LOW","show_id":null|number,"media_type_id":null|number,"media_type_agree":true|false,"file_date":null|string,"file_time":null|string,"datetime_agree":true|false,"reason":"short"}
+{"agree":true|false,"confidence":"HIGH"|"MEDIUM"|"LOW","show_id":null|number,"media_type_id":null|number,"media_type_agree":true|false,"file_date":"YYYYMMDD","file_time":"HHMM","datetime_agree":true|false,"reason":"short"}
 PROMPT;
 
         $catalogProposal = [
@@ -1180,7 +1201,7 @@ PROMPT;
         $proposal = is_array($asked['seed_packet']['proposal'] ?? null)
             ? $asked['seed_packet']['proposal']
             : [];
-        $completed = self::completeVerdictFromProposal($verdict, $proposal);
+        $completed = self::completeVerdictFromProposal($verdict, $proposal, $originalFilename);
         $verdict = $completed['verdict'];
         $filledFromProposal = $completed['filled'];
 

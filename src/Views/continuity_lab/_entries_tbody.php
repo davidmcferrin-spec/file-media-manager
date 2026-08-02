@@ -3,11 +3,53 @@
 declare(strict_types=1);
 
 use MediaManager\Services\ContinuityCheckService;
+use MediaManager\Services\DateNormalizer;
+use MediaManager\Services\ProposalPathBuilder;
 use MediaManager\Support\View;
 
 /** @var list<array<string, mixed>> $entries */
 /** @var array<int, string> $showAbbrById */
 $showAbbrById = $showAbbrById ?? [];
+
+/**
+ * First non-empty string among candidates (after trim).
+ *
+ * @param mixed ...$candidates
+ */
+$continuityFirst = static function (mixed ...$candidates): string {
+    foreach ($candidates as $c) {
+        if ($c === null) {
+            continue;
+        }
+        $s = trim((string) $c);
+        if ($s !== '') {
+            return $s;
+        }
+    }
+
+    return '';
+};
+
+/** Normalize date display to YYYYMMDD when possible. */
+$continuityDate = static function (string $raw): string {
+    $raw = trim($raw);
+    if ($raw === '') {
+        return '';
+    }
+    $norm = ProposalPathBuilder::normalizeDateInput($raw);
+
+    return $norm ?? $raw;
+};
+
+/** Normalize time display to HHMM when possible. */
+$continuityTime = static function (string $raw): string {
+    $raw = trim($raw);
+    if ($raw === '') {
+        return '';
+    }
+
+    return DateNormalizer::normalizeTime($raw) ?? $raw;
+};
 ?>
         <?php if ($entries === []): ?>
         <tr>
@@ -55,13 +97,52 @@ $showAbbrById = $showAbbrById ?? [];
                 $seedProposal = $seed['proposal'];
             }
         }
-        // Fallback date/time from seed for rows logged before dedicated columns.
-        $ruleDate = trim((string) ($row['rule_file_date'] ?? ($seedProposal['file_date'] ?? '')));
-        $ruleTime = trim((string) ($row['rule_file_time'] ?? ($seedProposal['file_time'] ?? '')));
-        $finalDate = trim((string) ($row['final_file_date'] ?? $ruleDate));
-        $finalTime = trim((string) ($row['final_file_time'] ?? $ruleTime));
-        $engineDate = trim((string) ($row['engine_file_date'] ?? ''));
-        $engineTime = trim((string) ($row['engine_file_time'] ?? ''));
+
+        $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
+        $engineReply = null;
+        if ($engineRaw !== '') {
+            $decodedReply = json_decode($engineRaw, true);
+            if (is_array($decodedReply)) {
+                $engineReply = $decodedReply;
+                // Repair payloads may append a second JSON block — prefer last object-looking decode.
+                if (str_contains($engineRaw, '--- repair ---')) {
+                    $parts = preg_split('/\n--- repair ---\n/', $engineRaw) ?: [];
+                    $last = trim((string) end($parts));
+                    $lastDecoded = json_decode($last, true);
+                    if (is_array($lastDecoded)) {
+                        $engineReply = $lastDecoded;
+                    }
+                }
+            }
+        }
+
+        $ruleDate = $continuityDate($continuityFirst(
+            $row['rule_file_date'] ?? null,
+            $seedProposal['file_date'] ?? null
+        ));
+        $ruleTime = $continuityTime($continuityFirst(
+            $row['rule_file_time'] ?? null,
+            $seedProposal['file_time'] ?? null
+        ));
+        $engineDate = $continuityDate($continuityFirst(
+            $row['engine_file_date'] ?? null,
+            is_array($engineReply) ? ($engineReply['file_date'] ?? null) : null
+        ));
+        $engineTime = $continuityTime($continuityFirst(
+            $row['engine_file_time'] ?? null,
+            is_array($engineReply) ? ($engineReply['file_time'] ?? null) : null
+        ));
+        $finalDate = $continuityDate($continuityFirst(
+            $row['final_file_date'] ?? null,
+            $ruleDate,
+            $engineDate
+        ));
+        $finalTime = $continuityTime($continuityFirst(
+            $row['final_file_time'] ?? null,
+            $ruleTime,
+            $engineTime
+        ));
+
         $ruleType = trim((string) ($row['rule_media_type_abbr'] ?? ($seedProposal['media_type'] ?? '')));
         $finalType = trim((string) ($row['final_media_type_abbr'] ?? $ruleType));
         $engineType = trim((string) ($row['engine_media_type_abbr'] ?? ''));
@@ -90,9 +171,9 @@ $showAbbrById = $showAbbrById ?? [];
         if ($engineShow === '' && $engineShowId > 0) {
             $engineShow = '#' . $engineShowId;
         }
-        $engineDt = trim($engineDate . ' ' . $engineTime);
-        $ruleDt = trim($ruleDate . ' ' . $ruleTime);
-        $finalDt = trim($finalDate . ' ' . $finalTime);
+        $engineDt = trim($engineDate . ($engineDate !== '' && $engineTime !== '' ? ' ' : '') . $engineTime);
+        $ruleDt = trim($ruleDate . ($ruleDate !== '' && $ruleTime !== '' ? ' ' : '') . $ruleTime);
+        $finalDt = trim($finalDate . ($finalDate !== '' && $finalTime !== '' ? ' ' : '') . $finalTime);
 
         $ruleConf = trim((string) ($row['rule_confidence'] ?? ''));
         $engineConf = trim((string) ($row['engine_confidence'] ?? ''));
@@ -102,23 +183,25 @@ $showAbbrById = $showAbbrById ?? [];
         if (is_array($seed)) {
             $seedPretty = (string) json_encode($seed, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         }
-        $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
         $transportErr = trim((string) ($row['transport_error'] ?? ''));
         $hasArtifacts = $seedPretty !== '' || $engineRaw !== '' || $transportErr !== '';
         $artifactsBundle = '';
         if ($hasArtifacts) {
             $engineReplyOut = $engineRaw !== '' ? $engineRaw : null;
-            if ($engineRaw !== '') {
-                $decodedReply = json_decode($engineRaw, true);
-                if (is_array($decodedReply)) {
-                    $engineReplyOut = $decodedReply;
-                }
+            if (is_array($engineReply)) {
+                $engineReplyOut = $engineReply;
             }
             $artifactsBundle = (string) json_encode([
                 'decision_id'     => $rowId,
                 'outcome'         => $outcome,
                 'http_status'     => $row['http_status'] ?? null,
                 'transport_error' => $transportErr !== '' ? $transportErr : null,
+                'comparison'      => [
+                    'confidence' => ['rules' => $ruleConf, 'model' => $engineConf, 'final' => $finalConf],
+                    'show'       => ['rules' => $ruleShow, 'model' => $engineShow, 'final' => $finalShow],
+                    'media_type' => ['rules' => $ruleType, 'model' => $engineType, 'final' => $finalType],
+                    'datetime'   => ['rules' => $ruleDt, 'model' => $engineDt, 'final' => $finalDt],
+                ],
                 'seed_packet'     => is_array($seed) ? $seed : null,
                 'engine_reply'    => $engineReplyOut,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -215,94 +298,84 @@ $showAbbrById = $showAbbrById ?? [];
           <td class="path-text"><?php echo (int) ($row['duration_ms'] ?? 0); ?></td>
           <td>
             <?php if ($hasArtifacts): ?>
-            <button type="button" class="btn btn-outline-secondary btn-xs"
-                    data-bs-toggle="collapse" data-bs-target="#art-<?php echo $rowId; ?>"
-                    aria-expanded="false">
+            <button type="button"
+                    class="btn btn-outline-secondary btn-xs continuity-artifact-btn"
+                    data-bs-toggle="modal"
+                    data-bs-target="#continuity-artifact-modal"
+                    data-decision-id="<?php echo $rowId; ?>"
+                    data-outcome="<?php echo View::e($outcome); ?>"
+                    data-badge="<?php echo View::e($badge); ?>"
+                    data-bundle-id="art-bundle-<?php echo $rowId; ?>"
+                    data-panel-id="art-panel-<?php echo $rowId; ?>">
               Artifacts
             </button>
+            <textarea id="art-bundle-<?php echo $rowId; ?>" class="d-none" readonly><?php echo View::e($artifactsBundle); ?></textarea>
+            <template id="art-panel-<?php echo $rowId; ?>">
+              <div class="d-flex flex-wrap gap-3 path-text mb-3" style="font-size:0.75rem">
+                <span>Shows: <strong><?php echo (int) $showCount; ?></strong></span>
+                <span>Schedule: <strong><?php echo (int) $scheduleCount; ?></strong></span>
+                <span>Day slots: <strong><?php echo (int) $daySlotCount; ?></strong></span>
+                <span>At air time: <strong><?php echo (int) $atAirCount; ?></strong></span>
+                <span>Examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
+                <?php if ($row['http_status'] !== null): ?>
+                <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
+                <?php endif; ?>
+              </div>
+              <div class="mb-3 p-2 rounded" style="background:var(--hover-bg);font-size:0.78rem">
+                <div class="form-label mb-2">Decision tree</div>
+                <div class="row g-2">
+                  <div class="col-md-3">
+                    <div class="path-text mb-1">Confidence</div>
+                    <?php echo View::continuityTriad($ruleConf, $engineConf, $finalConf); ?>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="path-text mb-1">Show</div>
+                    <?php echo View::continuityTriad($ruleShow, $engineShow, $finalShow); ?>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="path-text mb-1">Type</div>
+                    <?php echo View::continuityTriad($ruleType, $engineType, $finalType); ?>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="path-text mb-1">Date / Time</div>
+                    <?php echo View::continuityTriad($ruleDt, $engineDt, $finalDt); ?>
+                  </div>
+                </div>
+                <?php if (trim((string) ($row['engine_reason'] ?? '')) !== ''): ?>
+                <div class="mt-2 path-text">
+                  Model reason: <?php echo View::e((string) $row['engine_reason']); ?>
+                </div>
+                <?php endif; ?>
+              </div>
+              <?php if ($transportErr !== ''): ?>
+              <div class="mb-2">
+                <div class="form-label mb-1">Transport</div>
+                <pre class="mb-0 p-2 rounded" style="font-size:0.72rem;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($transportErr); ?></pre>
+              </div>
+              <?php endif; ?>
+              <div class="row g-3">
+                <div class="col-lg-7">
+                  <div class="form-label mb-1">Seed packet (what continuity saw)</div>
+                  <?php if ($seedPretty !== ''): ?>
+                  <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:420px;overflow:auto;white-space:pre;background:rgba(0,0,0,0.25)"><?php echo View::e($seedPretty); ?></pre>
+                  <?php else: ?>
+                  <div class="path-text">No seed packet stored for this row (logged before artifacts).</div>
+                  <?php endif; ?>
+                </div>
+                <div class="col-lg-5">
+                  <div class="form-label mb-1">Engine reply (raw)</div>
+                  <?php if ($engineRaw !== ''): ?>
+                  <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:420px;overflow:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($engineRaw); ?></pre>
+                  <?php else: ?>
+                  <div class="path-text">No raw reply captured.</div>
+                  <?php endif; ?>
+                </div>
+              </div>
+            </template>
             <?php else: ?>
             <span class="path-text">—</span>
             <?php endif; ?>
           </td>
         </tr>
-        <?php if ($hasArtifacts): ?>
-        <tr class="collapse-row">
-          <td colspan="9" class="p-0 border-0">
-            <div class="collapse" id="art-<?php echo $rowId; ?>">
-              <div class="p-3" style="background:var(--hover-bg);border-top:1px solid var(--bs-border-color)">
-                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                  <div class="d-flex flex-wrap gap-3 path-text" style="font-size:0.75rem">
-                    <span>Shows: <strong><?php echo (int) $showCount; ?></strong></span>
-                    <span>Schedule (full): <strong><?php echo (int) $scheduleCount; ?></strong></span>
-                    <span>Day slots: <strong><?php echo (int) $daySlotCount; ?></strong></span>
-                    <span>At air time: <strong><?php echo (int) $atAirCount; ?></strong></span>
-                    <span>Examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
-                    <?php if ($row['http_status'] !== null): ?>
-                    <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
-                    <?php endif; ?>
-                  </div>
-                  <?php if ($artifactsBundle !== ''): ?>
-                  <button type="button" class="btn btn-outline-secondary btn-xs continuity-copy-btn"
-                          data-copy-target="art-bundle-<?php echo $rowId; ?>">
-                    Copy JSON
-                  </button>
-                  <textarea id="art-bundle-<?php echo $rowId; ?>" class="d-none" readonly><?php echo View::e($artifactsBundle); ?></textarea>
-                  <?php endif; ?>
-                </div>
-                <div class="mb-3 p-2 rounded" style="background:rgba(0,0,0,0.18);font-size:0.78rem">
-                  <div class="form-label mb-2">Parsed comparison</div>
-                  <div class="row g-2">
-                    <div class="col-md-3">
-                      <div class="path-text mb-1">Confidence</div>
-                      <?php echo View::continuityTriad($ruleConf, $engineConf, $finalConf); ?>
-                    </div>
-                    <div class="col-md-3">
-                      <div class="path-text mb-1">Show</div>
-                      <?php echo View::continuityTriad($ruleShow, $engineShow, $finalShow); ?>
-                    </div>
-                    <div class="col-md-3">
-                      <div class="path-text mb-1">Type</div>
-                      <?php echo View::continuityTriad($ruleType, $engineType, $finalType); ?>
-                    </div>
-                    <div class="col-md-3">
-                      <div class="path-text mb-1">Date / Time</div>
-                      <?php echo View::continuityTriad($ruleDt, $engineDt, $finalDt); ?>
-                    </div>
-                  </div>
-                  <?php if (trim((string) ($row['engine_reason'] ?? '')) !== ''): ?>
-                  <div class="mt-2 path-text">
-                    Model reason: <?php echo View::e((string) $row['engine_reason']); ?>
-                  </div>
-                  <?php endif; ?>
-                </div>
-                <?php if ($transportErr !== ''): ?>
-                <div class="mb-2">
-                  <div class="form-label mb-1">Transport</div>
-                  <pre class="mb-0 p-2 rounded" style="font-size:0.72rem;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($transportErr); ?></pre>
-                </div>
-                <?php endif; ?>
-                <div class="row g-3">
-                  <div class="col-lg-7">
-                    <div class="form-label mb-1">Seed packet (what continuity saw)</div>
-                    <?php if ($seedPretty !== ''): ?>
-                    <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:360px;overflow:auto;white-space:pre;background:rgba(0,0,0,0.25)"><?php echo View::e($seedPretty); ?></pre>
-                    <?php else: ?>
-                    <div class="path-text">No seed packet stored for this row (logged before artifacts).</div>
-                    <?php endif; ?>
-                  </div>
-                  <div class="col-lg-5">
-                    <div class="form-label mb-1">Engine reply (raw)</div>
-                    <?php if ($engineRaw !== ''): ?>
-                    <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:360px;overflow:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($engineRaw); ?></pre>
-                    <?php else: ?>
-                    <div class="path-text">No raw reply captured.</div>
-                    <?php endif; ?>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-        <?php endif; ?>
         <?php endforeach; ?>
         <?php endif; ?>

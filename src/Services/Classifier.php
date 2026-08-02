@@ -76,8 +76,8 @@ final class Classifier
         // ── Media type ───────────────────────────────────────
         $typeMatch = $this->matchMediaType($segments, $filename, $signals);
 
-        // ── Date / time (FFprobe-preferred, LOW default trust) ─
-        $datetime = FileDateTimeResolver::resolve($filename, $ffprobe);
+        // ── Date / time (filename/path + FFprobe; LOW default trust) ─
+        $datetime = FileDateTimeResolver::resolve($filename, $ffprobe, $segments);
         $date     = $datetime['date'];
         $time     = $datetime['time'];
         foreach ($datetime['signals'] as $dtSignal) {
@@ -85,10 +85,7 @@ final class Classifier
         }
 
         if ($date === null) {
-            $date = DateNormalizer::mergePathDate(null, array_merge($segments, [$filename]));
-            if ($date !== null) {
-                $signals[] = 'path:YYYY/MM (day defaulted to 01)';
-            }
+            $date = DateNormalizer::mergePathDate(null, $segments);
         }
 
         // ── Schedule show lookup when path/filename did not match ─

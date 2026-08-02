@@ -311,6 +311,26 @@ $queryBase = array_filter([
 </nav>
 <?php endif; ?>
 
+<div class="modal fade" id="continuity-artifact-modal" tabindex="-1"
+     aria-labelledby="continuity-artifact-modal-label" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h2 class="modal-title h6 mb-0" id="continuity-artifact-modal-label">Decision</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="continuity-artifact-modal-body" style="font-size:0.82rem"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm continuity-copy-btn"
+                id="continuity-artifact-copy" data-copy-target="">
+          Copy JSON
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="clear-continuity-log-modal" tabindex="-1" aria-labelledby="clear-continuity-log-label" aria-hidden="true">
   <div class="modal-dialog">
     <form method="post" action="/continuity-lab/clear" class="modal-content">
@@ -339,6 +359,39 @@ $queryBase = array_filter([
 
 <script>
 (function () {
+  var artifactModal = document.getElementById('continuity-artifact-modal');
+  if (artifactModal) {
+    artifactModal.addEventListener('show.bs.modal', function (ev) {
+      var btn = ev.relatedTarget;
+      if (!btn || !btn.classList.contains('continuity-artifact-btn')) return;
+      var id = btn.getAttribute('data-decision-id') || '';
+      var outcome = btn.getAttribute('data-outcome') || '';
+      var badge = btn.getAttribute('data-badge') || 'bg-secondary';
+      var panelId = btn.getAttribute('data-panel-id') || '';
+      var bundleId = btn.getAttribute('data-bundle-id') || '';
+      var title = document.getElementById('continuity-artifact-modal-label');
+      var body = document.getElementById('continuity-artifact-modal-body');
+      var copyBtn = document.getElementById('continuity-artifact-copy');
+      if (title) {
+        title.innerHTML = 'Decision #' + id
+          + (outcome ? ' <span class="badge ' + badge + ' ms-1">' + outcome + '</span>' : '');
+      }
+      if (body) {
+        body.innerHTML = '';
+        var tpl = panelId ? document.getElementById(panelId) : null;
+        if (tpl && 'content' in tpl) {
+          body.appendChild(tpl.content.cloneNode(true));
+        } else {
+          body.textContent = 'Artifacts unavailable for this row.';
+        }
+      }
+      if (copyBtn) {
+        copyBtn.setAttribute('data-copy-target', bundleId);
+        copyBtn.textContent = copyBtn.getAttribute('data-label') || 'Copy JSON';
+      }
+    });
+  }
+
   document.addEventListener('click', function (ev) {
     var btn = ev.target && ev.target.closest ? ev.target.closest('.continuity-copy-btn') : null;
     if (!btn) return;
@@ -388,7 +441,6 @@ $queryBase = array_filter([
 
   function uiBusy() {
     return !!(document.querySelector('.modal.show')
-      || document.querySelector('.collapse.show')
       || (document.activeElement && (
         document.activeElement.tagName === 'INPUT'
         || document.activeElement.tagName === 'SELECT'
