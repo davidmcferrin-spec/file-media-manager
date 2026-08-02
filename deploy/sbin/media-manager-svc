@@ -88,7 +88,10 @@ case "${ACTION}" in
 
     if [[ -n "${CURSOR}" ]]; then
       # Journal cursors look like: s=…;i=…;b=…;m=…;t=…;x=…
-      if ! [[ "${CURSOR}" =~ ^[A-Za-z0-9+/=_;.-]+$ ]]; then
+      # Keep the regex in a variable — an unquoted ';' inside [[ =~ … ]] is a
+      # syntax error (bash treats it as ending the conditional).
+      cursor_re='^[A-Za-z0-9+/=_;.-]+$'
+      if ! [[ "${CURSOR}" =~ ${cursor_re} ]]; then
         echo "Invalid journal cursor" >&2
         exit 2
       fi

@@ -14,6 +14,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.21.1] — 2026-08-01
+
+### Fixed
+
+- `media-manager-svc journal` cursor validation: bash syntax error from `;` inside `[[ =~ … ]]` (broke Services UI live journal)
+
 ## [0.21.0] — 2026-08-01
 
 ### Changed
