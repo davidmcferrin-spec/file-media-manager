@@ -14,6 +14,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.21.4] — 2026-08-01
+
+### Changed
+
+- Continuity Lab **Filenames** column shows Original / Rules / Model / Final (model name logged as `engine_proposed_filename`; older rows reconstructed when possible)
+
+## [0.21.3] — 2026-08-01
+
+### Changed
+
+- Continuity Lab **defaults to live update**; use Pause live (`?live=0`) to stop polling
+
 ## [0.21.2] — 2026-08-01
 
 ### Fixed

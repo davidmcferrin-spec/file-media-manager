@@ -302,6 +302,39 @@ final class ContinuityCheckService
     }
 
     /**
+     * Build a policy-shaped proposed filename from classification parts.
+     * Used for engine logging and Continuity Lab display reconstruction.
+     */
+    public static function buildProposedFilename(
+        string $originalFilename,
+        ?string $showAbbr,
+        ?string $fileDate,
+        ?string $fileTime,
+        ?string $mediaTypeAbbr,
+        ?string $folderName = null,
+        ?string $guestName = null
+    ): ?string {
+        $showAbbr = $showAbbr !== null ? trim($showAbbr) : '';
+        $fileDate = $fileDate !== null ? trim($fileDate) : '';
+        $mediaTypeAbbr = $mediaTypeAbbr !== null ? trim($mediaTypeAbbr) : '';
+        if ($showAbbr === '' || $fileDate === '' || $mediaTypeAbbr === '') {
+            return null;
+        }
+        $folder = $folderName !== null && trim($folderName) !== '' ? trim($folderName) : $mediaTypeAbbr;
+        $built = ProposalPathBuilder::build(
+            $showAbbr,
+            $fileDate,
+            $fileTime,
+            $mediaTypeAbbr,
+            $folder,
+            $originalFilename,
+            $guestName
+        );
+
+        return $built['proposed_filename'] ?? null;
+    }
+
+    /**
      * Merge engine date/time with rule values. Fills gaps; keeps rule when both disagree.
      *
      * @param array<string, mixed> $verdict
@@ -736,26 +769,83 @@ PROMPT;
             default                => 'review',
         };
 
+        $engineShowId = isset($verdict['show_id']) && is_numeric($verdict['show_id'])
+            ? (int) $verdict['show_id'] : null;
+        $engineShowAbbr = null;
+        if ($engineShowId !== null && $engineShowId > 0) {
+            foreach ($this->catalog() as $showRow) {
+                if ((int) ($showRow['id'] ?? 0) === $engineShowId) {
+                    $engineShowAbbr = (string) ($showRow['abbreviation'] ?? '');
+                    break;
+                }
+            }
+            if ($engineShowAbbr === '') {
+                $engineShowAbbr = null;
+            }
+        }
+
+        $agreeYes = $agree === true;
+        $modelShow = $engineShowAbbr ?? ($agreeYes ? $result->showAbbreviation : null);
+        $modelDate = $dt['engine_date'] ?? ($agreeYes ? $result->fileDate : null);
+        $modelTime = $dt['engine_time'] ?? ($agreeYes ? $result->fileTime : null);
+        $modelType = $mt['engine_abbr'] ?? ($agreeYes ? $result->mediaTypeAbbreviation : null);
+        $modelFolder = $modelType;
+        if ($mt['engine_id'] !== null) {
+            [$typesById] = $this->mediaTypeIndexes();
+            $typeRow = $typesById[(int) $mt['engine_id']] ?? null;
+            if (is_array($typeRow) && trim((string) ($typeRow['folder_name'] ?? '')) !== '') {
+                $modelFolder = (string) $typeRow['folder_name'];
+            }
+        } elseif ($agreeYes && $result->mediaTypeAbbreviation !== null) {
+            [$typesById] = $this->mediaTypeIndexes();
+            if ($result->mediaTypeId !== null && isset($typesById[$result->mediaTypeId])) {
+                $modelFolder = (string) ($typesById[$result->mediaTypeId]['folder_name']
+                    ?? $result->mediaTypeAbbreviation);
+            }
+        }
+
+        $engineProposed = null;
+        $engineSentParts = $engineShowAbbr !== null
+            || $dt['engine_date'] !== null
+            || $dt['engine_time'] !== null
+            || $mt['engine_abbr'] !== null;
+        if ($agreeYes && !$engineSentParts) {
+            $engineProposed = $result->proposedFilename;
+        } else {
+            $engineProposed = self::buildProposedFilename(
+                $originalFilename,
+                $modelShow,
+                $modelDate,
+                $modelTime,
+                $modelType,
+                $modelFolder,
+                ProposalPathBuilder::guestFromProposed($result->proposedFilename)
+            );
+            if ($engineProposed === null && $agreeYes) {
+                $engineProposed = $result->proposedFilename;
+            }
+        }
+
         $this->safeLog($baseLog + [
-            'engine_agree'            => $agree,
-            'engine_confidence'       => isset($verdict['confidence']) ? strtoupper((string) $verdict['confidence']) : null,
-            'engine_show_id'          => isset($verdict['show_id']) && is_numeric($verdict['show_id'])
-                ? (int) $verdict['show_id'] : null,
-            'engine_file_date'        => $dt['engine_date'],
-            'engine_file_time'        => $dt['engine_time'],
-            'engine_media_type_id'    => $mt['engine_id'],
-            'engine_media_type_abbr'  => $mt['engine_abbr'],
-            'engine_reason'           => trim((string) ($verdict['reason'] ?? '')),
-            'final_confidence'        => $adjusted->confidence,
-            'final_show_id'           => $adjusted->showId,
-            'final_show_abbr'         => $adjusted->showAbbreviation,
-            'final_proposed_filename' => $adjusted->proposedFilename,
-            'final_file_date'         => $adjusted->fileDate,
-            'final_file_time'         => $adjusted->fileTime,
-            'final_media_type_id'     => $adjusted->mediaTypeId,
-            'final_media_type_abbr'   => $adjusted->mediaTypeAbbreviation,
-            'signal'                  => $merged['signal'],
-            'outcome'                 => $outcome,
+            'engine_agree'              => $agree,
+            'engine_confidence'         => isset($verdict['confidence']) ? strtoupper((string) $verdict['confidence']) : null,
+            'engine_show_id'            => $engineShowId,
+            'engine_file_date'          => $dt['engine_date'],
+            'engine_file_time'          => $dt['engine_time'],
+            'engine_media_type_id'      => $mt['engine_id'],
+            'engine_media_type_abbr'    => $mt['engine_abbr'],
+            'engine_proposed_filename'  => $engineProposed,
+            'engine_reason'             => trim((string) ($verdict['reason'] ?? '')),
+            'final_confidence'          => $adjusted->confidence,
+            'final_show_id'             => $adjusted->showId,
+            'final_show_abbr'           => $adjusted->showAbbreviation,
+            'final_proposed_filename'   => $adjusted->proposedFilename,
+            'final_file_date'           => $adjusted->fileDate,
+            'final_file_time'           => $adjusted->fileTime,
+            'final_media_type_id'       => $adjusted->mediaTypeId,
+            'final_media_type_abbr'     => $adjusted->mediaTypeAbbreviation,
+            'signal'                    => $merged['signal'],
+            'outcome'                   => $outcome,
         ]);
 
         return $adjusted;

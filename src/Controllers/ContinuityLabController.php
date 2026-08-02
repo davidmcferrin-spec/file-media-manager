@@ -195,7 +195,9 @@ $filters = [
 $page    = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = 50;
 $offset  = ($page - 1) * $perPage;
-$live    = isset($_GET['live']);
+// Live JSON polling is on by default; pause with ?live=0
+$liveParam = strtolower(trim((string) ($_GET['live'] ?? '1')));
+$live      = !in_array($liveParam, ['0', 'false', 'off', 'pause'], true);
 
 $continuity = ContinuityCheckService::create();
 $status     = $continuity->status();

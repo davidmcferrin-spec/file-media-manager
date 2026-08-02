@@ -20,7 +20,8 @@ use MediaManager\Support\View;
 $queryBase = array_filter([
     'outcome' => $filters['outcome'] ?? '',
     'q'       => $filters['q'] ?? '',
-    'live'    => $live ? '1' : '',
+    // Default is live; only persist live=0 when paused so Pause survives filter submits.
+    'live'    => $live ? '' : '0',
 ], static fn ($v) => $v !== '' && $v !== null);
 ?>
 
@@ -48,11 +49,11 @@ $queryBase = array_filter([
       Clear log
     </button>
     <?php if ($live): ?>
-    <a href="/continuity-lab?<?php echo View::e(http_build_query(array_diff_key($queryBase, ['live' => 1]))); ?>"
+    <a href="/continuity-lab?<?php echo View::e(http_build_query($queryBase + ['live' => '0'])); ?>"
        class="btn btn-outline-secondary btn-sm">Pause live</a>
     <?php else: ?>
-    <a href="/continuity-lab?<?php echo View::e(http_build_query($queryBase + ['live' => '1'])); ?>"
-       class="btn btn-outline-primary btn-sm">Live refresh</a>
+    <a href="/continuity-lab?<?php echo View::e(http_build_query(array_diff_key($queryBase, ['live' => '0']))); ?>"
+       class="btn btn-outline-primary btn-sm">Resume live</a>
     <?php endif; ?>
   </div>
 </div>
@@ -224,7 +225,7 @@ $queryBase = array_filter([
 </div>
 
 <form method="get" action="/continuity-lab" class="row g-2 align-items-end mb-3">
-  <?php if ($live): ?><input type="hidden" name="live" value="1"><?php endif; ?>
+  <?php if (!$live): ?><input type="hidden" name="live" value="0"><?php endif; ?>
   <div class="col-md-3">
     <label class="form-label">Outcome</label>
     <select name="outcome" class="form-select form-select-sm">
@@ -278,7 +279,7 @@ $queryBase = array_filter([
             <div class="path-text" style="font-size:0.65rem;font-weight:400">Rules / Model / Final</div>
           </th>
           <th>Reason / signals</th>
-          <th>File</th>
+          <th>Filenames</th>
           <th>ms</th>
           <th></th>
         </tr>

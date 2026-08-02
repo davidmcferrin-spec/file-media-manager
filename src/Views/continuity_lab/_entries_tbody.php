@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use MediaManager\Services\ContinuityCheckService;
 use MediaManager\Support\View;
 
 /** @var list<array<string, mixed>> $entries */
@@ -77,12 +78,13 @@ $showAbbrById = $showAbbrById ?? [];
         if ($engineShow === '' && $engineShowId > 0) {
             $engineShow = trim((string) ($showAbbrById[$engineShowId] ?? ''));
         }
-        if ($engineShow === '' && $engineShowId > 0) {
-            $engineShow = '#' . $engineShowId;
-        }
         // Model agreed with no alternate show_id → same as rules.
         if ($engineShow === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleShow !== '') {
             $engineShow = $ruleShow;
+        }
+        $engineShowForName = $engineShow;
+        if ($engineShow === '' && $engineShowId > 0) {
+            $engineShow = '#' . $engineShowId;
         }
         // Same fill for type/date when model agreed but left fields null.
         if ($engineType === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleType !== '') {
@@ -118,6 +120,33 @@ $showAbbrById = $showAbbrById ?? [];
         $catalogHref = $fileId > 0
             ? '/queue?status=ALL&file_id=' . $fileId
             : '/queue?status=ALL&q=' . rawurlencode((string) ($row['original_filename'] ?? ''));
+
+        $originalName = trim((string) ($row['original_filename'] ?? ''));
+        if ($originalName === '') {
+            $originalName = trim((string) ($row['original_path'] ?? ''));
+        }
+        $ruleName = trim((string) ($row['rule_proposed_filename'] ?? ($seedProposal['proposed_filename'] ?? '')));
+        $finalName = trim((string) ($row['final_proposed_filename'] ?? ''));
+        $modelName = trim((string) ($row['engine_proposed_filename'] ?? ''));
+        $agreed = $row['engine_agree'] !== null && !empty($row['engine_agree']);
+        if ($modelName === '') {
+            $modelDateForName = $engineDate !== '' ? $engineDate : ($agreed ? $ruleDate : '');
+            $modelTimeForName = $engineTime !== '' ? $engineTime : ($agreed ? $ruleTime : '');
+            $built = ContinuityCheckService::buildProposedFilename(
+                $originalName !== '' ? $originalName : 'file.bin',
+                $engineShowForName !== '' ? $engineShowForName : null,
+                $modelDateForName !== '' ? $modelDateForName : null,
+                $modelTimeForName !== '' ? $modelTimeForName : null,
+                $engineType !== '' ? $engineType : null
+            );
+            $modelName = $built ?? '';
+            if ($modelName === '' && $agreed && $ruleName !== '') {
+                $modelName = $ruleName;
+            }
+        }
+        if ($finalName === '' && $ruleName !== '') {
+            $finalName = $ruleName;
+        }
         ?>
         <tr>
           <td class="path-text text-nowrap">
@@ -157,18 +186,19 @@ $showAbbrById = $showAbbrById ?? [];
             <div class="path-text" style="font-size:0.7rem"><?php echo View::e((string) $row['signal']); ?></div>
             <?php endif; ?>
           </td>
-          <td class="path-text" style="max-width:260px;word-break:break-all">
-            <a href="<?php echo View::e($catalogHref); ?>">
-              <?php echo View::e((string) ($row['original_filename'] ?: $row['original_path'])); ?>
-            </a>
+          <td style="max-width:320px;word-break:break-all">
+            <div class="continuity-triad" style="font-size:0.72rem;line-height:1.35">
+              <div class="d-flex gap-1">
+                <span class="path-text" style="min-width:2.8rem">Orig</span>
+                <a href="<?php echo View::e($catalogHref); ?>">
+                  <code><?php echo View::e($originalName !== '' ? $originalName : '—'); ?></code>
+                </a>
+              </div>
+            </div>
+            <?php echo View::continuityTriad($ruleName, $modelName, $finalName); ?>
             <?php if ($fileId > 0): ?>
             <div class="mt-1" style="font-size:0.68rem">
               <a href="<?php echo View::e($catalogHref); ?>">Catalog #<?php echo $fileId; ?></a>
-            </div>
-            <?php endif; ?>
-            <?php if (!empty($row['final_proposed_filename']) || !empty($row['rule_proposed_filename'])): ?>
-            <div class="mt-1">
-              → <?php echo View::e((string) ($row['final_proposed_filename'] ?? $row['rule_proposed_filename'])); ?>
             </div>
             <?php endif; ?>
           </td>
