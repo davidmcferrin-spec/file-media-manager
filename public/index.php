@@ -56,8 +56,9 @@ match (true) {
     $uri === '/dashboard/library'
         => require dirname(__DIR__) . '/src/Controllers/DashboardLibraryController.php',
 
-    // Queue
+    // Queue / Catalog
     $uri === '/queue'
+    || $uri === '/queue/list-status'
         => require dirname(__DIR__) . '/src/Controllers/QueueController.php',
 
     // Thumbnail / preview (AJAX)
@@ -123,7 +124,9 @@ match (true) {
         => require dirname(__DIR__) . '/src/Controllers/ShowAuditController.php',
 
     // Execute / Rollback (admin only)
-    $uri === '/execute' || $uri === '/rollback'
+    $uri === '/execute'
+    || $uri === '/execute/list-status'
+    || $uri === '/rollback'
         => require dirname(__DIR__) . '/src/Controllers/ExecuteController.php',
 
     // Split workbench media (frame scrub / play segments) — before general split routes
@@ -145,6 +148,13 @@ match (true) {
     // Audit log (admin only)
     $uri === '/audit'
         => require dirname(__DIR__) . '/src/Controllers/AuditController.php',
+
+    // Services / systemd (admin only)
+    $uri === '/services'
+    || $uri === '/services/status'
+    || $uri === '/services/logs'
+    || $uri === '/services/action'
+        => require dirname(__DIR__) . '/src/Controllers/ServicesController.php',
 
     // Continuity lab (admin only, unlinked)
     $uri === '/continuity-lab'

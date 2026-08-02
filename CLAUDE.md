@@ -26,7 +26,7 @@ src/Services/           Scan, Classifier, Glue, Captions, Executor, Rollback,
                         FFprobe, Thumbnail, Preview, Continuity, Split media, …
 src/Views/              PHP templates only — no logic beyond display
 src/Support/            View helpers, AppVersion, WorkerMode
-public/js/live-poll.js  Shared JSON status poller (scan / captions / Continuity Lab)
+public/js/live-poll.js  Shared JSON status poller (job detail + queue list pages)
 VERSION                 App semver (displayed in footer)
 CHANGELOG.md            Release notes (shown on /versions)
 scripts/migrate.php     Versioned PostgreSQL migration runner
@@ -35,6 +35,8 @@ scripts/caption_extract_worker.php   Long-running CC extract daemon
 scripts/scan.php                     One-shot scan (CLI / legacy spawn)
 scripts/caption_extract.php          One-shot caption job (CLI / legacy spawn)
 deploy/systemd/         Unit files (installed by setup.sh)
+deploy/sbin/            media-manager-svc allowlisted systemctl/journalctl helper
+deploy/sudoers/         www-data NOPASSWD drop-in for Services UI
 sql/migrations/         Versioned PostgreSQL migrations (001_, 002_, etc.)
 storage/media/          Derived assets sharded by files.public_id (ULID): aa/bb/cc/{ulid}/
 storage/thumbnails/     Legacy flat thumbs (read fallback; new writes use storage/media)
@@ -54,7 +56,7 @@ storage/logs/           Application + worker logs
 - Date: YYYYMMDD, Time: HHMM 24hr Eastern
 
 ## Roles
-- admin — full access: scan, execute, rollback, audit, user mgmt, dictionary,
+- admin — full access: scan, execute, rollback, audit, services, user mgmt, dictionary,
   captions jobs, glue execute, split
 - editor — queue review only: approve, reject, edit proposed name/path, flag;
   glue mark/clear
@@ -88,6 +90,10 @@ Per caption job: `storage/logs/caption-extract-{id}.log`.
 Per split-audio job: `storage/logs/split-audio-{id}.log`.
 Env: `WORKER_MODE`, `WORKER_POLL_SECONDS`, `CAPTION_EXTRACT_TIMEOUT_SECONDS`.
 
+Admin → **Services** (`/services`): live unit status + journal tail + start/stop/restart/enable/disable
+for app workers (Apache/PostgreSQL: status + restart/reload only). Privileged ops go through
+`/usr/local/sbin/media-manager-svc` + `/etc/sudoers.d/media-manager` (installed by `setup.sh`).
+
 ## Code Style
 - strict_types=1 on every PHP file
 - snake_case for DB columns and PHP variables
@@ -110,10 +116,12 @@ Env: `WORKER_MODE`, `WORKER_POLL_SECONDS`, `CAPTION_EXTRACT_TIMEOUT_SECONDS`.
 
 ## User workflow (IA)
 - Setup: Shows → Timeline (admin)
+- Queues dropdown: Catalog, Glue; admin also Scan, Captions, Split, Execute
 - Ingest: Scan (worker processes queue)
 - Review loop: Catalog ↔ Gaps; Captions / Glue / Split as needed
 - Commit: Execute
-- Support: Settings; Admin menu: Audit / Rollback
+- Support: Settings; Admin menu: Services / Audit / Rollback
+- Queue list pages poll JSON (`/*/list-status`) — never full-page refresh while checkboxes are selected
 - Split flag / strong durations: Settings → Processing (`system_settings`; default 2h / 3h);
   `.env` is fallback only
 

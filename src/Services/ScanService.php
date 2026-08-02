@@ -14,6 +14,9 @@ final class ScanService
 {
     private bool $rescanMode = false;
 
+    /** @var list<int> */
+    private array $pendingSplitPrepIds = [];
+
     /** @param ?\Closure(string, array<string, mixed>): void $onProgress */
     public function __construct(
         private readonly ScanJobRepository $scanJobs = new ScanJobRepository(),
@@ -95,13 +98,17 @@ final class ScanService
         $mountPath = rtrim((string) $job['mount_path'], '/');
         $subpath   = trim((string) ($job['subpath'] ?? ''), '/');
         $scanRoot  = $subpath !== '' ? $mountPath . '/' . $subpath : $mountPath;
-        $extract   = (bool) ($job['extract_metadata'] ?? true);
+        // FFprobe + caption probe required for every file.
+        $extract   = true;
         $devList   = $job['dev_file_list'] ?? null;
         $ignore    = ScanIgnore::fromRepository();
+        $this->pendingSplitPrepIds = [];
 
-        if ($extract && !$this->ffprobe->isAvailable()) {
-            error_log('[scan] Job ' . $jobId . ': FFprobe unavailable; skipping metadata extraction.');
-            $this->progress('warning', ['message' => 'FFprobe unavailable; skipping metadata extraction.']);
+        if (!$this->ffprobe->isAvailable()) {
+            error_log('[scan] Job ' . $jobId . ': FFprobe unavailable — metadata/caption probe will fail until FFprobe is installed.');
+            $this->progress('warning', [
+                'message' => 'FFprobe unavailable — files will be ingested without metadata until probed.',
+            ]);
             $extract = false;
         }
 
@@ -269,6 +276,31 @@ final class ScanService
             $this->progress('glue_detect', ['job_id' => $jobId]);
             $glueUpdated = (new GlueGroupService($this->files))->applyForScanJob($jobId);
 
+            $splitPrep = [
+                'split_queued'   => 0,
+                'caption_job_id' => null,
+                'caption_files'  => 0,
+                'audio_jobs'     => 0,
+            ];
+            if ($this->pendingSplitPrepIds !== []) {
+                $this->progress('split_prep', [
+                    'job_id' => $jobId,
+                    'count'  => count($this->pendingSplitPrepIds),
+                ]);
+                try {
+                    $splitPrep = (new SplitPrepService(
+                        $this->files,
+                        $this->splitQueue,
+                    ))->onMarkedForSplitMany(
+                        $this->pendingSplitPrepIds,
+                        (int) $job['created_by'],
+                        true
+                    );
+                } catch (\Throwable $e) {
+                    error_log('[scan] Split prep after job ' . $jobId . ': ' . $e->getMessage());
+                }
+            }
+
             $this->scanJobs->markCompleted($jobId);
 
             $this->audit->record(
@@ -287,6 +319,7 @@ final class ScanService
                     'duplicates'   => $duplicates,
                     'skipped'      => $skipped,
                     'glue_updated' => $glueUpdated,
+                    'split_prep'   => $splitPrep,
                     'subpath'      => $subpath,
                     'rescan'       => $this->rescanMode,
                 ]
@@ -300,6 +333,7 @@ final class ScanService
                 'duplicates'   => $duplicates,
                 'skipped'      => $skipped,
                 'glue_updated' => $glueUpdated,
+                'split_prep'   => $splitPrep,
             ]);
 
             error_log(sprintf(
@@ -708,8 +742,22 @@ final class ScanService
             $filesize = $prepared['filesize'] ?? null;
             $probe = $prepared['probe'] ?? null;
 
-            $srtPath = FFprobeService::adjacentCaptionSidecar($path);
-            $hasCaptions = !empty($meta['has_captions']) || $srtPath !== null;
+            $sidecar = FFprobeService::adjacentCaptionSidecar($path);
+            $srtPath = null;
+            $sidecarCaptions = false;
+            if ($sidecar !== null && str_ends_with(strtolower($sidecar), '.srt')) {
+                if (SrtCaptionParser::parseFile($sidecar) === []) {
+                    // Empty SRT = no caption service (policy A).
+                    $sidecarCaptions = false;
+                } else {
+                    $srtPath = $sidecar;
+                    $sidecarCaptions = true;
+                }
+            } elseif ($sidecar !== null) {
+                // Non-SRT sidecar (e.g. VTT): stream present, no srt_path yet.
+                $sidecarCaptions = true;
+            }
+            $hasCaptions = !empty($meta['has_captions']) || $sidecarCaptions;
             $captionStreamIndex = isset($meta['caption_stream_index'])
                 ? (int) $meta['caption_stream_index']
                 : null;
@@ -746,9 +794,13 @@ final class ScanService
                 'has_captions'       => $hasCaptions,
                 'caption_stream_index' => $captionStreamIndex,
                 'srt_path'           => $srtPath,
-                'captions_probed'    => $probe !== null || $srtPath !== null,
+                'captions_probed'    => $probe !== null || $sidecarCaptions,
             ]);
             $this->continuity->attachFileId($path, $fileId);
+
+            if ($result->needsSplit) {
+                $this->pendingSplitPrepIds[] = $fileId;
+            }
 
             return 'queued';
         }
@@ -775,6 +827,8 @@ final class ScanService
 
             if ($wasSplit && !$result->needsSplit) {
                 $this->splitQueue->deleteActiveForFile($id);
+            } elseif (!$wasSplit && $result->needsSplit) {
+                $this->pendingSplitPrepIds[] = $id;
             }
 
             return 'reclassified';

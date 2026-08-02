@@ -204,6 +204,65 @@ if (preg_match('#^/glue/(\d+)$#', $uri, $m)) {
     exit;
 }
 
+// GET /glue/list-status — JSON for glue index live poll
+if ($method === 'GET' && $uri === '/glue/list-status') {
+    $statusFilter = trim((string) ($_GET['status'] ?? ''));
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $perPage = 50;
+    $offset = ($page - 1) * $perPage;
+    $jobItems = $jobs->all($statusFilter !== '' ? $statusFilter : null, $perPage, $offset);
+    $jobTotal = $jobs->count($statusFilter !== '' ? $statusFilter : null);
+    $statusCounts = $jobs->statusCounts();
+    $activeByGroup = $jobs->activeJobsByGroupKey();
+    $jobsOut = [];
+    $poll = false;
+    foreach ($jobItems as $job) {
+        $st = (string) ($job['status'] ?? '');
+        if (in_array($st, ['PENDING', 'RUNNING'], true)) {
+            $poll = true;
+        }
+        $badge = match ($st) {
+            'READY_FOR_QC' => 'bg-warning text-dark',
+            'APPROVED'     => 'bg-info text-dark',
+            'DONE'         => 'bg-success',
+            'FAILED'       => 'bg-danger',
+            'RUNNING'      => 'bg-primary',
+            'CANCELLED'    => 'bg-secondary',
+            default        => 'bg-secondary',
+        };
+        $jobsOut[] = [
+            'id'             => (int) ($job['id'] ?? 0),
+            'status'         => $st,
+            'status_badge'   => $badge,
+            'error_message'  => $job['error_message'] ?? null,
+            'output_filename'=> $job['output_filename'] ?? null,
+            'glue_group_key' => (string) ($job['glue_group_key'] ?? ''),
+        ];
+    }
+    $activeOut = [];
+    foreach ($activeByGroup as $key => $aj) {
+        $activeOut[(string) $key] = [
+            'id'     => (int) ($aj['id'] ?? 0),
+            'status' => (string) ($aj['status'] ?? ''),
+        ];
+        if (in_array((string) ($aj['status'] ?? ''), ['PENDING', 'RUNNING'], true)) {
+            $poll = true;
+        }
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'poll'            => $poll,
+        'status_counts'   => $statusCounts,
+        'job_total'       => $jobTotal,
+        'ids'             => array_column($jobsOut, 'id'),
+        'jobs'            => $jobsOut,
+        'active_by_group' => $activeOut,
+    ], JSON_THROW_ON_ERROR);
+    exit;
+}
+
 // GET /glue
 $statusFilter = trim((string) ($_GET['status'] ?? ''));
 $page = max(1, (int) ($_GET['page'] ?? 1));

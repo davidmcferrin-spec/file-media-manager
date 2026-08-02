@@ -519,6 +519,24 @@ final class FileRepository extends BaseRepository
     }
 
     /**
+     * Policy A: no caption service — probed, no usable captions/SRT
+     * (same outcome as empty extract).
+     */
+    public function clearCaptionService(int $id): bool
+    {
+        $stmt = $this->db()->prepare(
+            'UPDATE files SET
+                has_captions = FALSE,
+                caption_stream_index = NULL,
+                srt_path = NULL,
+                captions_probed = TRUE
+             WHERE id = ?'
+        );
+
+        return $stmt->execute([$id]);
+    }
+
+    /**
      * Persist extracted/linked SRT path and ensure it is listed as a moveable sidecar.
      */
     public function recordSrtSidecar(

@@ -83,12 +83,9 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
             </div>
           </div>
 
-          <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="extract_metadata"
-                   id="extract-metadata" checked>
-            <label class="form-check-label" for="extract-metadata">
-              Extract FFprobe metadata (duration, codecs)
-            </label>
+          <div class="mb-3" style="font-size:0.82rem;color:var(--text-soft);line-height:1.45">
+            <strong style="color:var(--text-main)">FFprobe + caption probe</strong> run for every file
+            (duration, codecs, caption stream detection). Required — not optional.
           </div>
 
           <div class="form-check mb-3">
@@ -149,11 +146,11 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
             $canStopRow = in_array($status, ['PENDING', 'RUNNING'], true);
             $canDeleteRow = $status !== 'RUNNING' || $orphanRow;
             ?>
-            <tr>
+            <tr data-scan-job="<?php echo (int) $job['id']; ?>">
               <td><a href="/scan/<?php echo (int) $job['id']; ?>">#<?php echo (int) $job['id']; ?></a></td>
               <td><?php echo View::e($job['source_name']); ?></td>
               <td class="path-text"><?php echo View::e($job['subpath'] ?: '—'); ?></td>
-              <td>
+              <td class="scan-job-status">
                 <?php
                 $badge  = match ($status) {
                     'COMPLETED' => 'success',
@@ -164,28 +161,28 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
                     default     => 'secondary',
                 };
                 ?>
-                <span class="badge bg-<?php echo $badge; ?>"><?php echo View::e($status); ?></span>
-                <?php if ($orphanRow): ?>
+                <span class="badge bg-<?php echo $badge; ?> scan-status-badge"><?php echo View::e($status); ?></span>
+                <span class="scan-orphan-badge"><?php if ($orphanRow): ?>
                 <span class="badge bg-warning text-dark" title="Worker process not running">hung</span>
-                <?php endif; ?>
+                <?php endif; ?></span>
               </td>
-              <td style="min-width:120px">
+              <td class="scan-job-progress" style="min-width:120px">
                 <?php if ($total > 0): ?>
                 <div class="progress" style="height:6px">
-                  <div class="progress-bar" style="width:<?php echo $pct; ?>%"></div>
+                  <div class="progress-bar scan-progress-bar" style="width:<?php echo $pct; ?>%"></div>
                 </div>
-                <span style="font-size:0.72rem;color:var(--text-soft)"><?php echo $done; ?> / <?php echo $total; ?></span>
+                <span class="scan-progress-label" style="font-size:0.72rem;color:var(--text-soft)"><?php echo $done; ?> / <?php echo $total; ?></span>
                 <?php else: ?>
-                —
+                <span class="scan-progress-label">—</span>
                 <?php endif; ?>
               </td>
-              <td class="path-text"><?php echo View::e((string) $timingRow['started_label']); ?></td>
-              <td class="path-text"><?php echo View::e((string) $timingRow['ended_label']); ?></td>
-              <td class="path-text" style="font-size:0.78rem">
-                <?php echo View::e((string) $timingRow['elapsed_label']); ?>
-                <?php if (in_array($status, ['RUNNING', 'PENDING'], true)): ?>
+              <td class="path-text scan-started"><?php echo View::e((string) $timingRow['started_label']); ?></td>
+              <td class="path-text scan-ended"><?php echo View::e((string) $timingRow['ended_label']); ?></td>
+              <td class="path-text scan-eta" style="font-size:0.78rem">
+                <span class="scan-elapsed"><?php echo View::e((string) $timingRow['elapsed_label']); ?></span>
+                <span class="scan-eta-line"><?php if (in_array($status, ['RUNNING', 'PENDING'], true)): ?>
                 <br><span style="color:var(--accent)"><?php echo View::e((string) $timingRow['eta_label']); ?></span>
-                <?php endif; ?>
+                <?php endif; ?></span>
               </td>
               <td class="text-end text-nowrap">
                 <?php if ($status === 'PAUSED'): ?>
@@ -228,3 +225,73 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
     </div>
   </div>
 </div>
+
+<?php
+$scanListLive = false;
+foreach ($recentJobs as $j) {
+    $st = (string) ($j['status'] ?? '');
+    if ($st === 'RUNNING' || ($st === 'PENDING' && empty($j['cancel_requested']))) {
+        $scanListLive = true;
+        break;
+    }
+}
+?>
+<?php if ($scanListLive || $recentJobs !== []): ?>
+<script src="/js/live-poll.js"></script>
+<script>
+(function () {
+  var lastIds = null;
+  var esc = LivePoll.escapeHtml;
+  LivePoll.start({
+    url: '/scan/list-status',
+    intervalMs: 5000,
+    onData: function (data) {
+      var ids = (data.ids || []).join(',');
+      if (lastIds !== null && lastIds !== ids) {
+        window.location.reload();
+        return;
+      }
+      lastIds = ids;
+      (data.jobs || []).forEach(function (job) {
+        var row = document.querySelector('[data-scan-job="' + job.id + '"]');
+        if (!row) return;
+        var badge = row.querySelector('.scan-status-badge');
+        if (badge) {
+          badge.className = 'badge bg-' + (job.status_badge || 'secondary') + ' scan-status-badge';
+          badge.textContent = job.status || '';
+        }
+        var orphan = row.querySelector('.scan-orphan-badge');
+        if (orphan) {
+          orphan.innerHTML = job.worker_orphan
+            ? '<span class="badge bg-warning text-dark" title="Worker process not running">hung</span>'
+            : '';
+        }
+        var bar = row.querySelector('.scan-progress-bar');
+        var label = row.querySelector('.scan-progress-label');
+        if (job.total_files > 0) {
+          if (bar) bar.style.width = (job.pct || 0) + '%';
+          if (label) label.textContent = job.processed_files + ' / ' + job.total_files;
+        } else if (label) {
+          label.textContent = '—';
+        }
+        var t = job.timing || {};
+        var started = row.querySelector('.scan-started');
+        var ended = row.querySelector('.scan-ended');
+        var elapsed = row.querySelector('.scan-elapsed');
+        var etaLine = row.querySelector('.scan-eta-line');
+        if (started) started.textContent = t.started_label || '—';
+        if (ended) ended.textContent = t.ended_label || '—';
+        if (elapsed) elapsed.textContent = t.elapsed_label || '—';
+        if (etaLine) {
+          var live = job.status === 'RUNNING' || job.status === 'PENDING';
+          etaLine.innerHTML = live
+            ? '<br><span style="color:var(--accent)">' + esc(t.eta_label || '—') + '</span>'
+            : '';
+        }
+      });
+    },
+    shouldStop: function (data) { return data.poll === false; }
+  });
+})();
+</script>
+<?php endif; ?>

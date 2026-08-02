@@ -97,8 +97,10 @@ These are **true daemons** — no CLI babysitting. The web UI only enqueues jobs
 | `media-manager-caption-extract` | `scripts/caption_extract_worker.php` | Caption extract jobs |
 | `media-manager-split-audio` | `scripts/split_audio_worker.php` | Split audio levels / suggest jobs |
 
+**Admin → Services** (`/services`) shows running status, start/stop/restart/enable/disable for the three workers, Apache/PostgreSQL restart, and a live journal tail (like `journalctl -f`). Privileged commands go through `/usr/local/sbin/media-manager-svc` with a sudoers drop-in installed by `setup.sh`.
+
 ```bash
-# Status / logs
+# Status / logs (CLI)
 systemctl status media-manager-scan media-manager-caption-extract media-manager-split-audio
 journalctl -u media-manager-scan -f
 journalctl -u media-manager-caption-extract -f
@@ -153,7 +155,7 @@ Studio Calendar typically on port **80**, Media Manager on **81**. Set `APP_URL`
 
 | Role | Capabilities |
 |------|-------------|
-| admin | Scan, execute, rollback, audit, users, dictionary, captions, glue execute, split |
+| admin | Scan, execute, rollback, audit, services, users, dictionary, captions, glue execute, split |
 | editor | Catalog review — approve, reject, edit, flag; glue mark/clear |
 
 ## User workflow
@@ -162,7 +164,8 @@ Studio Calendar typically on port **80**, Media Manager on **81**. Set `APP_URL`
 2. Ingest: Scan  
 3. Review: Catalog ↔ Gaps; Captions / Glue / Split as needed  
 4. Commit: Execute  
-5. Support: Settings; Admin: Audit / Rollback  
+5. Support: Settings; Admin: Services / Audit / Rollback  
+6. Queues menu: Catalog / Glue / Scan / Captions / Split / Execute (live JSON status polls)  
 
 ## Versioning
 

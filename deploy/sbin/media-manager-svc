@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Allowlisted systemd / journalctl helper for Media Manager Services UI.
+# Installed to /usr/local/sbin/media-manager-svc; invoked via sudo -n by www-data.
+#
+# Usage:
+#   media-manager-svc status  <unit>
+#   media-manager-svc start|stop|restart|enable|disable <unit>
+#   media-manager-svc reload  apache2
+#   media-manager-svc journal <unit> [lines] [after-cursor]
+set -euo pipefail
+
+ACTION="${1:-}"
+UNIT="${2:-}"
+
+if [[ -z "${ACTION}" || -z "${UNIT}" ]]; then
+  echo "usage: media-manager-svc <action> <unit> [args...]" >&2
+  exit 2
+fi
+
+# Strip accidental .service suffix for matching.
+UNIT="${UNIT%.service}"
+
+FULL_CONTROL=0
+case "${UNIT}" in
+  media-manager-scan|media-manager-caption-extract|media-manager-split-audio)
+    FULL_CONTROL=1
+    ;;
+  apache2|postgresql)
+    FULL_CONTROL=0
+    ;;
+  *)
+    echo "Unit not allowed: ${UNIT}" >&2
+    exit 2
+    ;;
+esac
+
+UNIT_NAME="${UNIT}.service"
+
+run_systemctl() {
+  /bin/systemctl "$@"
+}
+
+case "${ACTION}" in
+  status)
+    # Machine-readable key=value lines for PHP parsing.
+    run_systemctl show "${UNIT_NAME}" \
+      --property=Id \
+      --property=Description \
+      --property=LoadState \
+      --property=ActiveState \
+      --property=SubState \
+      --property=UnitFileState \
+      --property=MainPID \
+      --property=ActiveEnterTimestamp \
+      --property=FragmentPath \
+      --no-pager
+    echo "IsActive=$(run_systemctl is-active "${UNIT_NAME}" 2>/dev/null || true)"
+    echo "IsEnabled=$(run_systemctl is-enabled "${UNIT_NAME}" 2>/dev/null || true)"
+    ;;
+
+  start|stop|restart|enable|disable)
+    if [[ "${FULL_CONTROL}" -ne 1 ]]; then
+      if [[ "${ACTION}" != "restart" ]]; then
+        echo "Action '${ACTION}' not allowed for infrastructure unit '${UNIT}' (restart only)." >&2
+        exit 3
+      fi
+    fi
+    run_systemctl "${ACTION}" "${UNIT_NAME}"
+    ;;
+
+  reload)
+    if [[ "${UNIT}" != "apache2" ]]; then
+      echo "reload is only allowed for apache2" >&2
+      exit 3
+    fi
+    run_systemctl reload "${UNIT_NAME}"
+    ;;
+
+  journal)
+    LINES="${3:-120}"
+    CURSOR="${4:-}"
+    # Sanity-check lines (digits only).
+    if ! [[ "${LINES}" =~ ^[0-9]+$ ]]; then
+      LINES=120
+    fi
+    if (( LINES < 1 )); then LINES=1; fi
+    if (( LINES > 500 )); then LINES=500; fi
+
+    if [[ -n "${CURSOR}" ]]; then
+      # Journal cursors look like: s=…;i=…;b=…;m=…;t=…;x=…
+      if ! [[ "${CURSOR}" =~ ^[A-Za-z0-9+/=_;.-]+$ ]]; then
+        echo "Invalid journal cursor" >&2
+        exit 2
+      fi
+      /bin/journalctl -u "${UNIT_NAME}" --after-cursor="${CURSOR}" -n "${LINES}" \
+        --no-pager -o short-iso --show-cursor
+    else
+      /bin/journalctl -u "${UNIT_NAME}" -n "${LINES}" \
+        --no-pager -o short-iso --show-cursor
+    fi
+    ;;
+
+  *)
+    echo "Action not allowed: ${ACTION}" >&2
+    exit 2
+    ;;
+esac

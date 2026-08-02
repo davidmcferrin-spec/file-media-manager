@@ -56,9 +56,9 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
     <p class="mb-0" style="color:var(--text-soft);font-size:0.8rem;">
       <?php echo number_format($total); ?> files matching filters.
       Match show, date, and type; approve rename proposals.
-      <?php if (Auth::isAdmin() && ($statusCounts['APPROVED'] ?? 0) > 0): ?>
-      <a href="/execute" class="ms-1"><?php echo (int) $statusCounts['APPROVED']; ?> approved — ready to execute</a>
-      <?php endif; ?>
+      <span id="queue-approved-hint"><?php if (Auth::isAdmin() && ($statusCounts['APPROVED'] ?? 0) > 0): ?>
+      <a href="/execute" class="ms-1"><span id="queue-approved-count"><?php echo (int) $statusCounts['APPROVED']; ?></span> approved — ready to execute</a>
+      <?php endif; ?></span>
     </p>
     <p class="mb-0 mt-1 path-text" style="font-size:0.72rem">
       CC legend:
@@ -74,7 +74,7 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
 </div>
 
 <!-- Status pills -->
-<div class="d-flex flex-wrap gap-2 mb-3">
+<div class="d-flex flex-wrap gap-2 mb-3" id="queue-status-pills">
   <?php
   $statusFilter = $statusFilter ?? ($filters['status'] ?? 'PENDING');
   $statuses = ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED', 'EXECUTED', 'ALL'];
@@ -83,8 +83,9 @@ require dirname(__DIR__) . '/partials/workflow_step.php';
       $cnt = $st === 'ALL' ? array_sum($statusCounts) : ($statusCounts[$st] ?? 0);
   ?>
   <a href="/queue?status=<?php echo urlencode($st); ?>"
-     class="btn btn-sm <?php echo $active ? 'btn-primary' : 'btn-outline-secondary'; ?>">
-    <?php echo View::e($st); ?> <span class="opacity-75">(<?php echo $cnt; ?>)</span>
+     class="btn btn-sm <?php echo $active ? 'btn-primary' : 'btn-outline-secondary'; ?>"
+     data-queue-status-pill="<?php echo View::e($st); ?>">
+    <?php echo View::e($st); ?> <span class="opacity-75">(<span class="queue-status-cnt"><?php echo $cnt; ?></span>)</span>
   </a>
   <?php endforeach; ?>
 </div>
@@ -1360,6 +1361,51 @@ function confirmSplitSelected(form) {
     });
     return confirm('Add ' + ids.length + ' file(s) to split queue?');
 }
+
+(function () {
+  function selectionBusy() {
+    return !!(document.querySelector('.row-check:checked')
+      || document.querySelector('.modal.show')
+      || (document.activeElement && (
+        document.activeElement.tagName === 'INPUT'
+        || document.activeElement.tagName === 'SELECT'
+        || document.activeElement.tagName === 'TEXTAREA'
+      )));
+  }
+  function pollCounts() {
+    if (document.hidden || selectionBusy()) return;
+    fetch('/queue/list-status', {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.status_counts) return;
+        var counts = data.status_counts;
+        var all = 0;
+        Object.keys(counts).forEach(function (k) { all += Number(counts[k] || 0); });
+        document.querySelectorAll('[data-queue-status-pill]').forEach(function (pill) {
+          var key = pill.getAttribute('data-queue-status-pill');
+          var el = pill.querySelector('.queue-status-cnt');
+          if (!el) return;
+          el.textContent = String(key === 'ALL' ? all : (counts[key] || 0));
+        });
+        var hint = document.getElementById('queue-approved-hint');
+        var approved = Number(data.approved_count || 0);
+        if (hint) {
+          if (approved > 0) {
+            hint.innerHTML = ' <a href="/execute" class="ms-1"><span id="queue-approved-count">'
+              + approved + '</span> approved — ready to execute</a>';
+          } else {
+            hint.innerHTML = '';
+          }
+        }
+      })
+      .catch(function () {});
+  }
+  setInterval(pollCounts, 8000);
+})();
 </script>
 <?php
 $extraScripts = ($extraScripts ?? '') . ob_get_clean();

@@ -18,6 +18,7 @@ use MediaManager\Services\DateNormalizer;
 use MediaManager\Services\ScheduleSplitSuggester;
 use MediaManager\Services\SplitAudioJobService;
 use MediaManager\Services\SplitMediaService;
+use MediaManager\Services\SplitPrepService;
 use MediaManager\Services\SrtCaptionParser;
 use MediaManager\Support\WorkerMode;
 use PDOException;
@@ -161,20 +162,33 @@ if ($method === 'POST') {
             exit;
         }
 
-        try {
-            $id = $splitRepo->create($fileId, (int) Auth::id(), $notes);
-            split_audit($audit, 'SPLIT_QUEUED', $id, ['file_id' => $fileId]);
-            Session::flash('success', 'File added to split queue.');
-            header('Location: /split/' . $id);
-            exit;
-        } catch (PDOException $e) {
-            $msg = $splitRepo->isUniqueViolation($e)
-                ? 'This file already has an active split job.'
-                : 'Could not add file to split queue.';
-            Session::flash('error', $msg);
+        if ($notes !== '' && trim((string) ($file['split_notes'] ?? '')) === '') {
+            $fileRepo->updateSplitFlag($fileId, true, $notes);
+        }
+
+        $prep = (new SplitPrepService())->onMarkedForSplit($fileId, (int) Auth::id(), true);
+        $id = $prep['split_queue_id'];
+        if ($id === null) {
+            Session::flash('error', 'Could not add file to split queue.');
             header('Location: /split');
             exit;
         }
+
+        split_audit($audit, 'SPLIT_QUEUED', $id, [
+            'file_id'        => $fileId,
+            'caption_job_id' => $prep['caption_job_id'],
+            'audio_job_id'   => $prep['audio_job_id'],
+            'source'         => 'split_create',
+        ]);
+        Session::flash(
+            'success',
+            'File added to split queue'
+            . ($prep['needs_caption'] ? '; caption extract queued' : '')
+            . ($prep['audio_job_id'] ? '; audio levels queued' : '')
+            . '.'
+        );
+        header('Location: /split/' . $id);
+        exit;
     }
 
     if ($uri === '/split/update') {
@@ -650,6 +664,64 @@ if (preg_match('#^/split/(\d+)$#', $uri, $m)) {
     require dirname(__DIR__) . '/Views/layouts/header.php';
     require dirname(__DIR__) . '/Views/split/detail.php';
     require dirname(__DIR__) . '/Views/layouts/footer.php';
+    exit;
+}
+
+// GET /split/list-status — JSON for split index live poll
+if ($method === 'GET' && $uri === '/split/list-status') {
+    $statusFilter = trim((string) ($_GET['status'] ?? ''));
+    if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+        $statusFilter = '';
+    }
+    $page = max(1, (int) ($_GET['page'] ?? 1));
+    $perPage = 50;
+    $offset = ($page - 1) * $perPage;
+    $items = $splitRepo->all($statusFilter !== '' ? $statusFilter : null, $perPage, $offset);
+    $total = $splitRepo->count($statusFilter !== '' ? $statusFilter : null);
+    $statusCounts = $splitRepo->statusCounts();
+    $jobsOut = [];
+    $poll = false;
+    foreach ($items as $item) {
+        $id = (int) ($item['id'] ?? 0);
+        $st = (string) ($item['status'] ?? '');
+        if (in_array($st, ['PENDING', 'IN_PROGRESS'], true)) {
+            $poll = true;
+        }
+        $segs = json_decode((string) ($item['segments'] ?? '[]'), true);
+        $segCount = is_array($segs) ? count($segs) : 0;
+        $audioJob = $audioJobRepo->latestForSplitQueue($id);
+        $audioActive = null;
+        if ($audioJob !== null) {
+            $aStatus = (string) ($audioJob['status'] ?? '');
+            if (in_array($aStatus, ['PENDING', 'RUNNING'], true)) {
+                $poll = true;
+                $alive = $aStatus === 'RUNNING' && $audioJobRepo->isWorkerAlive((int) $audioJob['id']);
+                $audioActive = [
+                    'id'     => (int) $audioJob['id'],
+                    'kind'   => (string) ($audioJob['kind'] ?? ''),
+                    'status' => $aStatus,
+                    'orphan' => $aStatus === 'RUNNING' && !$alive,
+                ];
+            }
+        }
+        $jobsOut[] = [
+            'id'               => $id,
+            'status'           => $st,
+            'status_badge_html'=> \MediaManager\Support\View::statusBadge($st),
+            'segment_count'    => $segCount,
+            'active_audio_job' => $audioActive,
+        ];
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'poll'          => $poll,
+        'status_counts' => $statusCounts,
+        'total'         => $total,
+        'ids'           => array_column($jobsOut, 'id'),
+        'jobs'          => $jobsOut,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 

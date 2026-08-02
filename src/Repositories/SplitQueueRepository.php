@@ -150,12 +150,22 @@ final class SplitQueueRepository extends BaseRepository
 
     public function hasActiveForFile(int $fileId): bool
     {
+        return $this->findActiveForFile($fileId) !== null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findActiveForFile(int $fileId): ?array
+    {
         $stmt = $this->db()->prepare(
-            "SELECT 1 FROM split_queue WHERE file_id = ? AND status IN ('PENDING', 'IN_PROGRESS') LIMIT 1"
+            "SELECT * FROM split_queue
+             WHERE file_id = ? AND status IN ('PENDING', 'IN_PROGRESS')
+             ORDER BY created_at DESC
+             LIMIT 1"
         );
         $stmt->execute([$fileId]);
+        $row = $stmt->fetch();
 
-        return $stmt->fetchColumn() !== false;
+        return is_array($row) ? $row : null;
     }
 
     public function create(int $fileId, int $createdBy, string $notes = ''): int

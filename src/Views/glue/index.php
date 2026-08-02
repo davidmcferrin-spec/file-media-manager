@@ -32,21 +32,23 @@ $statuses = ['', 'PENDING', 'RUNNING', 'READY_FOR_QC', 'APPROVED', 'DONE', 'FAIL
   </div>
 </div>
 
-<div class="d-flex flex-wrap gap-2 mb-3">
+<div class="d-flex flex-wrap gap-2 mb-3" id="glue-status-pills">
   <?php foreach ($statuses as $st):
       $active = $statusFilter === $st;
       $label  = $st === '' ? 'All jobs' : $st;
       $cnt    = $st === '' ? array_sum($statusCounts) : ($statusCounts[$st] ?? 0);
+      $pillKey = $st === '' ? 'ALL' : $st;
   ?>
   <a href="/glue<?php echo $st !== '' ? '?status=' . urlencode($st) : ''; ?>"
-     class="btn btn-sm <?php echo $active ? 'btn-primary' : 'btn-outline-secondary'; ?>">
-    <?php echo View::e($label); ?> <span class="opacity-75">(<?php echo $cnt; ?>)</span>
+     class="btn btn-sm <?php echo $active ? 'btn-primary' : 'btn-outline-secondary'; ?>"
+     data-glue-status-pill="<?php echo View::e($pillKey); ?>">
+    <?php echo View::e($label); ?> <span class="opacity-75">(<span class="glue-status-cnt"><?php echo $cnt; ?></span>)</span>
   </a>
   <?php endforeach; ?>
 </div>
 
 <div class="card mb-4">
-  <div class="card-header">Glue Jobs (<?php echo number_format($jobTotal); ?>)</div>
+  <div class="card-header">Glue Jobs (<span id="glue-job-total"><?php echo number_format($jobTotal); ?></span>)</div>
   <?php if ($jobItems === []): ?>
   <div class="card-body path-text text-center py-4">
     No glue jobs yet. Queue a group below, then Run → QC → Delete sources.
@@ -70,7 +72,7 @@ $statuses = ['', 'PENDING', 'RUNNING', 'READY_FOR_QC', 'APPROVED', 'DONE', 'FAIL
             $partCount = is_array($ids) ? count($ids) : 0;
             $st = (string) ($job['status'] ?? '');
         ?>
-        <tr>
+        <tr data-glue-job="<?php echo (int) $job['id']; ?>">
           <td>
             <a href="/glue/<?php echo (int) $job['id']; ?>">#<?php echo (int) $job['id']; ?></a>
             <div class="path-text" style="font-size:0.7rem;max-width:16rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
@@ -78,7 +80,7 @@ $statuses = ['', 'PENDING', 'RUNNING', 'READY_FOR_QC', 'APPROVED', 'DONE', 'FAIL
               <?php echo View::e((string) $job['glue_group_key']); ?>
             </div>
           </td>
-          <td>
+          <td class="glue-job-status">
             <?php
             $badge = match ($st) {
                 'READY_FOR_QC' => 'bg-warning text-dark',
@@ -90,13 +92,13 @@ $statuses = ['', 'PENDING', 'RUNNING', 'READY_FOR_QC', 'APPROVED', 'DONE', 'FAIL
                 default        => 'bg-secondary',
             };
             ?>
-            <span class="badge <?php echo $badge; ?>"><?php echo View::e($st); ?></span>
-            <?php if ($st === 'FAILED' && !empty($job['error_message'])): ?>
-            <div class="path-text text-danger" style="font-size:0.68rem;max-width:14rem"
-                 title="<?php echo View::e((string) $job['error_message']); ?>">
+            <span class="badge glue-status-badge <?php echo $badge; ?>"><?php echo View::e($st); ?></span>
+            <div class="glue-job-error path-text text-danger" style="font-size:0.68rem;max-width:14rem"
+                 title="<?php echo View::e((string) ($job['error_message'] ?? '')); ?>">
+              <?php if ($st === 'FAILED' && !empty($job['error_message'])): ?>
               <?php echo View::e((string) $job['error_message']); ?>
+              <?php endif; ?>
             </div>
-            <?php endif; ?>
           </td>
           <td><?php echo $partCount; ?></td>
           <td>
@@ -172,11 +174,13 @@ $activeJob = $activeByGroup[$groupKey] ?? null;
       <span class="ms-2" style="font-size:0.85rem">
         <?php echo (int) $group['part_count']; ?> parts
       </span>
+      <span class="glue-group-active" data-glue-group="<?php echo View::e($groupKey); ?>">
       <?php if ($activeJob !== null): ?>
       <a href="/glue/<?php echo (int) $activeJob['id']; ?>" class="badge bg-primary text-decoration-none ms-1">
         Job #<?php echo (int) $activeJob['id']; ?> · <?php echo View::e((string) $activeJob['status']); ?>
       </a>
       <?php endif; ?>
+      </span>
       <?php if ($dir !== ''): ?>
       <div class="path-text mt-1" style="font-size:0.72rem"><?php echo View::e($dir); ?></div>
       <?php endif; ?>
@@ -259,3 +263,70 @@ $activeJob = $activeByGroup[$groupKey] ?? null;
 </div>
 <?php endforeach; ?>
 <?php endif; ?>
+
+<script src="/js/live-poll.js"></script>
+<script>
+(function () {
+  var statusFilter = <?php echo json_encode($statusFilter, JSON_THROW_ON_ERROR); ?>;
+  var page = <?php echo (int) $page; ?>;
+  var lastIds = null;
+  var params = new URLSearchParams();
+  if (statusFilter) params.set('status', statusFilter);
+  params.set('page', String(page));
+  var esc = LivePoll.escapeHtml;
+
+  LivePoll.start({
+    url: '/glue/list-status?' + params.toString(),
+    intervalMs: 5000,
+    onData: function (data) {
+      var ids = (data.ids || []).join(',');
+      if (lastIds !== null && lastIds !== ids) {
+        window.location.reload();
+        return;
+      }
+      lastIds = ids;
+
+      var counts = data.status_counts || {};
+      var all = 0;
+      Object.keys(counts).forEach(function (k) { all += Number(counts[k] || 0); });
+      document.querySelectorAll('[data-glue-status-pill]').forEach(function (pill) {
+        var key = pill.getAttribute('data-glue-status-pill');
+        var el = pill.querySelector('.glue-status-cnt');
+        if (!el) return;
+        el.textContent = String(key === 'ALL' ? all : (counts[key] || 0));
+      });
+      var totalEl = document.getElementById('glue-job-total');
+      if (totalEl) totalEl.textContent = Number(data.job_total || 0).toLocaleString();
+
+      (data.jobs || []).forEach(function (job) {
+        var row = document.querySelector('[data-glue-job="' + job.id + '"]');
+        if (!row) return;
+        var badge = row.querySelector('.glue-status-badge');
+        if (badge) {
+          badge.className = 'badge glue-status-badge ' + (job.status_badge || 'bg-secondary');
+          badge.textContent = job.status || '';
+        }
+        var err = row.querySelector('.glue-job-error');
+        if (err) {
+          var msg = (job.status === 'FAILED' && job.error_message) ? String(job.error_message) : '';
+          err.textContent = msg;
+          err.title = msg;
+        }
+      });
+
+      var active = data.active_by_group || {};
+      document.querySelectorAll('.glue-group-active').forEach(function (wrap) {
+        var key = wrap.getAttribute('data-glue-group') || '';
+        var aj = active[key];
+        if (!aj) {
+          wrap.innerHTML = '';
+          return;
+        }
+        wrap.innerHTML = '<a href="/glue/' + aj.id + '" class="badge bg-primary text-decoration-none ms-1">'
+          + 'Job #' + aj.id + ' · ' + esc(aj.status || '') + '</a>';
+      });
+    },
+    shouldStop: function (data) { return data.poll === false; }
+  });
+})();
+</script>

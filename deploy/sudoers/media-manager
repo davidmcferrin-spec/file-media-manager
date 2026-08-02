@@ -1,0 +1,7 @@
+# Media Manager — passwordless helper for Services admin UI (www-data).
+# Installed by setup.sh to /etc/sudoers.d/media-manager (mode 0440).
+#
+# www-data may ONLY run the allowlisted helper; the helper itself validates
+# unit names and actions (app workers full control; apache2/postgresql restart+status+journal).
+
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/media-manager-svc

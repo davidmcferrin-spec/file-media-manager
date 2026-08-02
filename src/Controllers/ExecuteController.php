@@ -103,6 +103,21 @@ if ($method === 'POST' && $uri === '/rollback') {
     exit;
 }
 
+// GET /execute/list-status — approved count (pause client poll when checkboxes selected)
+if ($method === 'GET' && $uri === '/execute/list-status') {
+    $approvedFiles = $files->allApproved(200);
+    $ids = array_map(static fn (array $f): int => (int) ($f['id'] ?? 0), $approvedFiles);
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'poll'           => true,
+        'approved_count' => count($ids),
+        'approved_ids'   => $ids,
+    ], JSON_THROW_ON_ERROR);
+    exit;
+}
+
 $approvedFiles  = $files->allApproved(200);
 $executedFiles  = $files->recentlyExecuted(30);
 $approvedCount  = count($approvedFiles);

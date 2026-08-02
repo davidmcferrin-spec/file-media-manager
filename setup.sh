@@ -365,6 +365,34 @@ else
     warn "systemctl unavailable — start workers manually: php scripts/scan_worker.php"
 fi
 
+# ── 13b. Services UI helper (sudo allowlist for www-data) ──────
+info "Installing Services admin helper (systemctl/journalctl allowlist)..."
+HELPER_SRC="${WEB_ROOT}/deploy/sbin/media-manager-svc"
+HELPER_DST="/usr/local/sbin/media-manager-svc"
+SUDOERS_SRC="${WEB_ROOT}/deploy/sudoers/media-manager"
+SUDOERS_DST="/etc/sudoers.d/media-manager"
+if [[ -f "${HELPER_SRC}" ]]; then
+    install -m 0755 "${HELPER_SRC}" "${HELPER_DST}"
+    success "Installed ${HELPER_DST}"
+else
+    warn "Missing ${HELPER_SRC}"
+fi
+if [[ -f "${SUDOERS_SRC}" ]]; then
+    # Validate before installing — never leave a broken sudoers drop-in.
+    TMP_SUDOERS="$(mktemp)"
+    cp "${SUDOERS_SRC}" "${TMP_SUDOERS}"
+    chmod 0440 "${TMP_SUDOERS}"
+    if visudo -cf "${TMP_SUDOERS}" >/dev/null 2>&1; then
+        install -m 0440 "${SUDOERS_SRC}" "${SUDOERS_DST}"
+        success "Installed ${SUDOERS_DST}"
+    else
+        warn "sudoers file failed visudo -cf — not installed. Services UI will be read-only until fixed."
+    fi
+    rm -f "${TMP_SUDOERS}"
+else
+    warn "Missing ${SUDOERS_SRC}"
+fi
+
 # ── 14. Restart Apache ────────────────────────────────────────
 info "Restarting Apache..."
 systemctl reload apache2
@@ -384,7 +412,8 @@ fi
 echo ""
 echo -e "  Edit ${CYAN}${ENV_FILE}${NC} to configure NAS mount paths"
 echo -e "  and other settings before first use."
-echo -e "  Workers:  ${CYAN}media-manager-scan${NC} + ${CYAN}media-manager-caption-extract${NC}"
+echo -e "  Workers:  ${CYAN}media-manager-scan${NC} + ${CYAN}media-manager-caption-extract${NC} + ${CYAN}media-manager-split-audio${NC}"
+echo -e "  Services: ${CYAN}/services${NC} (Admin menu) — status, start/stop, live journal"
 echo -e "  Logs:     journalctl -u media-manager-scan -f"
 echo -e "            journalctl -u media-manager-caption-extract -f"
 echo -e "  Broadcast continuity check runs quietly during Scan/Reclassify."

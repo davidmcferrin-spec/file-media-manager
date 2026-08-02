@@ -554,39 +554,43 @@ code, .path-text kbd {
           </ul>
         </li>
         <?php endif; ?>
-        <?php if (Auth::isAdmin()): ?>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/scan', $currentPath); ?>" href="/scan">Scan</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/captions', $currentPath); ?>" href="/captions">Captions</a>
-        </li>
-        <?php endif; ?>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/queue', $currentPath); ?>" href="/queue">Catalog</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/glue', $currentPath); ?>" href="/glue">Glue</a>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle<?php
+            echo navActive('/queue', $currentPath)
+                . navActive('/glue', $currentPath)
+                . navActive('/scan', $currentPath)
+                . navActive('/captions', $currentPath)
+                . navActive('/split', $currentPath)
+                . navActive('/execute', $currentPath);
+          ?>" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+            Queues
+          </a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="/queue">Catalog</a></li>
+            <li><a class="dropdown-item" href="/glue">Glue</a></li>
+            <?php if (Auth::isAdmin()): ?>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="/scan">Scan</a></li>
+            <li><a class="dropdown-item" href="/captions">Captions</a></li>
+            <li><a class="dropdown-item" href="/split">Split</a></li>
+            <li><a class="dropdown-item" href="/execute">Execute</a></li>
+            <?php endif; ?>
+          </ul>
         </li>
         <li class="nav-item">
           <a class="nav-link<?php echo navActive('/show-audit', $currentPath); ?>" href="/show-audit">Gaps</a>
         </li>
         <?php if (Auth::isAdmin()): ?>
         <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/execute', $currentPath); ?>" href="/execute">Execute</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link<?php echo navActive('/split', $currentPath); ?>" href="/split">Split</a>
-        </li>
-        <li class="nav-item">
           <a class="nav-link<?php echo navActive('/settings', $currentPath); ?>" href="/settings">Settings</a>
         </li>
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle<?php echo navActive('/audit', $currentPath) . navActive('/rollback', $currentPath); ?>"
+          <a class="nav-link dropdown-toggle<?php echo navActive('/audit', $currentPath) . navActive('/rollback', $currentPath) . navActive('/services', $currentPath); ?>"
              href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
             Admin
           </a>
           <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="/services">Services</a></li>
             <li><a class="dropdown-item" href="/audit">Audit log</a></li>
             <li><a class="dropdown-item" href="/rollback">Rollback</a></li>
           </ul>

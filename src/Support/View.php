@@ -162,17 +162,17 @@ class View
         $hasCc = !empty($file['has_captions']);
         $probed = !empty($file['captions_probed']);
 
-        if ($hasSrt) {
+        if ($hasSrt && $hasCc) {
             $label = 'CC';
-            $title = 'Captions present and SRT extracted';
+            $title = 'Usable captions (SRT with cues)';
             $style = 'background:#198754;color:#fff';
         } elseif ($hasCc) {
             $label = 'CC';
-            $title = 'Captions/subtitles detected in media (no SRT yet)';
+            $title = 'Caption stream detected — extract queued or pending (no usable SRT yet)';
             $style = 'background:#e67e22;color:#fff';
         } elseif ($probed) {
             $label = 'CC';
-            $title = 'Probed — no caption/subtitle stream found (CEA-608-only MXF may still need a special extractor)';
+            $title = 'No caption service (no stream, or extract produced no usable cues)';
             $style = 'background:rgba(148,163,184,0.28);color:var(--text-soft);text-decoration:line-through';
         } else {
             $label = 'CC?';

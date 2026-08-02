@@ -552,10 +552,6 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   </div>
 </div>
 
-<?php if ($audioJobActive): ?>
-<meta http-equiv="refresh" content="5">
-<?php endif; ?>
-
 <?php if (!empty($item['split_notes'])): ?>
 <div class="sw-notes-alert py-2 px-3 mb-3">
   <?php echo View::e($item['split_notes']); ?>

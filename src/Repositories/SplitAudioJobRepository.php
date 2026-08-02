@@ -107,13 +107,20 @@ final class SplitAudioJobRepository extends BaseRepository
 
     public function claimNextPending(): ?int
     {
+        // Prioritize files without usable captions (no SRT), then oldest job.
         $stmt = $this->db()->query(
             "WITH next AS (
-                SELECT id FROM split_audio_jobs
-                WHERE status = 'PENDING'
-                ORDER BY created_at ASC
+                SELECT j.id
+                FROM split_audio_jobs j
+                JOIN files f ON f.id = j.file_id
+                WHERE j.status = 'PENDING'
+                ORDER BY CASE
+                    WHEN f.srt_path IS NULL OR TRIM(f.srt_path) = '' THEN 0
+                    ELSE 1
+                END,
+                j.created_at ASC
                 LIMIT 1
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF j SKIP LOCKED
              )
              UPDATE split_audio_jobs j
              SET status = 'RUNNING',

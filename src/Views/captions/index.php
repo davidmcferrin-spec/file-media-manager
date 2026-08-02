@@ -26,15 +26,17 @@ $unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
   </div>
 </div>
 
+<div id="caption-running-banner">
 <?php if ($running !== null): ?>
-<div class="alert alert-info py-2">
+<div class="alert alert-info py-2 mb-0">
   Job <a href="/captions/<?php echo (int) $running['id']; ?>">#<?php echo (int) $running['id']; ?></a>
   is <strong>RUNNING</strong>
-  (<?php echo (int) ($running['processed_files'] ?? 0); ?> /
-  <?php echo (int) ($running['total_files'] ?? 0); ?>).
+  (<span id="caption-running-progress"><?php echo (int) ($running['processed_files'] ?? 0); ?> /
+  <?php echo (int) ($running['total_files'] ?? 0); ?></span>).
   Only one extract job runs at a time.
 </div>
 <?php endif; ?>
+</div>
 
 <div class="row g-4 mb-4">
   <div class="col-md-6">
@@ -65,7 +67,7 @@ $unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
               Catalog <strong>Extract CC</strong> enqueues or prioritizes a selected-scope extract job.
             </div>
           </div>
-          <button type="submit" class="btn btn-primary btn-sm"
+          <button type="submit" class="btn btn-primary btn-sm" id="caption-start-btn"
                   <?php echo $running !== null ? 'disabled' : ''; ?>>
             Start job
           </button>
@@ -117,20 +119,20 @@ $unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
           $jOrphan = $jStatus === 'RUNNING' && !$jobs->isWorkerAlive((int) $j['id']);
           $jCanDelete = $jStatus !== 'RUNNING' || $jOrphan;
         ?>
-        <tr>
+        <tr data-caption-job="<?php echo (int) $j['id']; ?>">
           <td>#<?php echo (int) $j['id']; ?></td>
-          <td>
-            <?php echo View::statusBadge($jStatus); ?>
-            <?php if ($jOrphan): ?>
+          <td class="caption-job-status">
+            <span class="caption-status-badge"><?php echo View::statusBadge($jStatus); ?></span>
+            <span class="caption-orphan-badge"><?php if ($jOrphan): ?>
             <span class="badge bg-warning text-dark">hung</span>
-            <?php endif; ?>
+            <?php endif; ?></span>
           </td>
           <td class="path-text"><?php echo View::e((string) ($j['scope'] ?? '')); ?></td>
-          <td>
+          <td class="caption-job-progress">
             <?php echo (int) ($j['processed_files'] ?? 0); ?> /
             <?php echo (int) ($j['total_files'] ?? 0); ?>
           </td>
-          <td class="path-text">
+          <td class="path-text caption-job-counts">
             <?php echo (int) ($j['ok_count'] ?? 0); ?> /
             <?php echo (int) ($j['fail_count'] ?? 0); ?> /
             <?php echo (int) ($j['skip_count'] ?? 0); ?>
@@ -161,3 +163,54 @@ $unprobed = $unprobed ?? ['count' => 0, 'duration_seconds' => 0.0];
     </table>
   </div>
 </div>
+
+<script src="/js/live-poll.js"></script>
+<script>
+(function () {
+  var lastIds = null;
+  LivePoll.start({
+    url: '/captions/list-status',
+    intervalMs: 5000,
+    onData: function (data) {
+      var ids = (data.ids || []).join(',');
+      if (lastIds !== null && lastIds !== ids) {
+        window.location.reload();
+        return;
+      }
+      lastIds = ids;
+
+      var banner = document.getElementById('caption-running-banner');
+      var startBtn = document.getElementById('caption-start-btn');
+      if (data.running) {
+        if (banner) {
+          banner.innerHTML = '<div class="alert alert-info py-2 mb-0">Job <a href="/captions/'
+            + data.running.id + '">#' + data.running.id + '</a> is <strong>RUNNING</strong> ('
+            + '<span id="caption-running-progress">' + data.running.processed_files + ' / '
+            + data.running.total_files + '</span>). Only one extract job runs at a time.</div>';
+        }
+        if (startBtn) startBtn.disabled = true;
+      } else {
+        if (banner) banner.innerHTML = '';
+        if (startBtn) startBtn.disabled = false;
+      }
+
+      (data.jobs || []).forEach(function (job) {
+        var row = document.querySelector('[data-caption-job="' + job.id + '"]');
+        if (!row) return;
+        var badge = row.querySelector('.caption-status-badge');
+        if (badge) badge.innerHTML = job.status_badge_html || '';
+        var orphan = row.querySelector('.caption-orphan-badge');
+        if (orphan) {
+          orphan.innerHTML = job.worker_orphan
+            ? '<span class="badge bg-warning text-dark">hung</span>' : '';
+        }
+        var prog = row.querySelector('.caption-job-progress');
+        if (prog) prog.textContent = job.processed_files + ' / ' + job.total_files;
+        var counts = row.querySelector('.caption-job-counts');
+        if (counts) counts.textContent = job.ok_count + ' / ' + job.fail_count + ' / ' + job.skip_count;
+      });
+    },
+    shouldStop: function (data) { return data.poll === false; }
+  });
+})();
+</script>

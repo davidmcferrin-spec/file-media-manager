@@ -15,6 +15,7 @@ use MediaManager\Repositories\CaptionExtractJobRepository;
 use MediaManager\Services\CaptionExtractJobService;
 use MediaManager\Services\GlueGroupService;
 use MediaManager\Services\ProposalPathBuilder;
+use MediaManager\Services\SplitPrepService;
 use PDOException;
 
 Auth::requireLogin();
@@ -328,6 +329,7 @@ if ($uri === '/queue/edit') {
     );
 
     if (!$wasSplit && $needsSplit) {
+        $prep = (new SplitPrepService())->onMarkedForSplit($id, $userId, true);
         $audit->record(
             $userId,
             $user['email'] ?? '',
@@ -337,7 +339,13 @@ if ($uri === '/queue/edit') {
             $id,
             $file['original_path'],
             null,
-            ['split_notes' => $splitNotes, 'source' => 'edit_modal']
+            [
+                'split_notes'    => $splitNotes,
+                'source'         => 'edit_modal',
+                'split_queue_id' => $prep['split_queue_id'],
+                'caption_job_id' => $prep['caption_job_id'],
+                'audio_job_id'   => $prep['audio_job_id'],
+            ]
         );
     } elseif ($wasSplit && !$needsSplit) {
         $audit->record(
@@ -354,6 +362,9 @@ if ($uri === '/queue/edit') {
     }
 
     $message = 'Proposed path updated.';
+    if (!$wasSplit && $needsSplit) {
+        $message .= ' Split prep queued (caption extract if needed + audio levels).';
+    }
     if ($removedJobs !== []) {
         $message .= ' ' . count($removedJobs) . ' active split job(s) removed.';
     }
@@ -573,30 +584,50 @@ if ($uri === '/queue/add-split') {
         redirect_queue();
     }
 
-    $splitRepo = new SplitQueueRepository();
-    $ids       = parse_ids();
-    $count     = 0;
-
+    $ids = parse_ids();
+    $eligible = [];
     foreach ($ids as $id) {
         $file = $files->findById($id);
         if ($file === null || empty($file['needs_split'])) {
             continue;
         }
-        if ($splitRepo->hasActiveForFile($id)) {
+        $eligible[] = $id;
+    }
+
+    $prep = (new SplitPrepService())->onMarkedForSplitMany($eligible, $userId, true);
+    foreach ($eligible as $id) {
+        $file = $files->findById($id);
+        if ($file === null) {
             continue;
         }
-        try {
-            $jobId = $splitRepo->create($id, $userId);
-            $audit->record($userId, $user['email'] ?? '', $ip, 'SPLIT_QUEUED', 'split_queue', $jobId, $file['original_path'], null, [
-                'file_id' => $id,
-            ]);
-            $count++;
-        } catch (PDOException) {
-            // unique constraint — already queued
+        $active = (new SplitQueueRepository())->findActiveForFile($id);
+        if ($active !== null) {
+            $audit->record(
+                $userId,
+                $user['email'] ?? '',
+                $ip,
+                'SPLIT_QUEUED',
+                'split_queue',
+                (int) $active['id'],
+                $file['original_path'],
+                null,
+                [
+                    'file_id'        => $id,
+                    'caption_files'  => $prep['caption_files'],
+                    'audio_jobs'     => $prep['audio_jobs'],
+                    'source'         => 'queue_add_split',
+                ]
+            );
         }
     }
 
-    Session::flash('success', $count . ' file(s) added to split queue.');
+    Session::flash(
+        'success',
+        count($eligible) . ' file(s) prepared for split'
+        . ($prep['caption_files'] > 0 ? '; caption extract for ' . $prep['caption_files'] : '')
+        . ($prep['audio_jobs'] > 0 ? '; audio levels for ' . $prep['audio_jobs'] : '')
+        . '.'
+    );
     redirect_queue();
 }
 

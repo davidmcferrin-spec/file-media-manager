@@ -70,7 +70,8 @@ if ($method === 'POST' && $uri === '/scan/start') {
 
     $sourceId        = (int) ($_POST['source_id'] ?? 0);
     $subpath         = trim((string) ($_POST['subpath'] ?? ''), '/');
-    $extractMetadata = isset($_POST['extract_metadata']);
+    // FFprobe + caption probe are required for every scanned file.
+    $extractMetadata = true;
     $useDevList      = isset($_POST['use_dev_list']);
     $ackTimeline     = isset($_POST['ack_timeline_not_ready']);
 
@@ -499,6 +500,57 @@ if ($method === 'POST' && $uri === '/scan/reclassify') {
     }
 
     header('Location: /scan/' . $jobId);
+    exit;
+}
+
+// ── GET: JSON list status (scan index live poll) ───────────────
+if ($method === 'GET' && $uri === '/scan/list-status') {
+    $recentJobs = $scanJobs->recent(15);
+    $jobsOut = [];
+    $poll = false;
+    foreach ($recentJobs as $job) {
+        $jobId = (int) ($job['id'] ?? 0);
+        $statusStr = (string) ($job['status'] ?? '');
+        $total = (int) ($job['total_files'] ?? 0);
+        $done = (int) ($job['processed_files'] ?? 0);
+        $pct = $total > 0 ? (int) round(($done / $total) * 100) : 0;
+        $orphan = $statusStr === 'RUNNING' && !$scanJobs->isWorkerAlive($jobId);
+        $timing = ScanEtaEstimator::estimate($job);
+        $active = $statusStr === 'RUNNING'
+            || ($statusStr === 'PENDING' && empty($job['cancel_requested']));
+        if ($active) {
+            $poll = true;
+        }
+        $badge = match ($statusStr) {
+            'COMPLETED' => 'success',
+            'RUNNING'   => 'primary',
+            'PAUSED'    => 'info',
+            'FAILED'    => 'danger',
+            'CANCELLED' => 'warning',
+            default     => 'secondary',
+        };
+        $jobsOut[] = [
+            'id'               => $jobId,
+            'status'           => $statusStr,
+            'status_badge'     => $badge,
+            'worker_orphan'    => $orphan,
+            'processed_files'  => $done,
+            'total_files'      => $total,
+            'pct'              => $pct,
+            'timing'           => $timing,
+            'can_stop'         => in_array($statusStr, ['PENDING', 'RUNNING'], true) && !$orphan,
+            'can_resume'       => $statusStr === 'PAUSED',
+            'can_delete'       => $statusStr !== 'RUNNING' || $orphan,
+        ];
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'poll' => $poll,
+        'ids'  => array_column($jobsOut, 'id'),
+        'jobs' => $jobsOut,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 

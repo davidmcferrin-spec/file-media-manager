@@ -267,6 +267,48 @@ if ($method === 'POST') {
     exit;
 }
 
+// GET /captions/list-status — JSON for captions index live poll
+if ($method === 'GET' && $uri === '/captions/list-status') {
+    $recent = $jobs->recent(30);
+    $running = $jobs->findRunning();
+    $jobsOut = [];
+    $poll = false;
+    foreach ($recent as $job) {
+        $id = (int) ($job['id'] ?? 0);
+        $statusStr = (string) ($job['status'] ?? '');
+        $orphan = $statusStr === 'RUNNING' && !$jobs->isWorkerAlive($id);
+        if (in_array($statusStr, ['PENDING', 'RUNNING'], true)) {
+            $poll = true;
+        }
+        $jobsOut[] = [
+            'id'              => $id,
+            'status'          => $statusStr,
+            'status_badge_html' => View::statusBadge($statusStr),
+            'worker_orphan'   => $orphan,
+            'processed_files' => (int) ($job['processed_files'] ?? 0),
+            'total_files'     => (int) ($job['total_files'] ?? 0),
+            'ok_count'        => (int) ($job['ok_count'] ?? 0),
+            'fail_count'      => (int) ($job['fail_count'] ?? 0),
+            'skip_count'      => (int) ($job['skip_count'] ?? 0),
+            'can_delete'      => $statusStr !== 'RUNNING' || $orphan,
+        ];
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'poll'    => $poll,
+        'ids'     => array_column($jobsOut, 'id'),
+        'running' => $running === null ? null : [
+            'id'              => (int) $running['id'],
+            'processed_files' => (int) ($running['processed_files'] ?? 0),
+            'total_files'     => (int) ($running['total_files'] ?? 0),
+        ],
+        'jobs'    => $jobsOut,
+    ], JSON_THROW_ON_ERROR);
+    exit;
+}
+
 // GET /captions/{id}/status — JSON for live poll (keeps checkbox UI intact)
 if ($method === 'GET' && preg_match('#^/captions/(\d+)/status$#', $uri, $m)) {
     $id = (int) $m[1];

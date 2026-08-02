@@ -13,11 +13,30 @@ use MediaManager\Services\FileEditSuggester;
 
 Auth::requireLogin();
 
+$uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
 $files       = new FileRepository();
 $shows       = new ShowRepository();
 $scanJobs    = new ScanJobRepository();
 $mediaTypes  = new MediaTypeRepository();
 $suggester   = new FileEditSuggester();
+
+// GET /queue/list-status — counts only (never replace checkbox rows)
+if ($method === 'GET' && $uri === '/queue/list-status') {
+    $statusCounts = $files->statusCounts();
+    $approved = (int) ($statusCounts['APPROVED'] ?? 0);
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        // Keep a light poll so pills stay fresh while reviewing.
+        'poll'          => true,
+        'status_counts' => $statusCounts,
+        'approved_count'=> $approved,
+    ], JSON_THROW_ON_ERROR);
+    exit;
+}
 
 $statusParam = $_GET['status'] ?? 'PENDING';
 $filters = [

@@ -14,6 +14,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.21.0] — 2026-08-01
+
+### Changed
+
+- **Ingest / split prep policy (A)**
+  - Scan always runs **FFprobe + caption probe** (checkbox removed)
+  - Empty / failed caption extract ⇒ **no caption service** (`has_captions=false`, `srt_path=null`, `captions_probed=true`)
+  - Marking for split (Catalog edit, Add to Split, or scan `needs_split`) auto-queues Split job + caption extract (if no usable SRT) + audio levels
+  - Audio worker claims **no-SRT files first**
+
+## [0.20.0] — 2026-08-01
+
+### Changed
+
+- Top nav **Queues** dropdown: Catalog, Glue; admin also Scan, Captions, Split, Execute
+- Queue list pages update via JSON (no full-page refresh for status/progress)
+  - `GET /scan/list-status`, `/captions/list-status`, `/glue/list-status`, `/split/list-status`
+  - Catalog `/queue/list-status` and Execute `/execute/list-status` update counts only; pause while checkboxes/modals are active
+  - Split workbench: removed meta refresh (audio job already polled via JSON)
+
+## [0.19.0] — 2026-08-01
+
+### Added
+
+- **Admin → Services** (`/services`): systemd status, start/stop/restart/enable/disable, live journal tail
+  - Workers: `media-manager-scan`, `media-manager-caption-extract`, `media-manager-split-audio`
+  - Infrastructure: Apache + PostgreSQL (status + restart/reload only — stop/disable blocked)
+  - Host snapshot: uptime, load, memory, disk, PHP, `WORKER_MODE`
+  - Journal panel follows like `journalctl -f` (auto-scroll to latest; pause when Follow is off)
+  - Allowlisted helper `deploy/sbin/media-manager-svc` + `deploy/sudoers/media-manager` (installed by `setup.sh`)
+  - Actions written to the audit log
+
 ## [0.18.1] — 2026-08-01
 
 ### Added
@@ -75,6 +107,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 - **Split flag default ≥ 2 hours** (`split_flag_threshold_seconds` = 7200); strong note remains ≥ 3 hours
 - Classifier / schedule split suggester use Settings → Processing thresholds (no hardcoded 75m / 1h 11m notes)
 - Settings UI, `.env.example`, and docs describe the configured thresholds
+
+## [0.21.0] — 2026-08-01
+
+### Changed
+
+- **Ingest / split prep policy (A)**
+  - Scan always runs **FFprobe + caption probe** (no optional checkbox)
+  - Empty / failed caption extract ⇒ **no caption service** (`has_captions=false`, `srt_path=null`, `captions_probed=true`)
+  - Marking a file for split (Catalog edit, Add to Split, or scan `needs_split`) auto-queues: Split job + caption extract (if no usable SRT) + audio levels
+  - Audio worker claims **no-SRT files first**
 
 ## [0.15.1] — 2026-08-01
 

@@ -8,6 +8,9 @@ use MediaManager\Repositories\FileRepository;
 
 /**
  * Extract embedded captions to an .srt sidecar beside the media file.
+ *
+ * Policy A: no stream / empty / unusable extract ⇒ no caption service
+ * (has_captions=false, srt_path=null, captions_probed=true).
  */
 final class CaptionExtractService
 {
@@ -68,13 +71,19 @@ final class CaptionExtractService
 
         $existing = FFprobeService::adjacentCaptionSidecar($source);
         if ($existing !== null && str_ends_with(strtolower($existing), '.srt')) {
+            $cues = SrtCaptionParser::parseFile($existing);
+            if ($cues === []) {
+                $this->files->clearCaptionService($fileId);
+
+                return $fail('Existing SRT sidecar has no usable cues — treated as no captions.', true);
+            }
             $this->files->recordSrtSidecar($fileId, $existing, true, null);
 
             return [
                 'ok'          => true,
                 'skip'        => false,
                 'srt_path'    => $existing,
-                'message'     => 'Existing SRT sidecar linked.',
+                'message'     => 'Existing SRT sidecar linked (' . count($cues) . ' cue(s)).',
                 'ffmpeg_tail' => '',
             ];
         }
@@ -101,8 +110,10 @@ final class CaptionExtractService
             ];
         }
 
+        $this->files->clearCaptionService($fileId);
+
         return $fail(
-            'No caption/subtitle stream detected. (CEA-608 in MXF may need a separate extractor.)',
+            'No caption/subtitle stream detected — treated as no captions.',
             true
         );
     }
@@ -138,13 +149,19 @@ final class CaptionExtractService
 
         $existing = FFprobeService::adjacentCaptionSidecar($source);
         if ($existing !== null && str_ends_with(strtolower($existing), '.srt')) {
+            $cues = SrtCaptionParser::parseFile($existing);
+            if ($cues === []) {
+                $this->files->clearCaptionService($fileId);
+
+                return $fail('Existing SRT sidecar has no usable cues — treated as no captions.', '', true);
+            }
             $this->files->recordSrtSidecar($fileId, $existing, true, null);
 
             return [
                 'ok'          => true,
                 'skip'        => false,
                 'srt_path'    => $existing,
-                'message'     => 'Existing SRT sidecar linked.',
+                'message'     => 'Existing SRT sidecar linked (' . count($cues) . ' cue(s)).',
                 'ffmpeg_tail' => '',
             ];
         }
@@ -170,15 +187,17 @@ final class CaptionExtractService
                     $hasCaptions = true;
                     $this->files->updateCaptionFlags($fileId, true, $streamIndex);
                 } else {
-                    $this->files->updateCaptionFlags($fileId, false, null);
+                    $this->files->clearCaptionService($fileId);
                 }
             }
         }
 
         if (!$hasCaptions && $streamIndex === null) {
             if ($probeOk) {
+                $this->files->clearCaptionService($fileId);
+
                 return $fail(
-                    'No caption/subtitle stream detected. (CEA-608 in MXF may need a separate extractor.)',
+                    'No caption/subtitle stream detected — treated as no captions.',
                     '',
                     true
                 );
@@ -230,18 +249,25 @@ final class CaptionExtractService
             if (is_file($srtPath)) {
                 @unlink($srtPath);
             }
+            $this->files->clearCaptionService($fileId);
 
             return $fail(
-                'FFmpeg could not extract captions (exit ' . $code . ', wall ' . $wall . 's).',
-                $tail
+                'No usable captions extracted (exit ' . $code . ', wall ' . $wall . 's) — treated as no captions.',
+                $tail,
+                true
             );
         }
 
         $cues = SrtCaptionParser::parseFile($srtPath);
         if ($cues === []) {
             @unlink($srtPath);
+            $this->files->clearCaptionService($fileId);
 
-            return $fail('Extracted file had no usable caption cues (wall ' . $wall . 's).', $tail);
+            return $fail(
+                'Extracted file had no usable caption cues (wall ' . $wall . 's) — treated as no captions.',
+                $tail,
+                true
+            );
         }
 
         $this->files->recordSrtSidecar($fileId, $srtPath, true, $streamIndex);
