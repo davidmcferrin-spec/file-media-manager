@@ -170,7 +170,7 @@ require dirname(__DIR__) . '/shows/_nav.php';
   <?php endforeach; ?>
 </div>
 
-<ul class="nav nav-tabs mb-3">
+<ul class="nav page-tabs mb-3 flex-wrap" role="tablist">
   <?php
   $tabs = [
       'overview'    => 'Overview',
@@ -184,7 +184,9 @@ require dirname(__DIR__) . '/shows/_nav.php';
   foreach ($tabs as $key => $label):
   ?>
   <li class="nav-item">
-    <a class="nav-link<?php echo $tab === $key ? ' active' : ''; ?>" href="<?php echo View::e($tabUrl($key)); ?>">
+    <a class="page-tab<?php echo $tab === $key ? ' active' : ''; ?>"
+       href="<?php echo View::e($tabUrl($key)); ?>"
+       <?php echo $tab === $key ? 'aria-current="page"' : ''; ?>>
       <?php echo View::e($label); ?>
       <?php if ($key === 'duplicates' && count($duplicates) > 0): ?>
         <span class="badge bg-danger ms-1"><?php echo count($duplicates); ?></span>

@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.21.2] — 2026-08-01
+
+### Fixed
+
+- Site-wide **page tab/pill contrast**: muted top-nav `.nav-link` styles no longer apply outside the navbar
+  - Shared high-contrast `.page-tab` chips for Dashboard, Settings, Shows/Gaps/Timeline, and Gaps inner tabs
+
 ## [0.21.1] — 2026-08-01
 
 ### Fixed

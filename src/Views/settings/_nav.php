@@ -23,44 +23,52 @@ function settings_tab(string $tab, string $currentTab): string
   </div>
 </div>
 
-<ul class="nav nav-pills mb-4 gap-1 flex-wrap">
+<ul class="nav page-tabs mb-4 flex-wrap" role="tablist">
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('sources', $settingsTab); ?>" href="/settings/sources">
+    <a class="page-tab<?php echo settings_tab('sources', $settingsTab); ?>" href="/settings/sources"
+       <?php echo $settingsTab === 'sources' ? 'aria-current="page"' : ''; ?>>
       NAS Sources
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('processing', $settingsTab); ?>" href="/settings/processing">
+    <a class="page-tab<?php echo settings_tab('processing', $settingsTab); ?>" href="/settings/processing"
+       <?php echo $settingsTab === 'processing' ? 'aria-current="page"' : ''; ?>>
       Processing
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('conversions', $settingsTab); ?>" href="/settings/conversions">
+    <a class="page-tab<?php echo settings_tab('conversions', $settingsTab); ?>" href="/settings/conversions"
+       <?php echo $settingsTab === 'conversions' ? 'aria-current="page"' : ''; ?>>
       Conversions
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('media-types', $settingsTab); ?>" href="/settings/media-types">
+    <a class="page-tab<?php echo settings_tab('media-types', $settingsTab); ?>" href="/settings/media-types"
+       <?php echo $settingsTab === 'media-types' ? 'aria-current="page"' : ''; ?>>
       Media Types
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('ignore-paths', $settingsTab); ?>" href="/settings/ignore-paths">
+    <a class="page-tab<?php echo settings_tab('ignore-paths', $settingsTab); ?>" href="/settings/ignore-paths"
+       <?php echo $settingsTab === 'ignore-paths' ? 'aria-current="page"' : ''; ?>>
       Ignore Paths
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('ldap', $settingsTab); ?>" href="/settings/ldap">
+    <a class="page-tab<?php echo settings_tab('ldap', $settingsTab); ?>" href="/settings/ldap"
+       <?php echo $settingsTab === 'ldap' ? 'aria-current="page"' : ''; ?>>
       LDAP
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('users', $settingsTab); ?>" href="/settings/users">
+    <a class="page-tab<?php echo settings_tab('users', $settingsTab); ?>" href="/settings/users"
+       <?php echo $settingsTab === 'users' ? 'aria-current="page"' : ''; ?>>
       Users
     </a>
   </li>
   <li class="nav-item">
-    <a class="nav-link<?php echo settings_tab('danger', $settingsTab); ?>" href="/settings/danger">
+    <a class="page-tab<?php echo settings_tab('danger', $settingsTab); ?>" href="/settings/danger"
+       <?php echo $settingsTab === 'danger' ? 'aria-current="page"' : ''; ?>>
       Danger Zone
     </a>
   </li>

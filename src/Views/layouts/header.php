@@ -144,7 +144,8 @@ code, .path-text kbd {
     text-transform: uppercase;
 }
 .navbar-brand span { color: var(--text-soft); font-weight: 400; }
-.nav-link {
+/* Top navbar only — do not mute in-page pills/tabs (Settings, Shows, Gaps, …). */
+.navbar .nav-link {
     color: var(--text-soft) !important;
     font-size: 0.82rem;
     letter-spacing: 0.03em;
@@ -152,11 +153,11 @@ code, .path-text kbd {
     border-radius: 0.375rem;
     transition: color 0.15s, background 0.15s;
 }
-.nav-link:hover {
+.navbar .nav-link:hover {
     color: var(--text-main) !important;
     background: var(--hover-bg);
 }
-.nav-link.active {
+.navbar .nav-link.active {
     color: var(--accent) !important;
     background: var(--info-soft);
 }
@@ -354,21 +355,24 @@ code, .path-text kbd {
     font-weight: 600;
 }
 
-/* ── Dashboard section tabs (Pipeline / Library Analytics) ─── */
+/* ── High-contrast page tabs/pills (Dashboard, Settings, Shows, Gaps) ─── */
+.page-tabs,
 .dashboard-tabs {
     display: flex;
     flex-wrap: wrap;
     list-style: none;
     padding: 0;
     margin: 0;
+    gap: 0.35rem;
 }
+.page-tab,
 .dashboard-tab {
     display: inline-block;
-    font-size: 0.92rem;
+    font-size: 0.88rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     line-height: 1.2;
-    padding: 0.55rem 1rem;
+    padding: 0.5rem 0.9rem;
     border-radius: 0.45rem;
     border: 1px solid var(--border-strong);
     background: var(--panel-strong);
@@ -376,19 +380,26 @@ code, .path-text kbd {
     text-decoration: none !important;
     transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
+.page-tab:hover,
 .dashboard-tab:hover {
     color: var(--text-main) !important;
     border-color: var(--accent);
     background: var(--hover-bg);
 }
+.page-tab.active,
 .dashboard-tab.active {
     color: #0b1118 !important;
     background: var(--accent);
     border-color: var(--accent);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
+[data-bs-theme="light"] .page-tab.active,
 [data-bs-theme="light"] .dashboard-tab.active {
     color: #ffffff !important;
+}
+.page-tab .badge {
+    font-size: 0.68rem;
+    vertical-align: middle;
 }
 
 /* ── Stat cards ─────────────────────────────────────────────── */
