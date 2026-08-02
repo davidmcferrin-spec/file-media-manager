@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.28.0] — 2026-08-02
+
+### Added
+
+- Rules + Continuity parse Seagate / linear PGM feed names: **`MMDDYY H{A|P} EST`** (e.g. `060625 8P EST` → 20250606 / 2000), using month folders like `JUNE 2025` for the year
+- Continuity prompt teaches that pattern and prefers schedule show at that Eastern air time
+
 ## [0.27.0] — 2026-08-02
 
 ### Added

@@ -9,12 +9,15 @@ namespace MediaManager\Services;
  */
 final class DateNormalizer
 {
-    /** @return array{date: ?string, time: ?string, signal: ?string} */
-    public static function fromFilename(string $filename): array
+    /**
+     * @param list<string> $pathSegments Directory segments (for year hints like "JUNE 2025")
+     * @return array{date: ?string, time: ?string, signal: ?string}
+     */
+    public static function fromFilename(string $filename, array $pathSegments = []): array
     {
         $base = pathinfo($filename, PATHINFO_FILENAME);
 
-        return self::fromToken($base);
+        return self::fromToken($base, self::yearHintFromPath($pathSegments));
     }
 
     /**
@@ -22,11 +25,17 @@ final class DateNormalizer
      *
      * @return array{date: ?string, time: ?string, signal: ?string}
      */
-    public static function fromToken(string $base): array
+    public static function fromToken(string $base, ?int $yearHint = null): array
     {
         $base = trim($base);
         if ($base === '') {
             return ['date' => null, 'time' => null, 'signal' => null];
+        }
+
+        // Seagate / linear PGM feed: MMDDYY 8P EST · 060625 7A EST · 121224 12P EST
+        $seagate = self::parseMmddyyHourAp($base, $yearHint);
+        if ($seagate['date'] !== null) {
+            return $seagate;
         }
 
         // Primary: _YYYYMMDD_HHMM or space/hyphen separators (time 4–8 digits).
@@ -121,9 +130,10 @@ final class DateNormalizer
     public static function fromPathSegments(array $segments): array
     {
         $n = count($segments);
+        $yearHint = self::yearHintFromPath($segments);
         for ($i = 0; $i < $n; $i++) {
             $token = (string) $segments[$i];
-            $parsed = self::fromToken($token);
+            $parsed = self::fromToken($token, $yearHint);
             if ($parsed['date'] !== null) {
                 return [
                     'date'   => $parsed['date'],
@@ -212,6 +222,121 @@ final class DateNormalizer
         }
 
         return $hhmm;
+    }
+
+    /**
+     * MMDDYY + 12-hour clock with A/P (Eastern), optional EST suffix.
+     * Example: "060625 8P EST" → 20250606 / 2000
+     *
+     * @return array{date: ?string, time: ?string, signal: ?string}
+     */
+    public static function parseMmddyyHourAp(string $base, ?int $yearHint = null): array
+    {
+        if (preg_match(
+            '/(?:^|[^0-9])(\d{2})(\d{2})(\d{2})[_\s\-]+(\d{1,2})([AaPp])(?:\s*EST)?(?:[^A-Za-z0-9]|$)/',
+            $base,
+            $m
+        ) !== 1) {
+            return ['date' => null, 'time' => null, 'signal' => null];
+        }
+
+        $month = (int) $m[1];
+        $day = (int) $m[2];
+        $yy = (int) $m[3];
+        $hour12 = (int) $m[4];
+        $ap = strtoupper($m[5]);
+        $year = self::expandTwoDigitYear($yy, $yearHint);
+        $hhmm = self::hourApToHhmm($hour12, $ap);
+        if ($hhmm === null) {
+            return ['date' => null, 'time' => null, 'signal' => null];
+        }
+
+        $date = sprintf('%04d%02d%02d', $year, $month, $day);
+        if (!self::isValidDate($date)) {
+            return ['date' => null, 'time' => null, 'signal' => null];
+        }
+
+        return [
+            'date'   => $date,
+            'time'   => $hhmm,
+            'signal' => 'filename:MMDDYY_H{A|P}_EST',
+        ];
+    }
+
+    /** 12A→0000, 8A→0800, 12P→1200, 8P→2000. */
+    public static function hourApToHhmm(int $hour12, string $amPm): ?string
+    {
+        if ($hour12 < 1 || $hour12 > 12) {
+            return null;
+        }
+        $ap = strtoupper(substr(trim($amPm), 0, 1));
+        if ($ap === 'A') {
+            $h24 = $hour12 === 12 ? 0 : $hour12;
+        } elseif ($ap === 'P') {
+            $h24 = $hour12 === 12 ? 12 : $hour12 + 12;
+        } else {
+            return null;
+        }
+
+        return sprintf('%02d00', $h24);
+    }
+
+    /** Prefer path year (e.g. JUNE 2025); else 00–69 → 20xx, 70–99 → 19xx. */
+    public static function expandTwoDigitYear(int $yy, ?int $yearHint = null): int
+    {
+        $yy = max(0, min(99, $yy));
+        if ($yearHint !== null && $yearHint >= 1900 && $yearHint <= 2100) {
+            $century = intdiv($yearHint, 100) * 100;
+            $candidate = $century + $yy;
+            // If hint is 2025 and yy is 25 → 2025; if yy is 24 near year boundary → 2024.
+            if (abs($candidate - $yearHint) <= 1) {
+                return $candidate;
+            }
+
+            return $candidate;
+        }
+
+        return $yy >= 70 ? 1900 + $yy : 2000 + $yy;
+    }
+
+    /**
+     * Year from folders like "JUNE 2025", "DECEMBER 2024", or bare "2025".
+     *
+     * @param list<string> $segments
+     */
+    public static function yearHintFromPath(array $segments): ?int
+    {
+        $monthNames = 'January|February|March|April|May|June|July|August|September|October|November|December'
+            . '|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
+
+        foreach (array_reverse($segments) as $seg) {
+            $seg = trim((string) $seg);
+            if ($seg === '') {
+                continue;
+            }
+            if (preg_match('/\b(?:' . $monthNames . ')\s+(\d{4})\b/i', $seg, $m) === 1) {
+                $y = (int) $m[1];
+                if ($y >= 1990 && $y <= 2100) {
+                    return $y;
+                }
+            }
+            if (preg_match('/^(19|20)\d{2}$/', $seg) === 1) {
+                return (int) $seg;
+            }
+        }
+
+        // Parent ranges like "SEAGATE PGM FEED OCT 2024-JUNE 30, 2025" — prefer the latest year.
+        foreach (array_reverse($segments) as $seg) {
+            if (preg_match_all('/\b(20\d{2}|19\d{2})\b/', (string) $seg, $m) > 0) {
+                $years = array_map('intval', $m[1]);
+                $y = max($years);
+                if ($y >= 1990 && $y <= 2100) {
+                    return $y;
+                }
+            }
+        }
+
+        return null;
     }
 
     /** Minutes from midnight for an HHMM (or HH:MM) time string. */

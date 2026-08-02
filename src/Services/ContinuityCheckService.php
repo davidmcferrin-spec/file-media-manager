@@ -237,7 +237,8 @@ final class ContinuityCheckService
                             'system' => 'Your previous JSON omitted required fields. Reply with complete JSON only: '
                                 . 'agree, confidence (HIGH|MEDIUM|LOW), show_id, media_type_id, media_type_agree, '
                                 . 'file_date (YYYYMMDD), file_time (HHMM), datetime_agree, reason. '
-                                . 'ALWAYS include file_date and file_time — extract from original_filename/path digits, '
+                                . 'ALWAYS include file_date and file_time — extract from original_filename/path '
+                                . '(including MMDDYY H{A|P} EST like 060625 8P EST → 20250606/2000), '
                                 . 'catalog_proposal, or schedule; never leave them null when any clue exists. '
                                 . 'Mirror proposal file_date/file_time/media_type_id when you do not dispute them. '
                                 . 'Choose show_id and media_type_id only from the catalogs in the user JSON.',
@@ -589,7 +590,8 @@ final class ContinuityCheckService
     public static function completeVerdictFromProposal(
         array $verdict,
         array $proposal,
-        ?string $originalFilename = null
+        ?string $originalFilename = null,
+        ?string $originalPath = null
     ): array {
         $filled = [];
         $conf = strtoupper(trim((string) ($verdict['confidence'] ?? '')));
@@ -628,9 +630,17 @@ final class ContinuityCheckService
             }
         }
 
-        // Last resort: parse digits from the original filename so Lab still shows a Model date/time.
+        // Last resort: parse digits from the original filename/path so Lab still shows a Model date/time.
         if ($originalFilename !== null && $originalFilename !== '') {
-            $parsed = DateNormalizer::fromFilename($originalFilename);
+            $pathSegments = [];
+            if ($originalPath !== null && $originalPath !== '') {
+                $norm = str_replace('\\', '/', $originalPath);
+                $dir = dirname($norm);
+                if ($dir !== '/' && $dir !== '.' && $dir !== '') {
+                    $pathSegments = array_values(array_filter(explode('/', $dir), static fn ($s) => $s !== ''));
+                }
+            }
+            $parsed = DateNormalizer::fromFilename($originalFilename, $pathSegments);
             if (
                 (($verdict['file_date'] ?? null) === null || $verdict['file_date'] === '')
                 && $parsed['date'] !== null
@@ -1071,7 +1081,11 @@ Your job:
 The application builds the policy filename from your fields — do not invent filenames.
 Rules:
 - ALWAYS return confidence, show_id, file_date, file_time, and media_type_id.
-- ALWAYS propose file_date (YYYYMMDD) and file_time (HHMM Eastern). Extract digits from original_filename/path (YYYYMMDD_HHMM, YYYY-MM-DD, YYYYMMDDHHMM, folder YYYY/MM/DD). If catalog_proposal has date/time and you do not dispute them, mirror them. Prefer a best-effort estimate from filename, path, schedule, or proposal over null. Null only when no digit or schedule clue exists at all.
+- ALWAYS propose file_date (YYYYMMDD) and file_time (HHMM Eastern). Extract from original_filename/path:
+  • Policy: YYYYMMDD_HHMM, YYYY-MM-DD, YYYYMMDDHHMM, folder YYYY/MM/DD
+  • Seagate / linear PGM feed: MMDDYY + hour + A/P + optional EST — e.g. "060625 8P EST" → file_date=20250606, file_time=2000; "060625 7A EST" → 20250606 / 0700; "121224 12P EST" → 20241212 / 1200; 12A → 0000. Month folders like "JUNE 2025" confirm the year.
+  If catalog_proposal has date/time and you do not dispute them, mirror them. Prefer a best-effort estimate from filename, path, schedule, or proposal over null. Null only when no digit or schedule clue exists at all.
+- When date/time are clear, choose show_id from day_slots[] / at_air_time[] / schedule[] for that Eastern air time — do not invent a default show.
 - If catalog_proposal is correct overall, mirror its values and set agree=true.
 - Choose show_id ONLY from shows[].id. Choose media_type_id ONLY from media_types[].id (numeric).
 - Use schedule[] (full Timeline) and day_slots[] (all blocks active on the air date) as the authority for what can air when. schedule.to null means the block is still current.
@@ -1234,7 +1248,7 @@ PROMPT;
         $proposal = is_array($asked['seed_packet']['proposal'] ?? null)
             ? $asked['seed_packet']['proposal']
             : [];
-        $completed = self::completeVerdictFromProposal($verdict, $proposal, $originalFilename);
+        $completed = self::completeVerdictFromProposal($verdict, $proposal, $originalFilename, $originalPath);
         $verdict = $completed['verdict'];
         $filledFromProposal = $completed['filled'];
 

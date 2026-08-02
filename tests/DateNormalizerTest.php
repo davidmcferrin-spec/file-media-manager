@@ -47,6 +47,31 @@ $r = DateNormalizer::fromFilename('clip_10-03-2022_19:00.mxf');
 assert_eq('20221003', $r['date'], 'US date');
 assert_eq('1900', $r['time'], 'US date time');
 
+// Seagate / linear PGM feed: MMDDYY H{A|P} EST
+$r = DateNormalizer::fromFilename('060625 8P EST.mp4', ['JUNE 2025']);
+assert_eq('20250606', $r['date'], 'seagate 8P date');
+assert_eq('2000', $r['time'], 'seagate 8P time');
+assert_eq('filename:MMDDYY_H{A|P}_EST', $r['signal'], 'seagate signal');
+
+$r = DateNormalizer::fromFilename('060625 7A EST.mxf', ['JUNE 2025']);
+assert_eq('20250606', $r['date'], 'seagate 7A date');
+assert_eq('0700', $r['time'], 'seagate 7A time');
+
+$r = DateNormalizer::fromFilename('060625 12P EST.mp4', ['JUNE 2025']);
+assert_eq('1200', $r['time'], 'seagate 12P noon');
+
+$r = DateNormalizer::fromFilename('060625 12A EST.mp4', ['JUNE 2025']);
+assert_eq('0000', $r['time'], 'seagate 12A midnight');
+
+$r = DateNormalizer::fromFilename('121224 10P EST.mxf', ['DECEMBER 2024']);
+assert_eq('20241212', $r['date'], 'seagate Dec 2024 date');
+assert_eq('2200', $r['time'], 'seagate 10P time');
+
+assert_eq('2000', DateNormalizer::hourApToHhmm(8, 'P'), 'hourAp 8P');
+assert_eq('0800', DateNormalizer::hourApToHhmm(8, 'A'), 'hourAp 8A');
+assert_eq(2025, DateNormalizer::expandTwoDigitYear(25, 2025), 'yy with hint');
+assert_eq(2025, DateNormalizer::yearHintFromPath(['SEAGATE PGM FEED', 'JUNE 2025']), 'year hint JUNE 2025');
+
 $path = DateNormalizer::fromPathSegments(['CUOMO', '2022', '10', '03', 'Clean']);
 assert_eq('20221003', $path['date'], 'path YYYY/MM/DD');
 

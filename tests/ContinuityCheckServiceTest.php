@@ -238,6 +238,23 @@ final class ContinuityCheckServiceTest extends TestCase
         $this->assertContains('file_time:filename', $done['filled']);
     }
 
+    public function test_complete_verdict_fills_seagate_mmddyy_hour_ap(): void
+    {
+        $done = ContinuityCheckService::completeVerdictFromProposal(
+            [
+                'agree'      => false,
+                'confidence' => 'MEDIUM',
+                'show_id'    => 20,
+            ],
+            [],
+            '060625 8P EST.mp4',
+            '/mnt-smb/SNSEVO-NYL/SEAGATE PGM FEED/JUNE 2025/060625 8P EST.mp4'
+        );
+        $v = $done['verdict'];
+        $this->assertSame('20250606', $v['file_date']);
+        $this->assertSame('2000', $v['file_time']);
+    }
+
     public function test_lean_schedule_prefers_matching_day(): void
     {
         $schedule = [];

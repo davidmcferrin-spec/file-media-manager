@@ -16,7 +16,7 @@ final class FileDateTimeResolver
     public static function resolve(string $filename, ?array $ffprobe, array $pathSegments = []): array
     {
         $signals = [];
-        $fromFile = DateNormalizer::fromFilename($filename);
+        $fromFile = DateNormalizer::fromFilename($filename, $pathSegments);
         $fileDate = $fromFile['date'];
         $fileTime = $fromFile['time'];
         if ($fromFile['signal'] !== null) {
