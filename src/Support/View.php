@@ -237,6 +237,7 @@ class View
             'ROLLED_BACK' => ['info',      'Rolled Back'],
             'IN_PROGRESS' => ['info',      'In Progress'],
             'RUNNING'     => ['info',      'Running'],
+            'PAUSED'      => ['warning',   'Paused'],
             'COMPLETED'   => ['success',   'Completed'],
             'CANCELLED'   => ['dark',      'Cancelled'],
             'DONE'        => ['success',   'Done'],

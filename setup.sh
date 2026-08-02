@@ -335,7 +335,7 @@ sudo -u www-data php8.4 -r "
 " || warn "Could not persist continuity setting (non-fatal)."
 
 # ── 13. Background workers (systemd) ──────────────────────────
-info "Installing scan + caption extract systemd workers..."
+info "Installing scan + caption extract + split audio systemd workers..."
 ensure_env_key "WORKER_MODE" "daemon"
 ensure_env_key "WORKER_POLL_SECONDS" "5"
 
@@ -344,7 +344,7 @@ if [[ -z "${PHP_BIN}" ]]; then
     warn "PHP binary not found — skip systemd workers."
 elif command -v systemctl >/dev/null 2>&1; then
     UNIT_DIR="/etc/systemd/system"
-    for unit in media-manager-scan media-manager-caption-extract; do
+    for unit in media-manager-scan media-manager-caption-extract media-manager-split-audio; do
         src="${WEB_ROOT}/deploy/systemd/${unit}.service"
         if [[ -f "${src}" ]]; then
             # Rewrite paths/PHP binary for this install

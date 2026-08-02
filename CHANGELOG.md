@@ -14,6 +14,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.18.0] — 2026-08-01
+
+### Changed
+
+- **Live job pages use JSON polling** instead of full page refresh
+  - Caption extract detail: `GET /captions/{id}/status` — progress/ETA/log update in place; prioritize checkboxes are preserved
+  - Scan job detail: `GET /scan/{id}/status` — counters, progress, sample table update without reload
+  - Continuity Lab live mode: `GET /continuity-lab/status` — no more `location.reload()` every 8s
+  - Shared client helper: `public/js/live-poll.js`
+  - Auth returns **401/403 JSON** when `Accept: application/json` (session expiry no longer returns HTML login to fetch)
+
+## [0.17.1] — 2026-08-01
+
+### Fixed
+
+- Dashboard **Pipeline** / **Library Analytics** tabs: dedicated high-contrast chips (no longer inherit muted top-nav `.nav-link` styles)
+
+## [0.18.0] — 2026-08-01
+
+### Changed
+
+- **Split audio analysis is a background worker** (no FFmpeg in Apache/PHP-FPM)
+  - Table `split_audio_jobs` + `media-manager-split-audio.service`
+  - Suggest from audio / Load audio levels enqueue only; workbench polls status
+  - Cooperative cancel; one active job per source file
+
 ## [0.17.0] — 2026-08-01
 
 ### Added

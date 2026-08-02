@@ -9,29 +9,76 @@ use MediaManager\Auth\Session;
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\FileRepository;
 use MediaManager\Repositories\ShowRepository;
+use MediaManager\Repositories\SplitAudioJobRepository;
 use MediaManager\Repositories\SplitQueueRepository;
 use MediaManager\Repositories\SystemRepository;
 use MediaManager\Services\AudioLevelMapService;
-use MediaManager\Services\AudioSilenceDetector;
-use MediaManager\Services\AudioSplitSuggester;
 use MediaManager\Services\CaptionSplitSuggester;
 use MediaManager\Services\DateNormalizer;
-use MediaManager\Services\MediaCacheService;
 use MediaManager\Services\ScheduleSplitSuggester;
+use MediaManager\Services\SplitAudioJobService;
 use MediaManager\Services\SplitMediaService;
 use MediaManager\Services\SrtCaptionParser;
+use MediaManager\Support\WorkerMode;
 use PDOException;
-use Throwable;
 
 Auth::requireAdmin();
 
 $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
-$splitRepo = new SplitQueueRepository();
-$showRepo  = new ShowRepository();
-$fileRepo  = new FileRepository();
-$audit     = new AuditRepository();
+$splitRepo     = new SplitQueueRepository();
+$showRepo      = new ShowRepository();
+$fileRepo      = new FileRepository();
+$audioJobRepo  = new SplitAudioJobRepository();
+$audit         = new AuditRepository();
+$projectRoot   = dirname(__DIR__, 2);
+
+/**
+ * Enqueue split audio work for the systemd / spawn worker (no FFmpeg in Apache).
+ */
+function spawn_split_audio_worker(int $jobId, string $projectRoot): void
+{
+    $logFile = SplitAudioJobService::logPathForJob($jobId, $projectRoot);
+    $logDir  = dirname($logFile);
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0775, true);
+    }
+
+    $modeNote = WorkerMode::isDaemon()
+        ? 'Queued for media-manager-split-audio.service'
+        : 'Spawned one-shot worker';
+    @file_put_contents(
+        $logFile,
+        '[' . gmdate('Y-m-d\TH:i:s\Z') . "] INFO {$modeNote} job_id={$jobId}\n",
+        FILE_APPEND | LOCK_EX
+    );
+
+    if (!WorkerMode::shouldSpawn()) {
+        return;
+    }
+
+    $phpBin = PHP_BINARY;
+    $script = $projectRoot . '/scripts/split_audio.php';
+    $flags = '--job-id=' . $jobId;
+
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        pclose(popen(
+            'start /B "" ' . escapeshellarg($phpBin) . ' ' . escapeshellarg($script)
+            . ' ' . $flags . ' >> ' . escapeshellarg($logFile) . ' 2>&1',
+            'r'
+        ));
+    } else {
+        $cmd = sprintf(
+            '%s %s %s >> %s 2>&1 &',
+            escapeshellarg($phpBin),
+            escapeshellarg($script),
+            $flags,
+            escapeshellarg($logFile)
+        );
+        exec($cmd);
+    }
+}
 
 /** @param array<string, mixed> $details */
 function split_audit(
@@ -271,97 +318,57 @@ if ($method === 'POST') {
         }
 
         $file = $fileRepo->findById((int) $item['file_id']);
-        if ($file === null) {
-            Session::flash('error', 'Source file not found.');
-            header('Location: /split/' . $id . $qs);
-            exit;
-        }
-
         $mediaPath = str_replace('\\', '/', (string) ($file['original_path'] ?? ''));
-        if ($mediaPath === '' || !is_readable($mediaPath)) {
+        if ($file === null || $mediaPath === '' || !is_readable($mediaPath)) {
             Session::flash('error', 'Source media is not readable on disk.');
             header('Location: /split/' . $id . $qs);
             exit;
         }
-
-        $codecAudio = trim((string) ($file['codec_audio'] ?? ''));
-        if ($codecAudio === '') {
+        if (trim((string) ($file['codec_audio'] ?? '')) === '') {
             Session::flash('error', 'No audio stream on file — cannot suggest from audio.');
             header('Location: /split/' . $id . $qs);
             exit;
         }
 
-        @set_time_limit(0);
-        $systemRepo = new SystemRepository();
-        $settings = split_audio_settings($systemRepo);
+        $active = $audioJobRepo->findActiveForFile((int) $file['id']);
+        if ($active !== null) {
+            Session::flash(
+                'error',
+                'Audio analysis already '
+                . strtolower((string) ($active['status'] ?? 'queued'))
+                . ' for this file (job #' . (int) $active['id'] . ', '
+                . (string) ($active['kind'] ?? '') . '). Wait or cancel it first.'
+            );
+            header('Location: /split/' . $id . $qs);
+            exit;
+        }
 
-        $mediaCache = new MediaCacheService();
         try {
-            $gaps = split_detect_silence_cached(
-                $mediaPath,
+            $jobId = $audioJobRepo->create(
+                $id,
                 (int) $file['id'],
-                $settings['noise_db'],
-                $mediaCache
+                SplitAudioJobRepository::KIND_SUGGEST,
+                (int) Auth::id()
             );
-            $durationSec = isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : 0.0;
-            try {
-                (new AudioLevelMapService($mediaCache))->buildFromSilenceAndCache(
-                    (int) $file['id'],
-                    $mediaPath,
-                    $durationSec,
-                    $settings['noise_db'],
-                    $gaps
-                );
-            } catch (Throwable) {
-                // Lane cache is best-effort; suggest still proceeds.
-            }
-            $suggestion = (new AudioSplitSuggester(
-                new AudioSilenceDetector(noiseDb: $settings['noise_db']),
-                $settings['flag_seconds'],
-                $settings['content_gap'],
-                $settings['min_program'],
-                $settings['ad_ignore'],
-            ))->suggestFromGaps(
-                $gaps,
-                $durationSec > 0 ? $durationSec : null,
-                isset($file['file_date']) ? (string) $file['file_date'] : null,
-                isset($file['file_time']) ? (string) $file['file_time'] : null,
-            );
-        } catch (Throwable $e) {
-            Session::flash('error', 'Audio suggest failed: ' . $e->getMessage());
+        } catch (PDOException $e) {
+            $msg = $audioJobRepo->isUniqueViolation($e)
+                ? 'An audio analysis job is already active for this file.'
+                : 'Could not queue audio suggest: ' . $e->getMessage();
+            Session::flash('error', $msg);
             header('Location: /split/' . $id . $qs);
             exit;
         }
 
-        if ($suggestion['segments'] === []) {
-            Session::flash('error', $suggestion['notes'] !== '' ? $suggestion['notes'] : 'No audio-based segments found.');
-            header('Location: /split/' . $id . $qs);
-            exit;
-        }
-
-        $segments = [];
-        foreach ($suggestion['segments'] as $seg) {
-            $segments[] = [
-                'start'   => $seg['start'],
-                'end'     => $seg['end'],
-                'show_id' => $seg['show_id'],
-                'label'   => $seg['label'],
-            ];
-        }
-
-        $notes = trim((string) ($item['notes'] ?? ''));
-        $notes = trim($notes . "\n\n" . $suggestion['notes']);
-        $splitRepo->update($id, $segments, $notes, (string) ($item['status'] ?? 'PENDING'));
-        split_audit($audit, 'SPLIT_AUDIO_SUGGEST', $id, [
-            'segment_count'     => count($segments),
-            'gap_count'         => $suggestion['gap_count'],
-            'content_gap_count' => $suggestion['content_gap_count'],
+        spawn_split_audio_worker($jobId, $projectRoot);
+        split_audit($audit, 'SPLIT_AUDIO_SUGGEST_QUEUED', $id, [
+            'audio_job_id' => $jobId,
+            'kind'         => SplitAudioJobRepository::KIND_SUGGEST,
         ]);
+        $verb = WorkerMode::isDaemon() ? 'queued' : 'started';
         Session::flash(
             'success',
-            'Filled ' . count($segments) . ' segment(s) from audio (≥'
-            . (int) round($settings['content_gap'] / 60)
-            . ' min quiet gaps). Review before saving — first run may take a few minutes on long files.'
+            'Audio suggest job #' . $jobId . ' ' . $verb
+            . ' — background worker will fill segments (no Apache wait).'
         );
         header('Location: /split/' . $id . $qs);
         exit;
@@ -414,64 +421,147 @@ if ($method === 'POST') {
             exit;
         }
 
-        @set_time_limit(0);
-        $systemRepo = new SystemRepository();
-        $settings = split_audio_settings($systemRepo);
-        $mediaCache = new MediaCacheService();
-        $levelSvc = new AudioLevelMapService($mediaCache);
-
-        try {
-            $gaps = null;
-            try {
-                $gaps = split_detect_silence_cached(
-                    $mediaPath,
-                    (int) $file['id'],
-                    $settings['noise_db'],
-                    $mediaCache
-                );
-            } catch (Throwable) {
-                $gaps = null;
-            }
-            $map = $levelSvc->buildAndCache(
-                (int) $file['id'],
-                $mediaPath,
-                isset($file['duration_seconds']) ? (float) $file['duration_seconds'] : 0.0,
-                $settings['noise_db'],
-                $gaps
-            );
-            split_audit($audit, 'SPLIT_AUDIO_MAP', $id, [
-                'source'         => $map['source'],
-                'bucket_seconds' => $map['bucket_seconds'],
-                'block_count'    => count($map['blocks']),
-            ]);
-        } catch (Throwable $e) {
+        $active = $audioJobRepo->findActiveForFile((int) $file['id']);
+        if ($active !== null) {
+            $msg = 'Audio analysis already active (job #' . (int) $active['id']
+                . ', ' . (string) ($active['kind'] ?? '') . ').';
             if ($wantJson) {
                 header('Content-Type: application/json');
-                http_response_code(500);
-                echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_THROW_ON_ERROR);
+                http_response_code(409);
+                echo json_encode([
+                    'ok'           => false,
+                    'error'        => $msg,
+                    'audio_job_id' => (int) $active['id'],
+                    'status'       => (string) ($active['status'] ?? ''),
+                    'kind'         => (string) ($active['kind'] ?? ''),
+                ], JSON_THROW_ON_ERROR);
                 exit;
             }
-            Session::flash('error', 'Audio level map failed: ' . $e->getMessage());
+            Session::flash('error', $msg);
             header('Location: /split/' . $id . $qs);
             exit;
         }
 
-        if ($wantJson) {
-            header('Content-Type: application/json');
-            echo json_encode(['ok' => true, 'map' => $map], JSON_THROW_ON_ERROR);
+        try {
+            $jobId = $audioJobRepo->create(
+                $id,
+                (int) $file['id'],
+                SplitAudioJobRepository::KIND_LEVELS,
+                (int) Auth::id()
+            );
+        } catch (PDOException $e) {
+            $msg = $audioJobRepo->isUniqueViolation($e)
+                ? 'An audio analysis job is already active for this file.'
+                : 'Could not queue audio levels: ' . $e->getMessage();
+            if ($wantJson) {
+                header('Content-Type: application/json');
+                http_response_code(409);
+                echo json_encode(['ok' => false, 'error' => $msg], JSON_THROW_ON_ERROR);
+                exit;
+            }
+            Session::flash('error', $msg);
+            header('Location: /split/' . $id . $qs);
             exit;
         }
 
+        spawn_split_audio_worker($jobId, $projectRoot);
+        split_audit($audit, 'SPLIT_AUDIO_MAP_QUEUED', $id, [
+            'audio_job_id' => $jobId,
+            'kind'         => SplitAudioJobRepository::KIND_LEVELS,
+        ]);
+
+        if ($wantJson) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'ok'           => true,
+                'queued'       => true,
+                'audio_job_id' => $jobId,
+                'status'       => 'PENDING',
+                'kind'         => SplitAudioJobRepository::KIND_LEVELS,
+                'daemon'       => WorkerMode::isDaemon(),
+            ], JSON_THROW_ON_ERROR);
+            exit;
+        }
+
+        $verb = WorkerMode::isDaemon() ? 'queued' : 'started';
         Session::flash(
             'success',
-            'Audio level lane ready (' . $map['source'] . ', '
-            . count($map['blocks']) . ' blocks).'
+            'Audio levels job #' . $jobId . ' ' . $verb
+            . ' — background worker will build the lane.'
         );
         header('Location: /split/' . $id . $qs);
         exit;
     }
 
+    if ($uri === '/split/audio-job/cancel') {
+        $splitId      = (int) ($_POST['id'] ?? 0);
+        $audioJobId   = (int) ($_POST['audio_job_id'] ?? 0);
+        $statusFilter = trim((string) ($_POST['status_filter'] ?? ''));
+        if (!in_array($statusFilter, ['PENDING', 'IN_PROGRESS', 'DONE', 'FAILED'], true)) {
+            $statusFilter = '';
+        }
+        $qs = split_status_query($statusFilter !== '' ? $statusFilter : null);
+        $job = $audioJobId > 0 ? $audioJobRepo->findById($audioJobId) : null;
+        if ($job === null || (int) ($job['split_queue_id'] ?? 0) !== $splitId) {
+            Session::flash('error', 'Audio job not found.');
+            header('Location: /split/' . max(0, $splitId) . $qs);
+            exit;
+        }
+        if ($audioJobRepo->requestCancel($audioJobId)) {
+            split_audit($audit, 'SPLIT_AUDIO_CANCEL', $splitId, ['audio_job_id' => $audioJobId]);
+            Session::flash('success', 'Cancel requested — worker will stop after the current FFmpeg step.');
+        } else {
+            Session::flash('error', 'Job is not cancellable.');
+        }
+        header('Location: /split/' . $splitId . $qs);
+        exit;
+    }
+
     http_response_code(404);
+    exit;
+}
+
+// GET /split/{id}/audio-job — JSON status for workbench polling
+if (preg_match('#^/split/(\d+)/audio-job$#', $uri, $m) && $method === 'GET') {
+    $id   = (int) $m[1];
+    $item = $splitRepo->findById($id);
+    header('Content-Type: application/json');
+    if ($item === null) {
+        http_response_code(404);
+        echo json_encode(['available' => false, 'error' => 'not_found'], JSON_THROW_ON_ERROR);
+        exit;
+    }
+    $job = $audioJobRepo->latestForSplitQueue($id);
+    if ($job === null) {
+        echo json_encode(['available' => false], JSON_THROW_ON_ERROR);
+        exit;
+    }
+    $status = (string) ($job['status'] ?? '');
+    $alive = $status === 'RUNNING' ? $audioJobRepo->isWorkerAlive((int) $job['id']) : false;
+    $map = null;
+    if ($status === 'COMPLETED') {
+        $mediaPath = str_replace('\\', '/', (string) ($item['original_path'] ?? ''));
+        if ($mediaPath !== '') {
+            $noiseDb = split_audio_settings(new SystemRepository())['noise_db'];
+            $map = (new AudioLevelMapService())->loadCached(
+                (int) $item['file_id'],
+                $mediaPath,
+                $noiseDb
+            );
+        }
+    }
+    echo json_encode([
+        'available'        => true,
+        'audio_job_id'     => (int) $job['id'],
+        'kind'             => (string) ($job['kind'] ?? ''),
+        'status'           => $status,
+        'worker_alive'     => $alive,
+        'orphan'           => $status === 'RUNNING' && !$alive,
+        'error_message'    => (string) ($job['error_message'] ?? ''),
+        'result_summary'   => (string) ($job['result_summary'] ?? ''),
+        'cancel_requested' => !empty($job['cancel_requested']),
+        'map'              => $map,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 
@@ -545,6 +635,7 @@ if (preg_match('#^/split/(\d+)$#', $uri, $m)) {
 
     $mediaInfo = (new SplitMediaService())->describe($item);
     $audioMap = null;
+    $audioJob = $audioJobRepo->latestForSplitQueue($id);
     $mediaPath = str_replace('\\', '/', (string) ($item['original_path'] ?? ''));
     if ($mediaPath !== '' && trim((string) ($item['codec_audio'] ?? '')) !== '') {
         $noiseDb = split_audio_settings(new SystemRepository())['noise_db'];
@@ -613,48 +704,6 @@ function split_audio_settings(SystemRepository $systemRepo): array
         'ad_ignore'    => max(1.0, $adIgnore),
         'noise_db'     => min(-5.0, max(-80.0, $noiseDb)),
     ];
-}
-
-/**
- * @return list<array{start: float, end: float, duration: float}>
- */
-function split_detect_silence_cached(
-    string $mediaPath,
-    int $fileId,
-    float $noiseDb,
-    MediaCacheService $cache,
-): array {
-    $mtime = @filemtime($mediaPath) ?: 0;
-    $size = @filesize($mediaPath) ?: 0;
-    $cacheDir = $cache->assetDir($fileId);
-    if (!is_dir($cacheDir)) {
-        @mkdir($cacheDir, 0755, true);
-    }
-    $cachePath = $cacheDir . '/audio_silence.json';
-    if (is_readable($cachePath)) {
-        $raw = file_get_contents($cachePath);
-        $json = is_string($raw) ? json_decode($raw, true) : null;
-        if (is_array($json)
-            && (int) ($json['mtime'] ?? 0) === $mtime
-            && (int) ($json['size'] ?? 0) === $size
-            && abs((float) ($json['noise_db'] ?? 0) - $noiseDb) < 0.01
-            && isset($json['gaps']) && is_array($json['gaps'])
-        ) {
-            /** @var list<array{start: float, end: float, duration: float}> */
-            return $json['gaps'];
-        }
-    }
-
-    $detector = new AudioSilenceDetector(noiseDb: $noiseDb);
-    $gaps = $detector->detect($mediaPath);
-    @file_put_contents($cachePath, json_encode([
-        'mtime'    => $mtime,
-        'size'     => $size,
-        'noise_db' => $noiseDb,
-        'gaps'     => $gaps,
-    ], JSON_THROW_ON_ERROR));
-
-    return $gaps;
 }
 
 /**

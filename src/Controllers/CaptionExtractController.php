@@ -12,6 +12,7 @@ use MediaManager\Repositories\FileRepository;
 use MediaManager\Services\CaptionExtractEtaEstimator;
 use MediaManager\Services\CaptionExtractJobService;
 use MediaManager\Services\ScanEtaEstimator;
+use MediaManager\Support\View;
 
 Auth::requireAdmin();
 
@@ -263,6 +264,63 @@ if ($method === 'POST') {
     }
 
     http_response_code(404);
+    exit;
+}
+
+// GET /captions/{id}/status — JSON for live poll (keeps checkbox UI intact)
+if ($method === 'GET' && preg_match('#^/captions/(\d+)/status$#', $uri, $m)) {
+    $id = (int) $m[1];
+    $job = $jobs->findById($id);
+    if ($job === null) {
+        http_response_code(404);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => 'Caption extract job not found'], JSON_THROW_ON_ERROR);
+        exit;
+    }
+
+    $eta = CaptionExtractEtaEstimator::estimate($job);
+    $timing = ScanEtaEstimator::estimate($job);
+    $logPath = CaptionExtractJobService::logPathForJob($id, $projectRoot);
+    $logTail = CaptionExtractJobService::tailLog($logPath, 150);
+    $statusStr = (string) ($job['status'] ?? '');
+    $poll = in_array($statusStr, ['PENDING', 'RUNNING'], true);
+    $workerAlive = $statusStr === 'RUNNING' && $jobs->isWorkerAlive($id);
+    $workerOrphan = $statusStr === 'RUNNING' && !$jobs->isWorkerAlive($id);
+
+    $curDur = isset($job['current_duration_seconds'])
+        ? (float) $job['current_duration_seconds']
+        : null;
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'id'               => $id,
+        'status'           => $statusStr,
+        'status_badge_html'=> View::statusBadge($statusStr),
+        'poll'             => $poll,
+        'cancel_requested' => !empty($job['cancel_requested']),
+        'worker_alive'     => $workerAlive,
+        'worker_orphan'    => $workerOrphan,
+        'processed_files'  => (int) ($job['processed_files'] ?? 0),
+        'total_files'      => (int) ($job['total_files'] ?? 0),
+        'ok_count'         => (int) ($job['ok_count'] ?? 0),
+        'fail_count'       => (int) ($job['fail_count'] ?? 0),
+        'skip_count'       => (int) ($job['skip_count'] ?? 0),
+        'current_filename' => $job['current_filename'] ?? null,
+        'current_file_id'  => isset($job['current_file_id']) ? (int) $job['current_file_id'] : null,
+        'current_duration_label' => $curDur !== null && $curDur > 0
+            ? View::duration($curDur)
+            : null,
+        'last_error'       => $job['last_error'] ?? null,
+        'error_message'    => $job['error_message'] ?? null,
+        'eta'              => $eta,
+        'timing'           => $timing,
+        'log_tail'         => $logTail,
+        'log_basename'     => basename($logPath),
+        'hang_duration_label' => !empty($eta['hang_seconds'])
+            ? View::duration((float) $eta['hang_seconds'])
+            : null,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 

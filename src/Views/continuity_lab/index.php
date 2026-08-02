@@ -64,6 +64,7 @@ $queryBase = array_filter([
       <div class="card-body" style="font-size:0.82rem">
         <div class="mb-2">
           Status:
+          <span id="continuity-engine-badge">
           <?php if (!empty($status['enabled']) && !empty($status['reachable'])): ?>
           <span class="badge bg-success">Online</span>
           <?php elseif (!empty($status['enabled'])): ?>
@@ -71,10 +72,11 @@ $queryBase = array_filter([
           <?php else: ?>
           <span class="badge bg-secondary">Disabled</span>
           <?php endif; ?>
+          </span>
         </div>
         <div class="path-text">Pack: <code><?php echo View::e((string) ($status['pack'] ?? '')); ?></code></div>
         <div class="path-text">Endpoint: <code><?php echo View::e((string) ($status['base_url'] ?? '')); ?></code></div>
-        <div class="path-text">
+        <div class="path-text" id="continuity-probe">
           Probe:
           <?php if ($status['latency_ms'] !== null): ?>
           <?php echo (int) $status['latency_ms']; ?> ms
@@ -127,7 +129,7 @@ $queryBase = array_filter([
     <div class="card h-100">
       <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span>Progress</span>
-        <span class="path-text" style="font-size:0.75rem;font-weight:400">
+        <span id="continuity-parallel-meta" class="path-text" style="font-size:0.75rem;font-weight:400">
           Parallel ×<?php echo (int) ($eta['parallel'] ?? 1); ?>
           <?php if (!empty($eta['active']) && ($eta['method'] ?? '') === 'observed'): ?>
           · rate from last 5 min
@@ -137,14 +139,15 @@ $queryBase = array_filter([
         </span>
       </div>
       <div class="card-body">
+        <div id="continuity-eta-block">
         <?php if (!empty($eta['active'])): ?>
         <div class="mb-3 pb-3" style="border-bottom:1px solid var(--border-color)">
           <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-1">
             <div>
-              <span class="h4 mb-0"><?php echo View::e((string) ($eta['eta_label'] ?? '—')); ?></span>
+              <span class="h4 mb-0" id="continuity-eta-label"><?php echo View::e((string) ($eta['eta_label'] ?? '—')); ?></span>
               <span class="path-text ms-2" style="font-size:0.78rem">ETA to scan completion</span>
             </div>
-            <div class="path-text" style="font-size:0.78rem">
+            <div class="path-text" style="font-size:0.78rem" id="continuity-eta-job">
               <?php if (!empty($eta['job_id'])): ?>
               <a href="/scan/<?php echo (int) $eta['job_id']; ?>">Scan #<?php echo (int) $eta['job_id']; ?></a>
               <?php endif; ?>
@@ -156,9 +159,9 @@ $queryBase = array_filter([
           <div class="progress mb-1" style="height:8px" role="progressbar"
                aria-valuenow="<?php echo (int) round((float) ($eta['pct'] ?? 0)); ?>"
                aria-valuemin="0" aria-valuemax="100">
-            <div class="progress-bar" style="width:<?php echo View::e((string) ($eta['pct'] ?? 0)); ?>%"></div>
+            <div id="continuity-eta-bar" class="progress-bar" style="width:<?php echo View::e((string) ($eta['pct'] ?? 0)); ?>%"></div>
           </div>
-          <div class="path-text" style="font-size:0.78rem">
+          <div class="path-text" style="font-size:0.78rem" id="continuity-eta-counts">
             <?php echo number_format((int) ($eta['processed'] ?? 0)); ?>
             /
             <?php echo number_format((int) ($eta['total'] ?? 0)); ?>
@@ -182,33 +185,34 @@ $queryBase = array_filter([
           <?php endif; ?>)
         </div>
         <?php endif; ?>
+        </div>
         <div class="row g-2 text-center" style="font-size:0.82rem">
           <div class="col">
-            <div class="h5 mb-0"><?php echo (int) ($summary['last_hour'] ?? 0); ?></div>
+            <div class="h5 mb-0" id="continuity-sum-hour"><?php echo (int) ($summary['last_hour'] ?? 0); ?></div>
             <div class="path-text">Last hour</div>
           </div>
           <div class="col">
-            <div class="h5 mb-0"><?php echo (int) ($summary['total'] ?? 0); ?></div>
+            <div class="h5 mb-0" id="continuity-sum-total"><?php echo (int) ($summary['total'] ?? 0); ?></div>
             <div class="path-text">All time</div>
           </div>
           <div class="col">
-            <div class="h5 mb-0 text-success"><?php echo (int) ($summary['confirmed'] ?? 0); ?></div>
+            <div class="h5 mb-0 text-success" id="continuity-sum-confirmed"><?php echo (int) ($summary['confirmed'] ?? 0); ?></div>
             <div class="path-text">Confirmed</div>
           </div>
           <div class="col">
-            <div class="h5 mb-0 text-warning"><?php echo (int) ($summary['conflict'] ?? 0); ?></div>
+            <div class="h5 mb-0 text-warning" id="continuity-sum-conflict"><?php echo (int) ($summary['conflict'] ?? 0); ?></div>
             <div class="path-text">Conflict</div>
           </div>
           <div class="col">
-            <div class="h5 mb-0"><?php echo (int) ($summary['review'] ?? 0); ?></div>
+            <div class="h5 mb-0" id="continuity-sum-review"><?php echo (int) ($summary['review'] ?? 0); ?></div>
             <div class="path-text">Review</div>
           </div>
           <div class="col">
-            <div class="h5 mb-0"><?php echo (int) ($summary['error'] ?? 0); ?></div>
+            <div class="h5 mb-0" id="continuity-sum-error"><?php echo (int) ($summary['error'] ?? 0); ?></div>
             <div class="path-text">Errors</div>
           </div>
           <div class="col">
-            <div class="h5 mb-0">
+            <div class="h5 mb-0" id="continuity-sum-avg">
               <?php echo $avgMs !== null ? (string) (int) round($avgMs) . 'ms' : '—'; ?>
             </div>
             <div class="path-text">Avg decide</div>
@@ -246,8 +250,8 @@ $queryBase = array_filter([
 
 <div class="card">
   <div class="card-header d-flex justify-content-between">
-    <span>Decisions (<?php echo (int) $total; ?>)</span>
-    <span class="path-text" style="font-size:0.75rem">
+    <span id="continuity-decisions-title">Decisions (<?php echo (int) $total; ?>)</span>
+    <span id="continuity-page-meta" class="path-text" style="font-size:0.75rem">
       Page <?php echo (int) $page; ?> / <?php echo (int) $totalPages; ?>
     </span>
   </div>
@@ -267,225 +271,8 @@ $queryBase = array_filter([
           <th></th>
         </tr>
       </thead>
-      <tbody>
-        <?php if ($entries === []): ?>
-        <tr>
-          <td colspan="10" class="text-center py-4 path-text">
-            No continuity decisions logged yet. Run a Scan or Reclassify with continuity enabled.
-          </td>
-        </tr>
-        <?php else: ?>
-        <?php foreach ($entries as $row): ?>
-        <?php
-        $rowId = (int) ($row['id'] ?? 0);
-        $fileId = (int) ($row['file_id'] ?? 0);
-        $outcome = (string) ($row['outcome'] ?? '');
-        $badge = match ($outcome) {
-            'confirmed' => 'bg-success',
-            'conflict'  => 'bg-warning text-dark',
-            'review'    => 'bg-info text-dark',
-            'error'     => 'bg-danger',
-            default     => 'bg-secondary',
-        };
-        $ruleShow = trim((string) ($row['rule_show_abbr'] ?? ''));
-        $finalShow = trim((string) ($row['final_show_abbr'] ?? ''));
-        $showChanged = $ruleShow !== '' && $finalShow !== '' && strcasecmp($ruleShow, $finalShow) !== 0;
-        $signalsRaw = $row['rule_signals'] ?? '[]';
-        if (is_string($signalsRaw)) {
-            $signals = json_decode($signalsRaw, true);
-        } else {
-            $signals = $signalsRaw;
-        }
-        if (!is_array($signals)) {
-            $signals = [];
-        }
-        $seedRaw = $row['seed_packet'] ?? null;
-        if (is_string($seedRaw) && $seedRaw !== '') {
-            $seed = json_decode($seedRaw, true);
-        } elseif (is_array($seedRaw)) {
-            $seed = $seedRaw;
-        } else {
-            $seed = null;
-        }
-        $seedProposal = is_array($seed) && is_array($seed['proposal'] ?? null) ? $seed['proposal'] : [];
-        // Fallback date/time from seed for rows logged before dedicated columns.
-        $ruleDate = trim((string) ($row['rule_file_date'] ?? ($seedProposal['file_date'] ?? '')));
-        $ruleTime = trim((string) ($row['rule_file_time'] ?? ($seedProposal['file_time'] ?? '')));
-        $finalDate = trim((string) ($row['final_file_date'] ?? $ruleDate));
-        $finalTime = trim((string) ($row['final_file_time'] ?? $ruleTime));
-        $engineDate = trim((string) ($row['engine_file_date'] ?? ''));
-        $engineTime = trim((string) ($row['engine_file_time'] ?? ''));
-        $dateChanged = $ruleDate !== '' && $finalDate !== '' && $ruleDate !== $finalDate;
-        $timeChanged = $ruleTime !== '' && $finalTime !== '' && $ruleTime !== $finalTime;
-        $ruleType = trim((string) ($row['rule_media_type_abbr'] ?? ($seedProposal['media_type'] ?? '')));
-        $finalType = trim((string) ($row['final_media_type_abbr'] ?? $ruleType));
-        $engineType = trim((string) ($row['engine_media_type_abbr'] ?? ''));
-        $typeChanged = $ruleType !== '' && $finalType !== '' && strcasecmp($ruleType, $finalType) !== 0;
-        $seedPretty = '';
-        if (is_array($seed)) {
-            $seedPretty = (string) json_encode($seed, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
-        }
-        $engineRaw = trim((string) ($row['engine_raw'] ?? ''));
-        $transportErr = trim((string) ($row['transport_error'] ?? ''));
-        $hasArtifacts = $seedPretty !== '' || $engineRaw !== '' || $transportErr !== '';
-        $scheduleCount = is_array($seed) && is_array($seed['schedule'] ?? null) ? count($seed['schedule']) : 0;
-        $atAirCount = is_array($seed) && is_array($seed['at_air_time'] ?? null)
-            ? count($seed['at_air_time'])
-            : (is_array($seed) && is_array($seed['timeline'] ?? null) ? count($seed['timeline']) : 0);
-        $exampleCount = is_array($seed) && is_array($seed['examples'] ?? null) ? count($seed['examples']) : 0;
-        $showCount = is_array($seed) && is_array($seed['shows'] ?? null) ? count($seed['shows']) : 0;
-        $catalogHref = $fileId > 0
-            ? '/queue?status=ALL&file_id=' . $fileId
-            : '/queue?status=ALL&q=' . rawurlencode((string) ($row['original_filename'] ?? ''));
-        ?>
-        <tr>
-          <td class="path-text text-nowrap">
-            <?php echo View::e(substr((string) ($row['created_at'] ?? ''), 0, 19)); ?>
-          </td>
-          <td>
-            <span class="badge <?php echo View::e($badge); ?>"><?php echo View::e($outcome); ?></span>
-            <?php if ($row['engine_agree'] !== null): ?>
-            <div class="path-text mt-1">
-              agree=<?php echo !empty($row['engine_agree']) ? 'yes' : 'no'; ?>
-              <?php if (!empty($row['engine_confidence'])): ?>
-              · eng <?php echo View::e((string) $row['engine_confidence']); ?>
-              <?php endif; ?>
-            </div>
-            <?php endif; ?>
-          </td>
-          <td class="text-nowrap">
-            <code><?php echo View::e((string) ($row['rule_confidence'] ?? '')); ?></code>
-            →
-            <code><?php echo View::e((string) ($row['final_confidence'] ?? '')); ?></code>
-          </td>
-          <td>
-            <?php if ($showChanged): ?>
-            <code><?php echo View::e($ruleShow); ?></code>
-            →
-            <code><?php echo View::e($finalShow); ?></code>
-            <?php else: ?>
-            <code><?php echo View::e($finalShow !== '' ? $finalShow : ($ruleShow !== '' ? $ruleShow : '—')); ?></code>
-            <?php endif; ?>
-          </td>
-          <td class="text-nowrap">
-            <?php if ($finalType !== '' || $ruleType !== ''): ?>
-              <?php if ($typeChanged): ?>
-              <code><?php echo View::e($ruleType); ?></code>
-              →
-              <code><?php echo View::e($finalType); ?></code>
-              <?php else: ?>
-              <code><?php echo View::e($finalType !== '' ? $finalType : $ruleType); ?></code>
-              <?php endif; ?>
-              <?php if ($engineType !== ''): ?>
-              <div class="path-text" style="font-size:0.68rem">eng <?php echo View::e($engineType); ?></div>
-              <?php endif; ?>
-            <?php else: ?>
-            —
-            <?php endif; ?>
-          </td>
-          <td class="text-nowrap path-text">
-            <?php if ($finalDate !== '' || $finalTime !== ''): ?>
-              <?php if ($dateChanged || $timeChanged): ?>
-              <code><?php echo View::e(trim($ruleDate . ' ' . $ruleTime)); ?></code>
-              →
-              <code><?php echo View::e(trim($finalDate . ' ' . $finalTime)); ?></code>
-              <?php else: ?>
-              <code><?php echo View::e(trim($finalDate . ' ' . $finalTime)); ?></code>
-              <?php endif; ?>
-              <?php if ($engineDate !== '' || $engineTime !== ''): ?>
-              <div style="font-size:0.68rem">eng <?php echo View::e(trim($engineDate . ' ' . $engineTime)); ?></div>
-              <?php endif; ?>
-            <?php else: ?>
-            —
-            <?php endif; ?>
-          </td>
-          <td style="max-width:280px">
-            <?php if (trim((string) ($row['engine_reason'] ?? '')) !== ''): ?>
-            <div><?php echo View::e((string) $row['engine_reason']); ?></div>
-            <?php endif; ?>
-            <?php if ($signals !== []): ?>
-            <div class="path-text mt-1" style="font-size:0.7rem">
-              <?php echo View::e(implode(' · ', array_slice(array_map('strval', $signals), 0, 4))); ?>
-              <?php if (count($signals) > 4): ?>…<?php endif; ?>
-            </div>
-            <?php endif; ?>
-            <?php if (!empty($row['signal'])): ?>
-            <div class="path-text" style="font-size:0.7rem"><?php echo View::e((string) $row['signal']); ?></div>
-            <?php endif; ?>
-          </td>
-          <td class="path-text" style="max-width:260px;word-break:break-all">
-            <a href="<?php echo View::e($catalogHref); ?>">
-              <?php echo View::e((string) ($row['original_filename'] ?: $row['original_path'])); ?>
-            </a>
-            <?php if ($fileId > 0): ?>
-            <div class="mt-1" style="font-size:0.68rem">
-              <a href="<?php echo View::e($catalogHref); ?>">Catalog #<?php echo $fileId; ?></a>
-            </div>
-            <?php endif; ?>
-            <?php if (!empty($row['final_proposed_filename']) || !empty($row['rule_proposed_filename'])): ?>
-            <div class="mt-1">
-              → <?php echo View::e((string) ($row['final_proposed_filename'] ?? $row['rule_proposed_filename'])); ?>
-            </div>
-            <?php endif; ?>
-          </td>
-          <td class="path-text"><?php echo (int) ($row['duration_ms'] ?? 0); ?></td>
-          <td>
-            <?php if ($hasArtifacts): ?>
-            <button type="button" class="btn btn-outline-secondary btn-xs"
-                    data-bs-toggle="collapse" data-bs-target="#art-<?php echo $rowId; ?>"
-                    aria-expanded="false">
-              Artifacts
-            </button>
-            <?php else: ?>
-            <span class="path-text">—</span>
-            <?php endif; ?>
-          </td>
-        </tr>
-        <?php if ($hasArtifacts): ?>
-        <tr class="collapse-row">
-          <td colspan="9" class="p-0 border-0">
-            <div class="collapse" id="art-<?php echo $rowId; ?>">
-              <div class="p-3" style="background:var(--hover-bg);border-top:1px solid var(--bs-border-color)">
-                <div class="d-flex flex-wrap gap-3 mb-2 path-text" style="font-size:0.75rem">
-                  <span>Shows seeded: <strong><?php echo (int) $showCount; ?></strong></span>
-                  <span>Schedule rows: <strong><?php echo (int) $scheduleCount; ?></strong></span>
-                  <span>At air time: <strong><?php echo (int) $atAirCount; ?></strong></span>
-                  <span>Approved examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
-                  <?php if ($row['http_status'] !== null): ?>
-                  <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
-                  <?php endif; ?>
-                </div>
-                <?php if ($transportErr !== ''): ?>
-                <div class="mb-2">
-                  <div class="form-label mb-1">Transport</div>
-                  <pre class="mb-0 p-2 rounded" style="font-size:0.72rem;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($transportErr); ?></pre>
-                </div>
-                <?php endif; ?>
-                <div class="row g-3">
-                  <div class="col-lg-7">
-                    <div class="form-label mb-1">Seed packet (what continuity saw)</div>
-                    <?php if ($seedPretty !== ''): ?>
-                    <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:360px;overflow:auto;white-space:pre;background:rgba(0,0,0,0.25)"><?php echo View::e($seedPretty); ?></pre>
-                    <?php else: ?>
-                    <div class="path-text">No seed packet stored for this row (logged before artifacts).</div>
-                    <?php endif; ?>
-                  </div>
-                  <div class="col-lg-5">
-                    <div class="form-label mb-1">Engine reply (raw)</div>
-                    <?php if ($engineRaw !== ''): ?>
-                    <pre class="mb-0 p-2 rounded" style="font-size:0.68rem;max-height:360px;overflow:auto;white-space:pre-wrap;background:rgba(0,0,0,0.25)"><?php echo View::e($engineRaw); ?></pre>
-                    <?php else: ?>
-                    <div class="path-text">No raw reply captured.</div>
-                    <?php endif; ?>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-        <?php endif; ?>
-        <?php endforeach; ?>
-        <?php endif; ?>
+      <tbody id="continuity-entries-tbody">
+        <?php require __DIR__ . '/_entries_tbody.php'; ?>
       </tbody>
     </table>
   </div>
@@ -538,7 +325,126 @@ $queryBase = array_filter([
 </div>
 
 <?php if ($live): ?>
+<script src="/js/live-poll.js"></script>
 <script>
-setTimeout(function () { window.location.reload(); }, 8000);
+(function () {
+  var page = <?php echo (int) $page; ?>;
+  var outcome = <?php echo json_encode((string) ($filters['outcome'] ?? ''), JSON_THROW_ON_ERROR); ?>;
+  var q = <?php echo json_encode((string) ($filters['q'] ?? ''), JSON_THROW_ON_ERROR); ?>;
+  var newestId = null;
+  var esc = LivePoll.escapeHtml;
+  var fmt = function (n) { return Number(n || 0).toLocaleString(); };
+
+  var params = new URLSearchParams();
+  params.set('page', String(page));
+  if (outcome) params.set('outcome', outcome);
+  if (q) params.set('q', q);
+
+  function uiBusy() {
+    return !!(document.querySelector('.modal.show')
+      || document.querySelector('.collapse.show')
+      || (document.activeElement && (
+        document.activeElement.tagName === 'INPUT'
+        || document.activeElement.tagName === 'SELECT'
+        || document.activeElement.tagName === 'TEXTAREA'
+      )));
+  }
+
+  function engineBadge(st) {
+    if (st && st.enabled && st.reachable) {
+      return '<span class="badge bg-success">Online</span>';
+    }
+    if (st && st.enabled) {
+      return '<span class="badge bg-warning text-dark">Enabled · offline</span>';
+    }
+    return '<span class="badge bg-secondary">Disabled</span>';
+  }
+
+  function renderEta(eta) {
+    var parallel = Number(eta.parallel || 1);
+    var meta = 'Parallel ×' + parallel;
+    if (eta.active && eta.method === 'observed') meta += ' · rate from last 5 min';
+    if (eta.active && eta.method === 'modeled') meta += ' · modeled (avg ÷ parallel)';
+    LivePoll.setText('continuity-parallel-meta', meta);
+
+    if (!eta.active) {
+      LivePoll.setHtml(
+        'continuity-eta-block',
+        '<div class="path-text mb-3 pb-3" style="font-size:0.8rem;border-bottom:1px solid var(--border-color)">'
+          + 'No active scan — ETA appears when a Scan / Rescan is <code>RUNNING</code>. '
+          + 'Parallelism: ×' + parallel
+          + ' (<code>CONTINUITY_CHECK_CONCURRENCY</code>)</div>'
+      );
+      return;
+    }
+
+    var jobHtml = '';
+    if (eta.job_id) {
+      jobHtml += '<a href="/scan/' + Number(eta.job_id) + '">Scan #' + Number(eta.job_id) + '</a>';
+    }
+    if (eta.source_name) {
+      jobHtml += (jobHtml ? ' · ' : '') + esc(eta.source_name);
+    }
+    var counts = fmt(eta.processed) + ' / ' + fmt(eta.total) + ' files';
+    if (Number(eta.remaining || 0) > 0) counts += ' · ' + fmt(eta.remaining) + ' left';
+    if (eta.rate_per_sec) counts += ' · ~' + Number(eta.rate_per_sec).toFixed(2) + '/s';
+
+    LivePoll.setHtml(
+      'continuity-eta-block',
+      '<div class="mb-3 pb-3" style="border-bottom:1px solid var(--border-color)">'
+        + '<div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-1">'
+        + '<div><span class="h4 mb-0" id="continuity-eta-label">' + esc(eta.eta_label || '—') + '</span>'
+        + '<span class="path-text ms-2" style="font-size:0.78rem">ETA to scan completion</span></div>'
+        + '<div class="path-text" style="font-size:0.78rem" id="continuity-eta-job">' + jobHtml + '</div></div>'
+        + '<div class="progress mb-1" style="height:8px"><div id="continuity-eta-bar" class="progress-bar" style="width:'
+        + Number(eta.pct || 0) + '%"></div></div>'
+        + '<div class="path-text" style="font-size:0.78rem" id="continuity-eta-counts">' + counts + '</div></div>'
+    );
+  }
+
+  LivePoll.start({
+    url: '/continuity-lab/status?' + params.toString(),
+    intervalMs: 8000,
+    shouldSkip: uiBusy,
+    onData: function (data) {
+      var st = data.status || {};
+      var summary = data.summary || {};
+      var eta = data.eta || {};
+
+      LivePoll.setHtml('continuity-engine-badge', engineBadge(st));
+      LivePoll.setHtml(
+        'continuity-probe',
+        'Probe: '
+          + (st.latency_ms != null ? (Number(st.latency_ms) + ' ms') : '—')
+          + ' · timeout ' + Number(st.timeout_seconds || 0) + 's'
+          + ' · keep_alive <code>' + esc(st.keep_alive || '24h') + '</code>'
+      );
+
+      renderEta(eta);
+      LivePoll.setText('continuity-sum-hour', String(summary.last_hour || 0));
+      LivePoll.setText('continuity-sum-total', String(summary.total || 0));
+      LivePoll.setText('continuity-sum-confirmed', String(summary.confirmed || 0));
+      LivePoll.setText('continuity-sum-conflict', String(summary.conflict || 0));
+      LivePoll.setText('continuity-sum-review', String(summary.review || 0));
+      LivePoll.setText('continuity-sum-error', String(summary.error || 0));
+      LivePoll.setText(
+        'continuity-sum-avg',
+        data.avg_ms != null ? (Math.round(Number(data.avg_ms)) + 'ms') : '—'
+      );
+      LivePoll.setText('continuity-decisions-title', 'Decisions (' + Number(data.total || 0) + ')');
+      LivePoll.setText(
+        'continuity-page-meta',
+        'Page ' + Number(data.page || page) + ' / ' + Number(data.total_pages || 1)
+      );
+
+      // Refresh table only when new rows arrive and UI is not mid-interaction.
+      if (!uiBusy() && data.entries_html != null
+          && (newestId === null || Number(data.newest_id || 0) !== newestId)) {
+        LivePoll.setHtml('continuity-entries-tbody', data.entries_html);
+        newestId = Number(data.newest_id || 0);
+      }
+    }
+  });
+})();
 </script>
 <?php endif; ?>

@@ -1,0 +1,31 @@
+[Unit]
+Description=Media Manager split audio analysis queue worker
+Documentation=file:///var/www/media-manager/README.md
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/media-manager
+ExecStart=/usr/bin/php8.4 /var/www/media-manager/scripts/split_audio_worker.php
+Restart=always
+RestartSec=5
+Nice=10
+
+# Worker loop: storage/logs/split-audio-worker.log
+# Per job: storage/logs/split-audio-{id}.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=media-manager-split-audio
+
+# FFmpeg silence/RMS over long NAS files
+TimeoutStopSec=120
+KillMode=mixed
+KillSignal=SIGTERM
+
+Environment=WORKER_MODE=daemon
+
+[Install]
+WantedBy=multi-user.target

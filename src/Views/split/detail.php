@@ -36,6 +36,13 @@ $audioLevelLabels = is_array($audioMap['labels'] ?? null)
     ? $audioMap['labels']
     : ['Quiet', 'Low', 'Dialog', 'Hot'];
 
+/** @var array<string, mixed>|null $audioJob */
+$audioJob = $audioJob ?? null;
+$audioJobStatus = (string) ($audioJob['status'] ?? '');
+$audioJobKind = (string) ($audioJob['kind'] ?? '');
+$audioJobId = (int) ($audioJob['id'] ?? 0);
+$audioJobActive = in_array($audioJobStatus, ['PENDING', 'RUNNING'], true);
+
 $formatTc = static function (float $seconds): string {
     $seconds = max(0.0, $seconds);
     $h = (int) floor($seconds / 3600);
@@ -545,9 +552,48 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
   </div>
 </div>
 
+<?php if ($audioJobActive): ?>
+<meta http-equiv="refresh" content="5">
+<?php endif; ?>
+
 <?php if (!empty($item['split_notes'])): ?>
 <div class="sw-notes-alert py-2 px-3 mb-3">
   <?php echo View::e($item['split_notes']); ?>
+</div>
+<?php endif; ?>
+
+<?php if ($audioJobId > 0): ?>
+<div class="alert <?php
+  echo match ($audioJobStatus) {
+      'COMPLETED' => 'alert-success',
+      'FAILED', 'CANCELLED' => 'alert-warning',
+      default => 'alert-info',
+  };
+?> py-2 px-3 mb-3 d-flex flex-wrap justify-content-between align-items-center gap-2" id="sw-audio-job-banner">
+  <div>
+    <strong>Audio job #<?php echo $audioJobId; ?></strong>
+    · <?php echo View::e($audioJobKind !== '' ? $audioJobKind : 'analysis'); ?>
+    · <span id="sw-audio-job-status"><?php echo View::e($audioJobStatus !== '' ? $audioJobStatus : '—'); ?></span>
+    <?php if (!empty($audioJob['result_summary'])): ?>
+      <span class="sw-meta"> — <?php echo View::e((string) $audioJob['result_summary']); ?></span>
+    <?php endif; ?>
+    <?php if (!empty($audioJob['error_message'])): ?>
+      <div class="small mt-1"><?php echo View::e((string) $audioJob['error_message']); ?></div>
+    <?php endif; ?>
+    <?php if ($audioJobActive): ?>
+      <div class="small mt-1 path-text">Running in background (media-manager-split-audio). This page refreshes every 5s.</div>
+    <?php endif; ?>
+  </div>
+  <?php if ($audioJobActive): ?>
+  <form method="post" action="/split/audio-job/cancel" class="m-0"
+        onsubmit="return confirm('Cancel this audio analysis job?');">
+    <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
+    <input type="hidden" name="id" value="<?php echo $jobId; ?>">
+    <input type="hidden" name="audio_job_id" value="<?php echo $audioJobId; ?>">
+    <input type="hidden" name="status_filter" value="<?php echo View::e($statusFilter); ?>">
+    <button type="submit" class="btn btn-outline-warning btn-sm">Cancel audio job</button>
+  </form>
+  <?php endif; ?>
 </div>
 <?php endif; ?>
 
@@ -831,17 +877,18 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
     </button>
   </form>
   <form method="post" action="/split/suggest-audio"
-        onsubmit="return confirm('Replace segment rows with audio-based suggestions (long quiet gaps / schedule hours)? First run scans the whole file with FFmpeg and may take several minutes. Unsaved edits will be lost.');">
+        onsubmit="return confirm('Queue background audio suggest (FFmpeg on worker, not Apache)? When the job finishes, segment rows will be replaced. Continue?');">
     <input type="hidden" name="_csrf" value="<?php echo View::e(Session::csrfToken()); ?>">
     <input type="hidden" name="id" value="<?php echo $jobId; ?>">
     <input type="hidden" name="status_filter" value="<?php echo View::e($statusFilter); ?>">
-    <button type="submit" class="btn btn-outline-info btn-sm" <?php echo $hasAudio ? '' : 'disabled'; ?>>
+    <button type="submit" class="btn btn-outline-info btn-sm"
+            <?php echo ($hasAudio && !$audioJobActive) ? '' : 'disabled'; ?>>
       Suggest from audio
     </button>
   </form>
   <button type="button" class="btn btn-outline-secondary btn-sm" id="sw-load-audio-levels"
-          <?php echo $hasAudio ? '' : 'disabled'; ?>>
-    <?php echo $audioBlocks === [] ? 'Load audio levels' : 'Refresh audio levels'; ?>
+          <?php echo ($hasAudio && !$audioJobActive) ? '' : 'disabled'; ?>>
+    <?php echo $audioJobActive ? 'Audio job running…' : ($audioBlocks === [] ? 'Load audio levels' : 'Refresh audio levels'); ?>
   </button>
   <form method="post" action="/split/delete"
         onsubmit="return confirm('Remove this split job from the queue?');">
@@ -1175,16 +1222,65 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
         }
     }
 
+    function pollAudioJob(audioJobId) {
+        var tries = 0;
+        var maxTries = 720; // ~1h at 5s
+        var timer = setInterval(function () {
+            tries += 1;
+            fetch('/split/' + jobId + '/audio-job', {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            }).then(function (res) { return res.json(); }).then(function (data) {
+                if (!data || !data.available) return;
+                var st = data.status || '';
+                var statusEl = document.getElementById('sw-audio-job-status');
+                if (statusEl) statusEl.textContent = st;
+                playStatus.textContent = 'Audio job #' + (data.audio_job_id || audioJobId) + ': ' + st;
+                if (st === 'COMPLETED') {
+                    clearInterval(timer);
+                    if (btnLoadAudio) {
+                        btnLoadAudio.disabled = false;
+                        btnLoadAudio.textContent = 'Refresh audio levels';
+                    }
+                    if (data.map) {
+                        paintAudioLane(data.map);
+                        playStatus.textContent = 'Audio levels ready (' + (data.map.source || 'scan') + ')';
+                    } else if ((data.kind || '') === 'suggest') {
+                        playStatus.textContent = 'Audio suggest finished — reloading…';
+                        window.location.reload();
+                    } else {
+                        window.location.reload();
+                    }
+                    return;
+                }
+                if (st === 'FAILED' || st === 'CANCELLED') {
+                    clearInterval(timer);
+                    if (btnLoadAudio) {
+                        btnLoadAudio.disabled = false;
+                        btnLoadAudio.textContent = 'Load audio levels';
+                    }
+                    playStatus.textContent = data.error_message || ('Audio job ' + st.toLowerCase());
+                    return;
+                }
+                if (tries >= maxTries) {
+                    clearInterval(timer);
+                    if (btnLoadAudio) btnLoadAudio.disabled = false;
+                    playStatus.textContent = 'Still running — refresh the page to check status';
+                }
+            }).catch(function () { /* keep polling */ });
+        }, 5000);
+    }
+
     if (btnLoadAudio) {
         btnLoadAudio.addEventListener('click', function () {
             if (!jobId || btnLoadAudio.disabled) return;
-            if (!window.confirm('Scan audio levels with FFmpeg? First run may take several minutes on long files.')) {
+            if (!window.confirm('Queue background audio level scan (FFmpeg on worker)? First run may take several minutes on long files.')) {
                 return;
             }
             btnLoadAudio.disabled = true;
             var prevLabel = btnLoadAudio.textContent;
-            btnLoadAudio.textContent = 'Scanning audio…';
-            playStatus.textContent = 'Building audio level lane…';
+            btnLoadAudio.textContent = 'Queuing…';
+            playStatus.textContent = 'Queueing audio level job…';
             var body = new FormData();
             body.append('_csrf', csrfToken);
             body.append('id', jobId);
@@ -1200,22 +1296,45 @@ $exportHandleSec = SplitExportPolicy::HANDLE_SECONDS;
                     return { ok: res.ok, data: data };
                 });
             }).then(function (result) {
-                btnLoadAudio.disabled = false;
-                if (!result.ok || !result.data || !result.data.ok || !result.data.map) {
-                    var err = (result.data && result.data.error) ? result.data.error : 'Audio level scan failed';
-                    playStatus.textContent = err;
+                if (!result.data) {
+                    btnLoadAudio.disabled = false;
                     btnLoadAudio.textContent = prevLabel;
+                    playStatus.textContent = 'Audio level queue failed';
                     return;
                 }
-                paintAudioLane(result.data.map);
-                playStatus.textContent = 'Audio levels ready (' + (result.data.map.source || 'scan') + ')';
+                if (result.data.map) {
+                    btnLoadAudio.disabled = false;
+                    paintAudioLane(result.data.map);
+                    playStatus.textContent = 'Audio levels ready (' + (result.data.map.source || 'scan') + ')';
+                    btnLoadAudio.textContent = 'Refresh audio levels';
+                    return;
+                }
+                if (result.data.queued || result.data.audio_job_id) {
+                    btnLoadAudio.textContent = 'Scanning…';
+                    playStatus.textContent = 'Audio levels job #' + result.data.audio_job_id + ' queued';
+                    pollAudioJob(result.data.audio_job_id);
+                    return;
+                }
+                var err = result.data.error || 'Audio level queue failed';
+                playStatus.textContent = err;
+                if (result.data.audio_job_id) {
+                    btnLoadAudio.textContent = 'Scanning…';
+                    pollAudioJob(result.data.audio_job_id);
+                    return;
+                }
+                btnLoadAudio.disabled = false;
+                btnLoadAudio.textContent = prevLabel;
             }).catch(function () {
                 btnLoadAudio.disabled = false;
                 btnLoadAudio.textContent = prevLabel;
-                playStatus.textContent = 'Audio level scan failed';
+                playStatus.textContent = 'Audio level queue failed';
             });
         });
     }
+
+    <?php if ($audioJobActive): ?>
+    pollAudioJob(<?php echo (int) $audioJobId; ?>);
+    <?php endif; ?>
 
     function loadFrame(at, immediate) {
         if (!playSupported && form.getAttribute('data-play-mode') === 'unsupported') {

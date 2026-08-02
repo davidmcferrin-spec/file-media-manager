@@ -128,12 +128,16 @@ $done   = (int) ($job['processed_files'] ?? 0);
 $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
 ?>
 
+<?php
+$scanLive = $status === 'RUNNING' || ($status === 'PENDING' && empty($job['cancel_requested']));
+?>
+
 <div class="row g-3 mb-4">
   <div class="col-md-3">
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Status</div>
-        <div class="stat-value" style="font-size:1.4rem"><?php echo View::e($status); ?></div>
+        <div id="scan-status-value" class="stat-value" style="font-size:1.4rem"><?php echo View::e($status); ?></div>
       </div>
     </div>
   </div>
@@ -141,7 +145,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Queued Files</div>
-        <div class="stat-value"><?php echo number_format($totalQueued); ?></div>
+        <div id="scan-queued-value" class="stat-value"><?php echo number_format($totalQueued); ?></div>
       </div>
     </div>
   </div>
@@ -149,7 +153,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">High</div>
-        <div class="stat-value" style="color:#22c55e"><?php echo $confidence['HIGH']; ?></div>
+        <div id="scan-conf-high" class="stat-value" style="color:#22c55e"><?php echo $confidence['HIGH']; ?></div>
       </div>
     </div>
   </div>
@@ -157,7 +161,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Medium</div>
-        <div class="stat-value" style="color:#facc15"><?php echo $confidence['MEDIUM']; ?></div>
+        <div id="scan-conf-medium" class="stat-value" style="color:#facc15"><?php echo $confidence['MEDIUM']; ?></div>
       </div>
     </div>
   </div>
@@ -165,7 +169,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Low</div>
-        <div class="stat-value" style="color:#f87171;font-size:1.4rem"><?php echo $confidence['LOW']; ?></div>
+        <div id="scan-conf-low" class="stat-value" style="color:#f87171;font-size:1.4rem"><?php echo $confidence['LOW']; ?></div>
       </div>
     </div>
   </div>
@@ -173,7 +177,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     <div class="card stat-card h-100">
       <div class="card-body py-3 px-3">
         <div class="stat-label">Uneval</div>
-        <div class="stat-value" style="color:var(--text-soft);font-size:1.4rem"><?php echo $confidence['UNEVALUATED'] ?? 0; ?></div>
+        <div id="scan-conf-uneval" class="stat-value" style="color:var(--text-soft);font-size:1.4rem"><?php echo $confidence['UNEVALUATED'] ?? 0; ?></div>
       </div>
     </div>
   </div>
@@ -185,56 +189,58 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     <div class="row g-2" style="font-size:0.84rem">
       <div class="col-sm-3">
         <div class="path-text">Started</div>
-        <strong><?php echo View::e((string) $timing['started_label']); ?></strong>
+        <strong id="scan-started"><?php echo View::e((string) $timing['started_label']); ?></strong>
       </div>
       <div class="col-sm-3">
         <div class="path-text">Ended</div>
-        <strong><?php echo View::e((string) $timing['ended_label']); ?></strong>
+        <strong id="scan-ended"><?php echo View::e((string) $timing['ended_label']); ?></strong>
       </div>
       <div class="col-sm-3">
         <div class="path-text">Elapsed</div>
-        <strong><?php echo View::e((string) $timing['elapsed_label']); ?></strong>
+        <strong id="scan-elapsed"><?php echo View::e((string) $timing['elapsed_label']); ?></strong>
       </div>
       <div class="col-sm-3">
-        <div class="path-text"><?php echo in_array($status, ['RUNNING', 'PENDING'], true) ? 'ETA' : 'Rate'; ?></div>
-        <strong style="color:var(--accent)">
+        <div class="path-text" id="scan-eta-heading"><?php echo in_array($status, ['RUNNING', 'PENDING'], true) ? 'ETA' : 'Rate'; ?></div>
+        <strong id="scan-eta-value" style="color:var(--accent)">
           <?php echo View::e((string) (in_array($status, ['RUNNING', 'PENDING'], true) ? $timing['eta_label'] : $timing['rate_label'])); ?>
         </strong>
       </div>
     </div>
+    <div id="scan-orphan-alert">
     <?php if ($workerOrphan): ?>
     <div class="alert alert-warning py-2 mt-3 mb-0" style="font-size:0.8rem">
       Job shows <strong><?php echo View::e($status); ?></strong> but the worker process is not running (orphaned).
       Use <strong>Force delete (hung)</strong> if you want to clear it.
     </div>
     <?php endif; ?>
+    </div>
   </div>
 </div>
 
-<?php if ($status === 'RUNNING' || ($status === 'PENDING' && empty($job['cancel_requested']))): ?>
+<div id="scan-progress-wrap">
+<?php if ($scanLive): ?>
 <div class="card mb-4">
   <div class="card-body py-3">
     <div class="d-flex justify-content-between mb-1">
-      <span style="font-size:0.82rem;color:var(--text-soft)">
+      <span id="scan-progress-status" style="font-size:0.82rem;color:var(--text-soft)">
         <?php echo $status === 'PENDING' ? 'Waiting to start…' : 'Processing…'; ?>
         · ETA <?php echo View::e((string) $timing['eta_label']); ?>
         · <?php echo View::e((string) $timing['rate_label']); ?>
       </span>
-      <span style="font-size:0.82rem"><?php echo $done; ?> / <?php echo $total; ?> (<?php echo $pct; ?>%)</span>
+      <span id="scan-progress-counts" style="font-size:0.82rem"><?php echo $done; ?> / <?php echo $total; ?> (<?php echo $pct; ?>%)</span>
     </div>
     <div class="progress" style="height:8px">
-      <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:<?php echo $pct; ?>%"></div>
+      <div id="scan-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:<?php echo $pct; ?>%"></div>
     </div>
-    <p class="mb-0 mt-2" style="font-size:0.78rem;color:var(--text-soft)">
+    <p id="scan-progress-hint" class="mb-0 mt-2" style="font-size:0.78rem;color:var(--text-soft)">
       <?php if (!empty($job['cancel_requested'])): ?>
       Stop requested — scan will halt shortly.
       <?php else: ?>
-      Elapsed <?php echo View::e((string) $timing['elapsed_label']); ?> · auto-refresh 5s
+      Elapsed <?php echo View::e((string) $timing['elapsed_label']); ?> · live update 5s
       <?php endif; ?>
     </p>
   </div>
 </div>
-<meta http-equiv="refresh" content="5">
 <?php elseif ($status === 'PAUSED'): ?>
 <div class="alert alert-info mb-4" style="font-size:0.84rem;">
   Scan paused<?php echo $done > 0 ? ' after processing ' . number_format($done) . ' of ' . number_format($total) . ' file(s)' : ''; ?>.
@@ -248,10 +254,13 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
   Queued results remain in the review queue until you delete this scan job.
 </div>
 <?php endif; ?>
+</div>
 
+<div id="scan-error-wrap">
 <?php if ($status === 'FAILED' && !empty($job['error_message'])): ?>
 <div class="alert alert-danger mb-4"><?php echo View::e($job['error_message']); ?></div>
 <?php endif; ?>
+</div>
 
 <div class="card">
   <div class="card-header">Sample Results (latest 50)</div>
@@ -264,7 +273,7 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
           <th>Conf</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="scan-sample-tbody">
         <?php if ($jobFiles === []): ?>
         <tr>
           <td colspan="3" class="text-center py-4" style="color:var(--text-soft)">
@@ -306,3 +315,106 @@ $pct    = $total > 0 ? round(($done / $total) * 100) : 0;
     </table>
   </div>
 </div>
+
+<?php if ($scanLive): ?>
+<script src="/js/live-poll.js"></script>
+<script>
+(function () {
+  var jobId = <?php echo (int) $job['id']; ?>;
+  var esc = LivePoll.escapeHtml;
+  var fmt = function (n) { return Number(n || 0).toLocaleString(); };
+
+  function renderSample(sample, status) {
+    if (!sample || !sample.length) {
+      return '<tr><td colspan="3" class="text-center py-4" style="color:var(--text-soft)">'
+        + (status === 'RUNNING' ? 'Scan in progress…' : 'No files queued.')
+        + '</td></tr>';
+    }
+    return sample.map(function (f) {
+      var conf = esc(f.confidence || 'UNEVALUATED');
+      var label = esc(f.confidence_label || conf);
+      var html = '<tr><td><div class="path-filename">' + esc(f.original_filename) + '</div>'
+        + '<div class="path-text">' + esc(f.original_dir) + '</div></td><td>';
+      if (f.proposed_filename) {
+        html += '<div class="path-filename proposed">' + esc(f.proposed_filename) + '</div>'
+          + '<div class="path-text proposed">' + esc(f.proposed_dir || '') + '</div>';
+      } else {
+        html += '<span style="color:var(--text-soft)">—</span>';
+      }
+      html += '</td><td><span class="badge badge-confidence-' + conf + '">' + label + '</span>';
+      if (f.parsed_dt) {
+        html += '<div class="path-text mt-1" style="font-size:0.72rem">' + esc(f.parsed_dt) + '</div>';
+      }
+      html += '</td></tr>';
+      return html;
+    }).join('');
+  }
+
+  LivePoll.start({
+    url: '/scan/' + jobId + '/status',
+    intervalMs: 5000,
+    onData: function (data) {
+      var timing = data.timing || {};
+      var conf = data.confidence || {};
+      var live = data.status === 'RUNNING' || (data.status === 'PENDING' && !data.cancel_requested);
+
+      LivePoll.setText('scan-status-value', data.status || '');
+      LivePoll.setText('scan-queued-value', fmt(data.total_queued));
+      LivePoll.setText('scan-conf-high', String(conf.HIGH || 0));
+      LivePoll.setText('scan-conf-medium', String(conf.MEDIUM || 0));
+      LivePoll.setText('scan-conf-low', String(conf.LOW || 0));
+      LivePoll.setText('scan-conf-uneval', String(conf.UNEVALUATED || 0));
+      LivePoll.setText('scan-started', timing.started_label || '—');
+      LivePoll.setText('scan-ended', timing.ended_label || '—');
+      LivePoll.setText('scan-elapsed', timing.elapsed_label || '—');
+      LivePoll.setText('scan-eta-heading', live ? 'ETA' : 'Rate');
+      LivePoll.setText('scan-eta-value', live ? (timing.eta_label || '—') : (timing.rate_label || '—'));
+
+      if (data.worker_orphan) {
+        LivePoll.setHtml(
+          'scan-orphan-alert',
+          '<div class="alert alert-warning py-2 mt-3 mb-0" style="font-size:0.8rem">'
+            + 'Job shows <strong>' + esc(data.status) + '</strong> but the worker process is not running (orphaned). '
+            + 'Use <strong>Force delete (hung)</strong> if you want to clear it.</div>'
+        );
+      } else {
+        LivePoll.setHtml('scan-orphan-alert', '');
+      }
+
+      if (live) {
+        var label = (data.status === 'PENDING' ? 'Waiting to start…' : 'Processing…')
+          + ' · ETA ' + (timing.eta_label || '—')
+          + ' · ' + (timing.rate_label || '—');
+        LivePoll.setText('scan-progress-status', label);
+        LivePoll.setText(
+          'scan-progress-counts',
+          data.processed_files + ' / ' + data.total_files + ' (' + data.pct + '%)'
+        );
+        LivePoll.setWidth('scan-progress-bar', data.pct);
+        LivePoll.setText(
+          'scan-progress-hint',
+          data.cancel_requested
+            ? 'Stop requested — scan will halt shortly.'
+            : ('Elapsed ' + (timing.elapsed_label || '—') + ' · live update 5s')
+        );
+      }
+
+      if (data.error_message && data.status === 'FAILED') {
+        LivePoll.setHtml(
+          'scan-error-wrap',
+          '<div class="alert alert-danger mb-4">' + esc(data.error_message) + '</div>'
+        );
+      }
+
+      LivePoll.setHtml('scan-sample-tbody', renderSample(data.sample || [], data.status));
+    },
+    shouldStop: function (data) {
+      return data.poll === false;
+    },
+    onStop: function () {
+      setTimeout(function () { window.location.reload(); }, 400);
+    }
+  });
+})();
+</script>
+<?php endif; ?>

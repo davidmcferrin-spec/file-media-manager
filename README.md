@@ -11,7 +11,7 @@ naming/folder policy, and moves/renames them only after human approval.
 - **Catalog** — paginated review (approve / edit / reject / flag), thumbnails + WebM preview
 - **Captions / CC** — detect caption streams; background extract to `.srt` sidecars; Catalog viewer; priority cue
 - **Glue** — detect multipart sets, queue ffmpeg concat, QC, then delete source parts
-- **Split** — flag files at/above Settings → Processing duration (default ≥ 2 hours) or multi-hour schedule spans; workbench mark in/out; caption- or audio-based segment suggest; coarse audio level lane; export handle policy
+- **Split** — flag files at/above Settings → Processing duration (default ≥ 2 hours) or multi-hour schedule spans; workbench mark in/out; caption suggest; background audio suggest / level lane (systemd worker); export handle policy
 - **Gaps / Show audit** — completeness vs Timeline
 - **Execute / Rollback** — atomic rename+move of APPROVED files; per-file or batch undo
 - **Audit log** — every action with user, IP, before/after paths
@@ -23,7 +23,7 @@ naming/folder policy, and moves/renames them only after human approval.
 - PostgreSQL 14+
 - Bootstrap 5 UI (vendored under `public/vendor/`, no CDN)
 - FFmpeg + FFprobe
-- systemd workers for Scan + Caption extract
+- systemd workers for Scan + Caption extract + Split audio
 
 ## Architecture
 
@@ -74,6 +74,7 @@ sudo ./setup.sh
 
 - `media-manager-scan.service`
 - `media-manager-caption-extract.service`
+- `media-manager-split-audio.service`
 
 For local development without systemd:
 
@@ -86,7 +87,7 @@ php scripts/test.php
 
 **Dev scan mode:** Scanner page → “Dev mode” uses `example_file_trees/` without a NAS mount.
 
-## Background workers (Scan + CC extract)
+## Background workers (Scan + CC extract + Split audio)
 
 These are **true daemons** — no CLI babysitting. The web UI only enqueues jobs (`PENDING`); workers poll and process.
 
@@ -94,17 +95,21 @@ These are **true daemons** — no CLI babysitting. The web UI only enqueues jobs
 |------|--------|----------------|
 | `media-manager-scan` | `scripts/scan_worker.php` | Scan jobs (pending / paused / failed / orphaned) |
 | `media-manager-caption-extract` | `scripts/caption_extract_worker.php` | Caption extract jobs |
+| `media-manager-split-audio` | `scripts/split_audio_worker.php` | Split audio levels / suggest jobs |
 
 ```bash
 # Status / logs
-systemctl status media-manager-scan media-manager-caption-extract
+systemctl status media-manager-scan media-manager-caption-extract media-manager-split-audio
 journalctl -u media-manager-scan -f
 journalctl -u media-manager-caption-extract -f
+journalctl -u media-manager-split-audio -f
 
 # Also written under the app:
 #   storage/logs/scan-worker.log
 #   storage/logs/caption-extract-worker.log
 #   storage/logs/caption-extract-{jobId}.log   (per-job detail)
+#   storage/logs/split-audio-worker.log
+#   storage/logs/split-audio-{jobId}.log
 #   storage/logs/scan-{jobId}.log             (legacy one-shot spawn)
 ```
 

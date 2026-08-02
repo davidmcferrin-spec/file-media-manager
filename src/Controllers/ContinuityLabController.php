@@ -115,6 +115,53 @@ if ($method === 'POST' && $uri === '/continuity-lab/clear') {
     exit;
 }
 
+// GET /continuity-lab/status — JSON live poll (no full page reload)
+if ($method === 'GET' && $uri === '/continuity-lab/status') {
+    $filters = [
+        'outcome' => trim((string) ($_GET['outcome'] ?? '')),
+        'q'       => trim((string) ($_GET['q'] ?? '')),
+    ];
+    $page    = max(1, (int) ($_GET['page'] ?? 1));
+    $perPage = 50;
+    $offset  = ($page - 1) * $perPage;
+
+    $continuity = ContinuityCheckService::create();
+    $status     = $continuity->status();
+    $logRepo    = new ContinuityCheckLogRepository();
+    $summary    = $logRepo->summary();
+    $avgMs      = $logRepo->avgDurationMs();
+    $runningJob = (new ScanJobRepository())->findRunning();
+    $eta        = ContinuityEtaEstimator::estimate(
+        $runningJob,
+        $avgMs,
+        $logRepo->countSinceMinutes(5)
+    );
+    $total      = $logRepo->count($filters);
+    $entries    = $logRepo->list($filters, $perPage, $offset);
+    $totalPages = max(1, (int) ceil($total / $perPage));
+    $newestId   = $entries !== [] ? (int) ($entries[0]['id'] ?? 0) : 0;
+
+    ob_start();
+    require dirname(__DIR__) . '/Views/continuity_lab/_entries_tbody.php';
+    $entriesHtml = (string) ob_get_clean();
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'poll'        => true,
+        'status'      => $status,
+        'summary'     => $summary,
+        'avg_ms'      => $avgMs,
+        'eta'         => $eta,
+        'total'       => $total,
+        'page'        => $page,
+        'total_pages' => $totalPages,
+        'newest_id'   => $newestId,
+        'entries_html'=> $entriesHtml,
+    ], JSON_THROW_ON_ERROR);
+    exit;
+}
+
 if ($uri !== '/continuity-lab') {
     http_response_code(404);
     exit;

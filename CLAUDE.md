@@ -26,6 +26,7 @@ src/Services/           Scan, Classifier, Glue, Captions, Executor, Rollback,
                         FFprobe, Thumbnail, Preview, Continuity, Split media, …
 src/Views/              PHP templates only — no logic beyond display
 src/Support/            View helpers, AppVersion, WorkerMode
+public/js/live-poll.js  Shared JSON status poller (scan / captions / Continuity Lab)
 VERSION                 App semver (displayed in footer)
 CHANGELOG.md            Release notes (shown on /versions)
 scripts/migrate.php     Versioned PostgreSQL migration runner
@@ -71,18 +72,20 @@ storage/logs/           Application + worker logs
 - Bootstrap vendored under public/vendor/ — no external requests
 - No inline SQL — use Repository classes
 - No framework — vanilla PHP, PSR-4 autoloading
-- Background Scan + Caption extract: web enqueues only; systemd workers poll
-  (`WORKER_MODE=daemon`). Do not SIGKILL the daemon PID on cancel — use
-  cooperative `cancel_requested`. Local/dev may set `WORKER_MODE=spawn`.
+- Background Scan + Caption extract + Split audio: web enqueues only; systemd
+  workers poll (`WORKER_MODE=daemon`). Do not SIGKILL the daemon PID on cancel —
+  use cooperative `cancel_requested`. Local/dev may set `WORKER_MODE=spawn`.
 
 ## Background workers
 | Unit | Drains |
 |------|--------|
 | media-manager-scan | scan_jobs PENDING/PAUSED/FAILED/orphaned RUNNING |
 | media-manager-caption-extract | caption_extract_jobs same statuses |
+| media-manager-split-audio | split_audio_jobs (levels / suggest) |
 
 Logs: `journalctl -u <unit> -f` and `storage/logs/*-worker.log`.
 Per caption job: `storage/logs/caption-extract-{id}.log`.
+Per split-audio job: `storage/logs/split-audio-{id}.log`.
 Env: `WORKER_MODE`, `WORKER_POLL_SECONDS`, `CAPTION_EXTRACT_TIMEOUT_SECONDS`.
 
 ## Code Style

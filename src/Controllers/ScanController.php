@@ -14,6 +14,7 @@ use MediaManager\Repositories\SourceRepository;
 use MediaManager\Repositories\SystemRepository;
 use MediaManager\Services\FFprobeService;
 use MediaManager\Services\ScanEtaEstimator;
+use MediaManager\Support\View;
 
 Auth::requireAdmin();
 
@@ -498,6 +499,72 @@ if ($method === 'POST' && $uri === '/scan/reclassify') {
     }
 
     header('Location: /scan/' . $jobId);
+    exit;
+}
+
+// ── GET: JSON status (live poll — no full page refresh) ───────
+if ($method === 'GET' && preg_match('#^/scan/(\d+)/status$#', $uri, $m) === 1) {
+    $jobId = (int) $m[1];
+    $job   = $scanJobs->findById($jobId);
+    if ($job === null) {
+        http_response_code(404);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => 'Scan job not found'], JSON_THROW_ON_ERROR);
+        exit;
+    }
+
+    $statusStr = (string) ($job['status'] ?? '');
+    $totalQueued = $files->countByScanJob($jobId);
+    $confidence = $files->confidenceSummary($jobId);
+    $workerAlive = $statusStr === 'RUNNING' && $scanJobs->isWorkerAlive($jobId);
+    $workerOrphan = $statusStr === 'RUNNING' && !$scanJobs->isWorkerAlive($jobId);
+    $timing = ScanEtaEstimator::estimate($job);
+    $total = (int) ($job['total_files'] ?? 0);
+    $done = (int) ($job['processed_files'] ?? 0);
+    $pct = $total > 0 ? (int) round(($done / $total) * 100) : 0;
+    $poll = $statusStr === 'RUNNING'
+        || ($statusStr === 'PENDING' && empty($job['cancel_requested']));
+
+    $sample = [];
+    foreach ($files->byScanJob($jobId, 50, 0, true) as $file) {
+        $fc = (string) ($file['confidence'] ?? 'UNEVALUATED');
+        $sample[] = [
+            'original_filename'  => (string) ($file['original_filename'] ?? ''),
+            'original_dir'       => (string) ($file['original_dir'] ?? ''),
+            'proposed_filename'  => $file['proposed_filename'] ?? null,
+            'proposed_dir'       => $file['proposed_dir'] ?? null,
+            'confidence'         => $fc,
+            'confidence_label'   => $fc === 'UNEVALUATED' ? 'Unevaluated' : $fc,
+            'parsed_dt'          => View::formatParsedDateTime(
+                $file['file_date'] ?? null,
+                $file['file_time'] ?? null
+            ),
+        ];
+    }
+
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'id'               => $jobId,
+        'status'           => $statusStr,
+        'poll'             => $poll,
+        'cancel_requested' => !empty($job['cancel_requested']),
+        'worker_alive'     => $workerAlive,
+        'worker_orphan'    => $workerOrphan,
+        'processed_files'  => $done,
+        'total_files'      => $total,
+        'pct'              => $pct,
+        'total_queued'     => $totalQueued,
+        'confidence'       => [
+            'HIGH'         => (int) ($confidence['HIGH'] ?? 0),
+            'MEDIUM'       => (int) ($confidence['MEDIUM'] ?? 0),
+            'LOW'          => (int) ($confidence['LOW'] ?? 0),
+            'UNEVALUATED'  => (int) ($confidence['UNEVALUATED'] ?? 0),
+        ],
+        'timing'           => $timing,
+        'error_message'    => $job['error_message'] ?? null,
+        'sample'           => $sample,
+    ], JSON_THROW_ON_ERROR);
     exit;
 }
 

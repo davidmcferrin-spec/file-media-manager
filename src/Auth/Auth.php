@@ -125,11 +125,28 @@ class Auth
     }
 
     /**
+     * True when the client asked for JSON (AJAX / status pollers).
+     */
+    public static function wantsJson(): bool
+    {
+        $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+
+        return str_contains($accept, 'application/json');
+    }
+
+    /**
      * Require login — redirect to /login if not authenticated.
+     * Returns 401 JSON when Accept: application/json.
      */
     public static function requireLogin(): void
     {
         if (!self::check()) {
+            if (self::wantsJson()) {
+                http_response_code(401);
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['error' => 'Unauthorized'], JSON_THROW_ON_ERROR);
+                exit;
+            }
             header('Location: /login');
             exit;
         }
@@ -137,11 +154,18 @@ class Auth
 
     /**
      * Require admin role — redirect to dashboard if insufficient.
+     * Returns 403 JSON when Accept: application/json.
      */
     public static function requireAdmin(): void
     {
         self::requireLogin();
         if (!self::isAdmin()) {
+            if (self::wantsJson()) {
+                http_response_code(403);
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['error' => 'Forbidden'], JSON_THROW_ON_ERROR);
+                exit;
+            }
             header('Location: /dashboard?error=unauthorized');
             exit;
         }

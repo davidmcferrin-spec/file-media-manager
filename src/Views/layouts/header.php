@@ -354,6 +354,43 @@ code, .path-text kbd {
     font-weight: 600;
 }
 
+/* ── Dashboard section tabs (Pipeline / Library Analytics) ─── */
+.dashboard-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.dashboard-tab {
+    display: inline-block;
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    padding: 0.55rem 1rem;
+    border-radius: 0.45rem;
+    border: 1px solid var(--border-strong);
+    background: var(--panel-strong);
+    color: var(--text-main) !important;
+    text-decoration: none !important;
+    transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.dashboard-tab:hover {
+    color: var(--text-main) !important;
+    border-color: var(--accent);
+    background: var(--hover-bg);
+}
+.dashboard-tab.active {
+    color: #0b1118 !important;
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+[data-bs-theme="light"] .dashboard-tab.active {
+    color: #ffffff !important;
+}
+
 /* ── Stat cards ─────────────────────────────────────────────── */
 .stat-card .stat-label {
     font-size: 0.72rem;

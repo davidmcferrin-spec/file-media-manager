@@ -32,10 +32,8 @@ $timing = $timing ?? [
 ];
 $priorityFiles = $priorityFiles ?? [];
 $upcoming = $upcoming ?? [];
+$refresh = $refresh ?? false;
 ?>
-<?php if ($refresh): ?>
-<meta http-equiv="refresh" content="5">
-<?php endif; ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start mb-4 gap-3">
   <div>
@@ -44,14 +42,14 @@ $upcoming = $upcoming ?? [];
     </h1>
     <p class="mb-0 path-text">
       Scope <code><?php echo View::e((string) ($job['scope'] ?? '')); ?></code>
-      · <?php echo View::statusBadge($status); ?>
+      · <span id="caption-status-badge"><?php echo View::statusBadge($status); ?></span>
       · by <?php echo View::e((string) ($job['created_by_email'] ?? '')); ?>
-      <?php if ($refresh): ?>
-      · auto-refresh 5s
-      <?php endif; ?>
-      <?php if ($workerOrphan): ?>
+      <span id="caption-live-hint"><?php if ($refresh): ?>
+      · live update 5s
+      <?php endif; ?></span>
+      <span id="caption-orphan-badge"><?php if ($workerOrphan): ?>
       · <span class="badge bg-warning text-dark">hung — worker not running</span>
-      <?php endif; ?>
+      <?php endif; ?></span>
     </p>
   </div>
   <div class="d-flex gap-2">
@@ -93,15 +91,15 @@ $upcoming = $upcoming ?? [];
         <div class="row g-2" style="font-size:0.84rem">
           <div class="col-sm-4">
             <div class="path-text">Started</div>
-            <strong><?php echo View::e((string) $timing['started_label']); ?></strong>
+            <strong id="caption-started"><?php echo View::e((string) $timing['started_label']); ?></strong>
           </div>
           <div class="col-sm-4">
             <div class="path-text">Ended</div>
-            <strong><?php echo View::e((string) $timing['ended_label']); ?></strong>
+            <strong id="caption-ended"><?php echo View::e((string) $timing['ended_label']); ?></strong>
           </div>
           <div class="col-sm-4">
             <div class="path-text">Elapsed</div>
-            <strong><?php echo View::e((string) $timing['elapsed_label']); ?></strong>
+            <strong id="caption-elapsed"><?php echo View::e((string) $timing['elapsed_label']); ?></strong>
           </div>
         </div>
       </div>
@@ -111,39 +109,39 @@ $upcoming = $upcoming ?? [];
       <div class="card-header">Progress</div>
       <div class="card-body">
         <div class="d-flex justify-content-between mb-1" style="font-size:0.82rem">
-          <span>
+          <span id="caption-progress-label">
             <?php echo (int) ($job['processed_files'] ?? 0); ?> /
             <?php echo (int) ($job['total_files'] ?? 0); ?> files
             (<?php echo View::e((string) ($eta['pct'] ?? 0)); ?>%)
           </span>
-          <strong style="color:var(--accent)"><?php echo View::e((string) ($eta['eta_label'] ?? '')); ?></strong>
+          <strong id="caption-eta-label" style="color:var(--accent)"><?php echo View::e((string) ($eta['eta_label'] ?? '')); ?></strong>
         </div>
         <div class="progress mb-3" style="height:10px;background:var(--panel-strong)">
-          <div class="progress-bar" role="progressbar"
+          <div id="caption-progress-bar" class="progress-bar" role="progressbar"
                style="width:<?php echo View::e((string) ($eta['pct'] ?? 0)); ?>%;background:var(--accent)"></div>
         </div>
         <div class="row g-2" style="font-size:0.82rem">
           <div class="col-sm-4">
             <div class="path-text">OK</div>
-            <strong><?php echo number_format((int) ($job['ok_count'] ?? 0)); ?></strong>
+            <strong id="caption-ok"><?php echo number_format((int) ($job['ok_count'] ?? 0)); ?></strong>
           </div>
           <div class="col-sm-4">
             <div class="path-text">Failed</div>
-            <strong><?php echo number_format((int) ($job['fail_count'] ?? 0)); ?></strong>
+            <strong id="caption-fail"><?php echo number_format((int) ($job['fail_count'] ?? 0)); ?></strong>
           </div>
           <div class="col-sm-4">
             <div class="path-text">Skipped (no CC)</div>
-            <strong><?php echo number_format((int) ($job['skip_count'] ?? 0)); ?></strong>
+            <strong id="caption-skip"><?php echo number_format((int) ($job['skip_count'] ?? 0)); ?></strong>
           </div>
         </div>
         <hr style="border-color:var(--border-color)">
         <div style="font-size:0.82rem">
           <div class="path-text mb-1">Duration-weighted ETA</div>
-          <div>
+          <div id="caption-eta-detail">
             Remaining media ~
-            <strong><?php echo number_format(((float) ($eta['remaining_duration'] ?? 0)) / 3600, 1); ?>h</strong>
-            · Rate: <?php echo View::e((string) ($eta['rate_label'] ?? '—')); ?>
-            · Method: <code><?php echo View::e((string) ($eta['method'] ?? '')); ?></code>
+            <strong id="caption-remaining-h"><?php echo number_format(((float) ($eta['remaining_duration'] ?? 0)) / 3600, 1); ?>h</strong>
+            · Rate: <span id="caption-rate"><?php echo View::e((string) ($eta['rate_label'] ?? '—')); ?></span>
+            · Method: <code id="caption-method"><?php echo View::e((string) ($eta['method'] ?? '')); ?></code>
           </div>
           <div class="path-text mt-1" style="font-size:0.75rem">
             ETA scales with file duration — a 3h MXF counts ~3× a 1h file.
@@ -154,7 +152,7 @@ $upcoming = $upcoming ?? [];
 
     <div class="card">
       <div class="card-header">Current file</div>
-      <div class="card-body" style="font-size:0.84rem">
+      <div class="card-body" id="caption-current-body" style="font-size:0.84rem">
         <?php if (!empty($job['current_filename'])): ?>
         <div class="path-filename"><?php echo View::e((string) $job['current_filename']); ?></div>
         <div class="path-text">
@@ -196,7 +194,7 @@ $upcoming = $upcoming ?? [];
         <span class="path-text" style="font-size:0.72rem"><?php echo View::e(basename($logPath)); ?></span>
       </div>
       <div class="card-body p-0">
-        <pre class="mb-0 p-3 path-text"
+        <pre id="caption-log-tail" class="mb-0 p-3 path-text"
              style="font-size:0.68rem;max-height:420px;overflow:auto;white-space:pre-wrap;background:var(--form-bg)"><?php
 if ($logTail === []) {
     echo 'Log empty or not created yet: ' . View::e($logPath);
@@ -335,6 +333,106 @@ if ($logTail === []) {
     }
     return confirm('Move ' + n + ' clip(s) to the top of this extract cue?');
   };
+})();
+</script>
+<?php endif; ?>
+
+<?php if ($refresh): ?>
+<script src="/js/live-poll.js"></script>
+<script>
+(function () {
+  var jobId = <?php echo (int) $job['id']; ?>;
+  var esc = LivePoll.escapeHtml;
+  var fmt = function (n) { return Number(n || 0).toLocaleString(); };
+
+  function renderCurrent(data) {
+    var eta = data.eta || {};
+    var html = '';
+    if (data.current_filename) {
+      html += '<div class="path-filename">' + esc(data.current_filename) + '</div>';
+      html += '<div class="path-text">File #' + esc(data.current_file_id || 0);
+      if (data.current_duration_label) {
+        html += ' · duration ' + esc(data.current_duration_label);
+      }
+      if (data.hang_duration_label) {
+        html += ' · running ' + esc(data.hang_duration_label);
+      }
+      html += '</div>';
+      if (eta.hang_warning) {
+        html += '<div class="alert alert-warning py-2 mt-3 mb-0" style="font-size:0.82rem">'
+          + 'This file has been processing for over 20 minutes — check the log for a hang or timeout'
+          + ' (<code>CAPTION_EXTRACT_TIMEOUT_SECONDS</code>, default 900s).</div>';
+      }
+    } else {
+      html += '<span class="path-text">No file in progress.</span>';
+    }
+    if (data.last_error) {
+      html += '<div class="alert alert-danger py-2 mt-3 mb-0" style="font-size:0.78rem;white-space:pre-wrap">'
+        + 'Last error: ' + esc(data.last_error) + '</div>';
+    }
+    if (data.error_message) {
+      html += '<div class="alert alert-danger py-2 mt-3 mb-0" style="font-size:0.78rem;white-space:pre-wrap">'
+        + 'Job error: ' + esc(data.error_message) + '</div>';
+    }
+    LivePoll.setHtml('caption-current-body', html);
+  }
+
+  function patchLog(lines) {
+    var pre = document.getElementById('caption-log-tail');
+    if (!pre) return;
+    var nearBottom = (pre.scrollHeight - pre.scrollTop - pre.clientHeight) < 40;
+    var text = (lines && lines.length)
+      ? lines.map(function (l) { return String(l); }).join('\n') + '\n'
+      : pre.textContent;
+    if (lines && lines.length) {
+      pre.textContent = text;
+      if (nearBottom) pre.scrollTop = pre.scrollHeight;
+    }
+  }
+
+  LivePoll.start({
+    url: '/captions/' + jobId + '/status',
+    intervalMs: 5000,
+    onData: function (data) {
+      var eta = data.eta || {};
+      var timing = data.timing || {};
+      LivePoll.setHtml('caption-status-badge', data.status_badge_html || '');
+      LivePoll.setText('caption-started', timing.started_label || '—');
+      LivePoll.setText('caption-ended', timing.ended_label || '—');
+      LivePoll.setText('caption-elapsed', timing.elapsed_label || '—');
+      LivePoll.setText(
+        'caption-progress-label',
+        data.processed_files + ' / ' + data.total_files + ' files (' + (eta.pct || 0) + '%)'
+      );
+      LivePoll.setText('caption-eta-label', eta.eta_label || '');
+      LivePoll.setWidth('caption-progress-bar', eta.pct || 0);
+      LivePoll.setText('caption-ok', fmt(data.ok_count));
+      LivePoll.setText('caption-fail', fmt(data.fail_count));
+      LivePoll.setText('caption-skip', fmt(data.skip_count));
+      LivePoll.setText(
+        'caption-remaining-h',
+        (Number(eta.remaining_duration || 0) / 3600).toFixed(1) + 'h'
+      );
+      LivePoll.setText('caption-rate', eta.rate_label || '—');
+      LivePoll.setText('caption-method', eta.method || '');
+      LivePoll.setHtml(
+        'caption-orphan-badge',
+        data.worker_orphan
+          ? ' · <span class="badge bg-warning text-dark">hung — worker not running</span>'
+          : ''
+      );
+      renderCurrent(data);
+      patchLog(data.log_tail || []);
+    },
+    shouldStop: function (data) {
+      return data.poll === false;
+    },
+    onStop: function () {
+      LivePoll.setText('caption-live-hint', '');
+      // One reload so action buttons (delete / cancel) match terminal state.
+      setTimeout(function () { window.location.reload(); }, 400);
+    }
+  });
 })();
 </script>
 <?php endif; ?>
