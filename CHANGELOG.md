@@ -14,6 +14,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.18.1] — 2026-08-01
+
+### Added
+
+- Continuity Lab **Rules / Model / Final** comparison on Confidence, Show, Type, and Date/Time
+  - Model show resolved from seed catalog / show dictionary (`engine_show_id`)
+  - When the model agrees without an alternate value, Model mirrors Rules
+  - Diffs from Rules highlighted; Artifacts panel includes the same Parsed comparison
+
 ## [0.18.0] — 2026-08-01
 
 ### Changed

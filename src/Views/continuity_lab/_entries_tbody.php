@@ -5,6 +5,8 @@ declare(strict_types=1);
 use MediaManager\Support\View;
 
 /** @var list<array<string, mixed>> $entries */
+/** @var array<int, string> $showAbbrById */
+$showAbbrById = $showAbbrById ?? [];
 ?>
         <?php if ($entries === []): ?>
         <tr>
@@ -27,7 +29,6 @@ use MediaManager\Support\View;
         };
         $ruleShow = trim((string) ($row['rule_show_abbr'] ?? ''));
         $finalShow = trim((string) ($row['final_show_abbr'] ?? ''));
-        $showChanged = $ruleShow !== '' && $finalShow !== '' && strcasecmp($ruleShow, $finalShow) !== 0;
         $signalsRaw = $row['rule_signals'] ?? '[]';
         if (is_string($signalsRaw)) {
             $signals = json_decode($signalsRaw, true);
@@ -53,12 +54,54 @@ use MediaManager\Support\View;
         $finalTime = trim((string) ($row['final_file_time'] ?? $ruleTime));
         $engineDate = trim((string) ($row['engine_file_date'] ?? ''));
         $engineTime = trim((string) ($row['engine_file_time'] ?? ''));
-        $dateChanged = $ruleDate !== '' && $finalDate !== '' && $ruleDate !== $finalDate;
-        $timeChanged = $ruleTime !== '' && $finalTime !== '' && $ruleTime !== $finalTime;
         $ruleType = trim((string) ($row['rule_media_type_abbr'] ?? ($seedProposal['media_type'] ?? '')));
         $finalType = trim((string) ($row['final_media_type_abbr'] ?? $ruleType));
         $engineType = trim((string) ($row['engine_media_type_abbr'] ?? ''));
-        $typeChanged = $ruleType !== '' && $finalType !== '' && strcasecmp($ruleType, $finalType) !== 0;
+
+        // Resolve model show abbr: seed catalog → show map → id fallback.
+        $engineShowId = isset($row['engine_show_id']) && $row['engine_show_id'] !== null && $row['engine_show_id'] !== ''
+            ? (int) $row['engine_show_id']
+            : 0;
+        $engineShow = '';
+        if ($engineShowId > 0 && is_array($seed) && is_array($seed['shows'] ?? null)) {
+            foreach ($seed['shows'] as $s) {
+                if (!is_array($s)) {
+                    continue;
+                }
+                if ((int) ($s['id'] ?? 0) === $engineShowId) {
+                    $engineShow = trim((string) ($s['abbreviation'] ?? ''));
+                    break;
+                }
+            }
+        }
+        if ($engineShow === '' && $engineShowId > 0) {
+            $engineShow = trim((string) ($showAbbrById[$engineShowId] ?? ''));
+        }
+        if ($engineShow === '' && $engineShowId > 0) {
+            $engineShow = '#' . $engineShowId;
+        }
+        // Model agreed with no alternate show_id → same as rules.
+        if ($engineShow === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleShow !== '') {
+            $engineShow = $ruleShow;
+        }
+        // Same fill for type/date when model agreed but left fields null.
+        if ($engineType === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleType !== '') {
+            $engineType = $ruleType;
+        }
+        $engineDt = trim($engineDate . ' ' . $engineTime);
+        $ruleDt = trim($ruleDate . ' ' . $ruleTime);
+        $finalDt = trim($finalDate . ' ' . $finalTime);
+        if ($engineDt === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleDt !== '') {
+            $engineDt = $ruleDt;
+        }
+
+        $ruleConf = trim((string) ($row['rule_confidence'] ?? ''));
+        $engineConf = trim((string) ($row['engine_confidence'] ?? ''));
+        $finalConf = trim((string) ($row['final_confidence'] ?? ''));
+        if ($engineConf === '' && $row['engine_agree'] !== null && !empty($row['engine_agree']) && $ruleConf !== '') {
+            $engineConf = $ruleConf;
+        }
+
         $seedPretty = '';
         if (is_array($seed)) {
             $seedPretty = (string) json_encode($seed, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -85,57 +128,20 @@ use MediaManager\Support\View;
             <?php if ($row['engine_agree'] !== null): ?>
             <div class="path-text mt-1">
               agree=<?php echo !empty($row['engine_agree']) ? 'yes' : 'no'; ?>
-              <?php if (!empty($row['engine_confidence'])): ?>
-              · eng <?php echo View::e((string) $row['engine_confidence']); ?>
-              <?php endif; ?>
             </div>
             <?php endif; ?>
           </td>
           <td class="text-nowrap">
-            <code><?php echo View::e((string) ($row['rule_confidence'] ?? '')); ?></code>
-            →
-            <code><?php echo View::e((string) ($row['final_confidence'] ?? '')); ?></code>
-          </td>
-          <td>
-            <?php if ($showChanged): ?>
-            <code><?php echo View::e($ruleShow); ?></code>
-            →
-            <code><?php echo View::e($finalShow); ?></code>
-            <?php else: ?>
-            <code><?php echo View::e($finalShow !== '' ? $finalShow : ($ruleShow !== '' ? $ruleShow : '—')); ?></code>
-            <?php endif; ?>
+            <?php echo View::continuityTriad($ruleConf, $engineConf, $finalConf); ?>
           </td>
           <td class="text-nowrap">
-            <?php if ($finalType !== '' || $ruleType !== ''): ?>
-              <?php if ($typeChanged): ?>
-              <code><?php echo View::e($ruleType); ?></code>
-              →
-              <code><?php echo View::e($finalType); ?></code>
-              <?php else: ?>
-              <code><?php echo View::e($finalType !== '' ? $finalType : $ruleType); ?></code>
-              <?php endif; ?>
-              <?php if ($engineType !== ''): ?>
-              <div class="path-text" style="font-size:0.68rem">eng <?php echo View::e($engineType); ?></div>
-              <?php endif; ?>
-            <?php else: ?>
-            —
-            <?php endif; ?>
+            <?php echo View::continuityTriad($ruleShow, $engineShow, $finalShow); ?>
           </td>
-          <td class="text-nowrap path-text">
-            <?php if ($finalDate !== '' || $finalTime !== ''): ?>
-              <?php if ($dateChanged || $timeChanged): ?>
-              <code><?php echo View::e(trim($ruleDate . ' ' . $ruleTime)); ?></code>
-              →
-              <code><?php echo View::e(trim($finalDate . ' ' . $finalTime)); ?></code>
-              <?php else: ?>
-              <code><?php echo View::e(trim($finalDate . ' ' . $finalTime)); ?></code>
-              <?php endif; ?>
-              <?php if ($engineDate !== '' || $engineTime !== ''): ?>
-              <div style="font-size:0.68rem">eng <?php echo View::e(trim($engineDate . ' ' . $engineTime)); ?></div>
-              <?php endif; ?>
-            <?php else: ?>
-            —
-            <?php endif; ?>
+          <td class="text-nowrap">
+            <?php echo View::continuityTriad($ruleType, $engineType, $finalType); ?>
+          </td>
+          <td class="text-nowrap">
+            <?php echo View::continuityTriad($ruleDt, $engineDt, $finalDt); ?>
           </td>
           <td style="max-width:280px">
             <?php if (trim((string) ($row['engine_reason'] ?? '')) !== ''): ?>
@@ -191,6 +197,32 @@ use MediaManager\Support\View;
                   <span>Approved examples: <strong><?php echo (int) $exampleCount; ?></strong></span>
                   <?php if ($row['http_status'] !== null): ?>
                   <span>HTTP: <strong><?php echo (int) $row['http_status']; ?></strong></span>
+                  <?php endif; ?>
+                </div>
+                <div class="mb-3 p-2 rounded" style="background:rgba(0,0,0,0.18);font-size:0.78rem">
+                  <div class="form-label mb-2">Parsed comparison</div>
+                  <div class="row g-2">
+                    <div class="col-md-3">
+                      <div class="path-text mb-1">Confidence</div>
+                      <?php echo View::continuityTriad($ruleConf, $engineConf, $finalConf); ?>
+                    </div>
+                    <div class="col-md-3">
+                      <div class="path-text mb-1">Show</div>
+                      <?php echo View::continuityTriad($ruleShow, $engineShow, $finalShow); ?>
+                    </div>
+                    <div class="col-md-3">
+                      <div class="path-text mb-1">Type</div>
+                      <?php echo View::continuityTriad($ruleType, $engineType, $finalType); ?>
+                    </div>
+                    <div class="col-md-3">
+                      <div class="path-text mb-1">Date / Time</div>
+                      <?php echo View::continuityTriad($ruleDt, $engineDt, $finalDt); ?>
+                    </div>
+                  </div>
+                  <?php if (trim((string) ($row['engine_reason'] ?? '')) !== ''): ?>
+                  <div class="mt-2 path-text">
+                    Model reason: <?php echo View::e((string) $row['engine_reason']); ?>
+                  </div>
                   <?php endif; ?>
                 </div>
                 <?php if ($transportErr !== ''): ?>

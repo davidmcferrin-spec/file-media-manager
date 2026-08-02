@@ -9,6 +9,7 @@ use MediaManager\Auth\Session;
 use MediaManager\Repositories\AuditRepository;
 use MediaManager\Repositories\ContinuityCheckLogRepository;
 use MediaManager\Repositories\ScanJobRepository;
+use MediaManager\Repositories\ShowRepository;
 use MediaManager\Services\ContinuityCheckService;
 use MediaManager\Services\ContinuityEtaEstimator;
 use MediaManager\Services\ContinuityLabExportService;
@@ -17,6 +18,25 @@ Auth::requireAdmin();
 
 $uri    = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
+/** @return array<int, string> show_id => abbreviation */
+function continuity_show_abbr_map(): array
+{
+    static $map = null;
+    if (is_array($map)) {
+        return $map;
+    }
+    $map = [];
+    foreach ((new ShowRepository())->all() as $row) {
+        $id = (int) ($row['id'] ?? 0);
+        $abbr = trim((string) ($row['abbreviation'] ?? ''));
+        if ($id > 0 && $abbr !== '') {
+            $map[$id] = $abbr;
+        }
+    }
+
+    return $map;
+}
 
 if ($method === 'GET' && $uri === '/continuity-lab/export') {
     $filters = [
@@ -140,6 +160,7 @@ if ($method === 'GET' && $uri === '/continuity-lab/status') {
     $entries    = $logRepo->list($filters, $perPage, $offset);
     $totalPages = max(1, (int) ceil($total / $perPage));
     $newestId   = $entries !== [] ? (int) ($entries[0]['id'] ?? 0) : 0;
+    $showAbbrById = continuity_show_abbr_map();
 
     ob_start();
     require dirname(__DIR__) . '/Views/continuity_lab/_entries_tbody.php';
@@ -190,6 +211,7 @@ $eta        = ContinuityEtaEstimator::estimate(
 $total      = $logRepo->count($filters);
 $entries    = $logRepo->list($filters, $perPage, $offset);
 $totalPages = max(1, (int) ceil($total / $perPage));
+$showAbbrById = continuity_show_abbr_map();
 
 $title = 'Continuity Lab — Media Manager';
 

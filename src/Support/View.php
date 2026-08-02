@@ -248,6 +248,36 @@ class View
     }
 
     /**
+     * Continuity Lab cell: parsing Rules vs Model vs Final (merged) suggestion.
+     * Differs from Rules are highlighted so conflicts are scannable.
+     */
+    public static function continuityTriad(string $rule, string $model, string $final): string
+    {
+        $rule = trim($rule);
+        $model = trim($model);
+        $final = trim($final);
+
+        $rows = [
+            ['Rules', $rule, false],
+            ['Model', $model, $model !== '' && $rule !== '' && strcasecmp($model, $rule) !== 0],
+            ['Final', $final, $final !== '' && $rule !== '' && strcasecmp($final, $rule) !== 0],
+        ];
+
+        $html = '<div class="continuity-triad" style="font-size:0.72rem;line-height:1.35">';
+        foreach ($rows as [$label, $value, $diff]) {
+            $disp = $value !== '' ? $value : '—';
+            $valStyle = $diff ? 'color:var(--bs-warning);font-weight:600' : '';
+            $html .= '<div class="d-flex gap-1">'
+                . '<span class="path-text" style="min-width:2.4rem">' . self::e($label) . '</span>'
+                . '<code style="' . $valStyle . '">' . self::e($disp) . '</code>'
+                . '</div>';
+        }
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    /**
      * Page numbers for pagination UI: [1, '…', 4, 5, 6, '…', 100]
      *
      * @return list<int|string>

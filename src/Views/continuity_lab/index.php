@@ -261,10 +261,22 @@ $queryBase = array_filter([
         <tr>
           <th>Time (ET)</th>
           <th>Outcome</th>
-          <th>Rule → Final</th>
-          <th>Show</th>
-          <th>Type</th>
-          <th>Date / Time</th>
+          <th title="Parsing rules → model verdict → merged final">
+            Confidence
+            <div class="path-text" style="font-size:0.65rem;font-weight:400">Rules / Model / Final</div>
+          </th>
+          <th title="Show abbreviation from rules vs model vs merge">
+            Show
+            <div class="path-text" style="font-size:0.65rem;font-weight:400">Rules / Model / Final</div>
+          </th>
+          <th title="Media type from rules vs model vs merge">
+            Type
+            <div class="path-text" style="font-size:0.65rem;font-weight:400">Rules / Model / Final</div>
+          </th>
+          <th title="Air date/time from rules vs model vs merge">
+            Date / Time
+            <div class="path-text" style="font-size:0.65rem;font-weight:400">Rules / Model / Final</div>
+          </th>
           <th>Reason / signals</th>
           <th>File</th>
           <th>ms</th>
