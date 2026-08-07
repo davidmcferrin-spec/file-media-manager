@@ -70,7 +70,9 @@ final class ScheduleSplitSuggester
         }
 
         $threshold = max(1, $this->flagThresholdSeconds);
-        $needsSplit = count($segments) > 1 || $durationSeconds >= $threshold;
+        // Duration must meet the configured flag threshold. Crossing a clock
+        // hour alone (e.g. 1h22m or 30m straddling :00) must not set needs_split.
+        $needsSplit = $durationSeconds >= $threshold && count($segments) > 1;
 
         if (!$needsSplit || $segments === []) {
             return $empty;

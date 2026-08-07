@@ -14,6 +14,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). Versioning follo
 2. Add a `## [x.y.z] — YYYY-MM-DD` section below (newest first)
 3. Deploy
 
+## [0.28.3] — 2026-08-02
+
+### Fixed
+
+- `needs_split` from schedule hourly blocks only applies when duration is at/above the Split flag setting (default 2h) — short clips that merely straddle a clock hour (e.g. 1:22:30, 00:30:00) are no longer auto-flagged
+
 ## [0.28.2] — 2026-08-02
 
 ### Changed

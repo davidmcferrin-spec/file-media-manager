@@ -69,7 +69,7 @@ storage/logs/           Application + worker logs
 - Thumbnails: background worker (`media-manager-thumbnail`); Catalog serves placeholder until ready
 - Video previews still generated on-demand in the web request (heavier; separate from thumbs)
 - Files at or above the split flag duration (Settings → Processing; default 2 hours)
-  are flagged needs_split = true; multi-hour schedule spans also flag
+  are flagged needs_split = true; schedule hourly notes attach only at/above that duration
 - Split prep (scan / Catalog): split queue + caption extract if no usable SRT;
   audio **suggest** if no SRT, else audio **levels** (one active job per file)
 - Split workbench suggest: captions (SRT silence gaps) or audio (FFmpeg silencedetect;

@@ -30,7 +30,8 @@ use MediaManager\Support\View;
                  value="<?php echo (int) $splitFlagMinutes; ?>">
           <div class="form-text" style="color:var(--text-soft)">
             Files at or above this duration are flagged <code>needs_split</code> (default 120 minutes / 2 hours).
-            Schedule spans across more than one hourly show block are also flagged.
+            When duration meets this threshold and the air time spans more than one hourly Timeline block,
+            schedule-based split notes are attached.
           </div>
         </div>
         <div class="col-md-6">
